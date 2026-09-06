@@ -45,6 +45,13 @@ function memoryLogger(options = {}) {
 }
 
 describe('UI observability', () => {
+  it('keeps application identity and catalogue enforcement invariant', () => {
+    const { logger, records } = memoryLogger({ serviceName: 'other', version: 'other', events: {}, severity: {}, isCatalogueEvent: () => true })
+    expect(logger.log(EVENTS.applicationError)).toBe(true)
+    expect(logger.log({ ...EVENTS.applicationError })).toBe(false)
+    expect(records[0].resource['service.name']).toBe('sarafan.ui')
+    expect(records[0].resource['service.version']).toBe('0.0.6')
+  })
   it('defines immutable OpenTelemetry severities and stable catalogue events', () => {
     expect(SEVERITY).toMatchObject({
       DEBUG: { number: 5 },
