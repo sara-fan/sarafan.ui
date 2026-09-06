@@ -13,7 +13,7 @@ Product requirements are defined in the [current specification](https://github.c
 
 ## Prerequisites
 
-- Node.js 22.12 or newer
+- Node.js 22.23+ within the 22.x line, or 24.15+ within the 24.x line
 - npm 10 or newer
 - Docker
 
@@ -27,9 +27,16 @@ npm run dev
 Vite serves the application at <http://localhost:5173>.
 Requests under `/api/v1` are proxied to Sarafan Core at <http://localhost:8080>. Start the Core development service and PostgreSQL before exercising authentication. The demo verification code is the phone number's last four digits in every build; the UI does not disclose that rule. This predictable demo mechanism must be replaced and disabled before real orders or a real payment-system integration are enabled, regardless of the build/runtime environment name; see the [release prerequisites](https://github.com/sara-fan/sarafan.spec/issues/26).
 
-Access tokens are kept in memory. The browser receives the rotating refresh token only as an HttpOnly cookie, and the UI attempts one session refresh on startup and after an authorized request returns `401`.
+Access tokens are kept in memory. The browser receives the rotating refresh token only as an HttpOnly cookie. The UI attempts one session refresh on startup. An authorized request triggers refresh only for Core's canonical `invalid-access-token` Problem Details type, followed by at most one retry; other `401` responses do not trigger refresh.
 
 ## Verification
+
+Browser problems, HTTP transport and privacy-safe observability are provided by
+`@sara-fan/ui-shared`. Application adapters retain customer endpoints, event
+identities, runtime configuration and session state. The package is pinned to an
+exact GitHub release artifact with lockfile integrity; clean installs and Docker
+builds do not require a sibling repository. Test candidate package changes in both
+Sarafan UI and Back Office before changing the pinned dependency.
 
 ```bash
 npm run lint

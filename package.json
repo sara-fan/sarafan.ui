@@ -1,10 +1,10 @@
 {
   "name": "sarafan-ui",
-  "version": "0.0.5",
+  "version": "0.0.6",
   "private": true,
   "type": "module",
   "engines": {
-    "node": ">=22.12.0 <25"
+    "node": "^22.23.0 || ^24.15.0"
   },
   "scripts": {
     "dev": "vite",
@@ -16,20 +16,21 @@
     "coverage": "vitest run --coverage"
   },
   "dependencies": {
+    "@sara-fan/ui-shared": "https://github.com/sara-fan/sarafan.ui.shared/releases/download/v0.0.1-review.3/sara-fan-ui-shared-0.0.1.tgz",
     "vue": "3.5.41",
     "vuetify": "4.1.11"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
     "@vitejs/plugin-vue": "6.0.8",
-    "@vitest/coverage-v8": "4.1.11",
+    "@vitest/coverage-v8": "5.0.0",
     "@vue/test-utils": "2.4.11",
     "eslint": "10.9.1",
     "eslint-plugin-vue": "10.10.0",
     "jsdom": "30.0.1",
     "vite": "8.2.2",
     "vite-plugin-vuetify": "2.1.3",
-    "vitest": "4.1.11",
+    "vitest": "5.0.0",
     "vue-eslint-parser": "10.4.1"
   }
 }

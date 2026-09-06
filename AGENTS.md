@@ -58,3 +58,15 @@ For other comment-capable formats, use the same three lines with that format's n
 - Keep the logger and every sink non-throwing. Apply bounded rate limiting to repeated global failures and emit only an aggregate dropped count without retaining payloads.
 - Production logging defaults to Warning and Development may use Debug, both beneath the runtime master switch. Thresholds and switches must never bypass sanitization or change the allowed fields.
 - Extend tests for record shape/readability, catalogue enforcement, redaction, runtime control, W3C generation/retry propagation, RFC 9457 correlation, deduplication, rate limiting, global boundaries, and sink failure. Preserve at least 95% coverage for new and modified code.
+
+## Shared infrastructure and UI behavior
+
+- Use @sara-fan/ui-shared for problem parsing, HTTP transport, tracing and privacy-safe diagnostics. Keep identity state, runtime configuration, route allowlists, fixed event catalogues and domain-specific problems in this application.
+- Every user-relevant failure has one presentation owner. Stores reject transport/server failures; no empty catches or unobserved promise rejections. Expected suppression uses the named shared policy.
+- Render one shared page alert immediately below the heading. Put field errors beneath controls without shrinking inputs. Failed forms retain values; navigate only after success. Clear stale alerts on successful navigation.
+- Use shared confirmation/dialog primitives and Sarafan semantic colors, explicit action labels and keyboard-accessible controls. Color is never the only indication of meaning.
+- Add asynchronous rejection-path tests verifying propagation and visible presentation, preserved failed forms, retry behavior and duplicate-reporting prevention. Run lint, coverage and build before handoff.
+- Pin shared-package release tarball URLs and commit lockfile integrity. Do not commit sibling file dependencies. Shared changes require packed-artifact tests in both consumers.
+- Keep container shell entrypoints as LF text through `.gitattributes`; verify container startup as well as image builds when changing deployment inputs.
+
+- Application logger adapters fix service/version identity, event catalogue, severities and catalogue validation after configurable test/runtime options; callers cannot override these invariants.
