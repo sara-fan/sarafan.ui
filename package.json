@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "engines": {
-    "node": "^22.12.0 || ^24.0.0"
+    "node": "^22.23.0 || ^24.15.0"
   },
   "scripts": {
     "dev": "vite",
@@ -16,6 +16,7 @@
     "coverage": "vitest run --coverage"
   },
   "dependencies": {
+    "@sara-fan/ui-shared": "https://github.com/sara-fan/sarafan.ui.shared/releases/download/v0.0.1-review.2/sara-fan-ui-shared-0.0.1.tgz",
     "vue": "3.5.41",
     "vuetify": "4.1.11"
   },

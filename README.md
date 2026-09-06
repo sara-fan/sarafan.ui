@@ -31,6 +31,13 @@ Access tokens are kept in memory. The browser receives the rotating refresh toke
 
 ## Verification
 
+Browser problems, HTTP transport and privacy-safe observability are provided by
+`@sara-fan/ui-shared`. Application adapters retain customer endpoints, event
+identities, runtime configuration and session state. The package is pinned to an
+exact GitHub release artifact with lockfile integrity; clean installs and Docker
+builds do not require a sibling repository. Test candidate package changes in both
+Sarafan UI and Back Office before changing the pinned dependency.
+
 ```bash
 npm run lint
 npm test
