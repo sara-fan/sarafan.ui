@@ -33,6 +33,7 @@ describe('runtime logging deployment contract', () => {
       source('docker-entrypoint.d/40-sarafan-runtime-config.sh')
     ])
     expect(dockerfile).toContain('COPY --chmod=755 docker-entrypoint.d/40-sarafan-runtime-config.sh')
+    expect(entrypoint).not.toContain('\r')
     expect(entrypoint).toContain('${SARAFAN_UI_LOGGING_ENABLED:-}')
     expect(entrypoint).toContain('true|false)')
     expect(entrypoint).toContain('sarafan_logging_enabled="false"')

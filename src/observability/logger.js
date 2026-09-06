@@ -7,12 +7,14 @@ import { version } from '../../package.json'
 import { runtimeConfig } from '../config/runtime.js'
 import { EVENTS, SEVERITY, isCatalogueEvent } from './catalogue.js'
 
-export function createLogger(options = {}) {
+export function createLogger({
+  enabled = runtimeConfig.loggingEnabled,
+  minimumSeverity = runtimeConfig.minimumSeverity,
+  environment = import.meta.env.MODE || 'unknown',
+  sink, now, rateLimit
+} = {}) {
   return createSharedLogger({
-    enabled: runtimeConfig.loggingEnabled,
-    minimumSeverity: runtimeConfig.minimumSeverity,
-    environment: import.meta.env.MODE || 'unknown',
-    ...options,
+    enabled, minimumSeverity, environment, sink, now, rateLimit,
     serviceName: 'sarafan.ui', version,
     events: EVENTS, severity: SEVERITY, isCatalogueEvent
   })

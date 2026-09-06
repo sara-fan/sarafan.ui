@@ -45,6 +45,18 @@ function memoryLogger(options = {}) {
 }
 
 describe('UI observability', () => {
+  it('preserves application defaults for explicitly undefined options', async () => {
+    vi.resetModules()
+    vi.stubGlobal('__SARAFAN_RUNTIME_CONFIG__', { loggingEnabled: true })
+    try {
+      const { createLogger: configuredLogger } = await import('../src/observability/logger.js')
+      const { EVENTS: configuredEvents } = await import('../src/observability/catalogue.js')
+      const records = []
+      const logger = configuredLogger({ enabled: undefined, minimumSeverity: undefined, environment: undefined, sink: { emit: record => records.push(record) } })
+      expect(logger.log(configuredEvents.applicationStarted)).toBe(true)
+      expect(records[0].resource['deployment.environment.name']).toBe('test')
+    } finally { vi.unstubAllGlobals(); vi.resetModules() }
+  })
   it('keeps application identity and catalogue enforcement invariant', () => {
     const { logger, records } = memoryLogger({ serviceName: 'other', version: 'other', events: {}, severity: {}, isCatalogueEvent: () => true })
     expect(logger.log(EVENTS.applicationError)).toBe(true)
