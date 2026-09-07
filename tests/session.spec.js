@@ -139,7 +139,7 @@ describe('session store', () => {
     expect(session.restoring.value).toBe(false)
   })
 
-  it('preserves validation details and rejects malformed error responses', async () => {
+  it('preserves validation details and presents malformed HTTP errors as service unavailability', async () => {
     const malformed = response(502, null, 'text/html')
     const fetch = vi.fn()
       .mockResolvedValueOnce(problemResponse(400, 'validation-failed', {
@@ -164,9 +164,31 @@ describe('session store', () => {
       }
     })
     await expect(session.requestCode('+79990000004', 'login')).rejects.toMatchObject({
-      type: INTERNAL_PROBLEM_TYPES.protocolError,
-      code: 'ui_protocol_error'
+      type: INTERNAL_PROBLEM_TYPES.serviceUnavailable,
+      code: 'ui_service_unavailable',
+      detail: 'Сервис недоступен. Пожалуйста, повторите позже.'
     })
+  })
+
+  it('forces logoff after an authenticated request receives a gateway error', async () => {
+    const customer = { id: 4, phone: '+79990000004', profile: { phone: '+79990000004' } }
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(response(200, {
+        accessToken: 'active-token',
+        expiresAt: '2026-08-30T00:15:00Z',
+        customer
+      }))
+      .mockResolvedValueOnce(response(502, null, 'text/html'))
+    vi.stubGlobal('fetch', fetch)
+
+    const session = useSession()
+    await session.verifyCode({ phone: customer.phone, purpose: 'login', code: '1111' })
+    await expect(session.updateProfile({ firstName:'Анна' })).rejects.toMatchObject({
+      code: 'ui_service_unavailable',
+      detail: 'Сервис недоступен. Пожалуйста, повторите позже.'
+    })
+    expect(session.customer.value).toBeNull()
+    expect(session.notice.value).toBe('Сервис недоступен. Пожалуйста, повторите позже.')
   })
 
   it('uploads, refreshes, reads, and deletes a profile photo', async () => {
@@ -274,7 +296,7 @@ describe('session store', () => {
     expect(session.restoreProblem.value).not.toHaveProperty('status')
   })
 
-  it('logs the normalized restore problem with safe upstream correlation', async () => {
+  it('forces sign-in without duplicating an already logged server restore failure', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
       problemResponse(503, 'service-unavailable')
     ))
@@ -282,15 +304,14 @@ describe('session store', () => {
     const session = useSession()
     await session.restoreSession()
 
-    const call = loggerMocks.log.mock.calls.find(([event]) => event === EVENTS.sessionRestoreFailed)
-    expect(call).toEqual([
-      EVENTS.sessionRestoreFailed,
-      {
-        'error.type': INTERNAL_PROBLEM_TYPES.sessionRestoreUnavailable,
-        'sarafan.problem.code': 'ui_session_restore_unavailable',
-        'sarafan.problem.instance': session.restoreProblem.value.instance
-      },
-      { traceId: TEST_TRACE_ID }
-    ])
+    expect(session.restoreProblem.value).toBeNull()
+    expect(session.notice.value).toBe('Сервис недоступен. Пожалуйста, повторите позже.')
+    expect(loggerMocks.log.mock.calls.filter(([event]) => event === EVENTS.sessionRestoreFailed)).toHaveLength(0)
+    expect(loggerMocks.log.mock.calls.some(([event, attributes, context]) =>
+      event === EVENTS.apiRequestFailed
+      && attributes['http.response.status_code'] === 503
+      && attributes['sarafan.problem.code'] === 'service_unavailable'
+      && context.traceId === TEST_TRACE_ID
+    )).toBe(true)
   })
 })
