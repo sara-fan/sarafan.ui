@@ -217,16 +217,16 @@ describe('ProfileDialog', () => {
         }))
       }
       if (url === '/api/v1/customers/me/photo' && options.method === 'DELETE') {
-        return Promise.resolve(problemResponse(500, 'internal-error', {
-          title: 'Внутренняя ошибка сервиса',
+        return Promise.resolve(problemResponse(409, 'photo-delete-failed', {
+          title: 'Фотография не удалена',
           detail: 'Фото не удалено'
         }))
       }
       if (url === '/api/v1/customers/me/photo') {
         photoReads += 1
         return Promise.resolve(photoReads === 1
-          ? problemResponse(500, 'internal-error', {
-              title: 'Внутренняя ошибка сервиса',
+          ? problemResponse(404, 'photo-not-found', {
+              title: 'Фотография не найдена',
               detail: 'Фотография временно недоступна'
             })
           : response(200, new globalThis.Blob(['photo']), 'image/png'))

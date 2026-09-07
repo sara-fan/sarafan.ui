@@ -8,6 +8,7 @@ import { API_BASE_PATH } from '../api.js'
 import { createApiClient } from '../api/client.js'
 import {
   CORE_PROBLEM_TYPES,
+  INTERNAL_PROBLEM_TYPES,
   ProblemError,
   createInternalProblem
 } from '../errors/problem.js'
@@ -19,17 +20,33 @@ const accessToken = ref('')
 const customer = ref(null)
 const restoring = ref(true)
 const restoreProblem = ref(null)
+const notice = ref('')
 let refreshPromise = null
+const SERVICE_UNAVAILABLE_MESSAGE = 'Сервис недоступен. Пожалуйста, повторите позже.'
+
+function isServiceUnavailable(problem) {
+  return problem?.type === INTERNAL_PROBLEM_TYPES.protocolError
+    || problem?.type === INTERNAL_PROBLEM_TYPES.serviceUnavailable
+    || (Number.isInteger(problem?.status) && problem.status >= 500)
+}
+
+function serviceUnavailableProblem(problem) {
+  return problem?.type === INTERNAL_PROBLEM_TYPES.serviceUnavailable
+    ? problem
+    : createInternalProblem('serviceUnavailable', { cause:problem })
+}
 
 function applySession(session) {
   accessToken.value = session.accessToken
   customer.value = session.customer
+  notice.value = ''
   return session.customer
 }
 
-function clearSession() {
+function clearSession(message = '') {
   accessToken.value = ''
   customer.value = null
+  notice.value = message
 }
 
 function jsonOptions(method, body) {
@@ -52,11 +69,16 @@ async function refreshSession(operationTrace) {
       { method: 'POST' },
       { operationTrace }
     )
-      .then(applySession)
       .catch((error) => {
+        if (isServiceUnavailable(error)) {
+          const problem = serviceUnavailableProblem(error)
+          clearSession(SERVICE_UNAVAILABLE_MESSAGE)
+          throw problem
+        }
         clearSession()
         throw error
       })
+      .then(applySession)
       .finally(() => {
         refreshPromise = null
       })
@@ -71,7 +93,8 @@ async function restoreSession() {
   try {
     await refreshSession()
   } catch (error) {
-    if (!(error instanceof ProblemError) || error.type !== CORE_PROBLEM_TYPES.invalidRefreshToken) {
+    if (error?.type !== INTERNAL_PROBLEM_TYPES.serviceUnavailable
+      && (!(error instanceof ProblemError) || error.type !== CORE_PROBLEM_TYPES.invalidRefreshToken)) {
       const problem = createInternalProblem('sessionRestoreUnavailable', { cause: error })
       restoreProblem.value = problem
       uiLogger.log(
@@ -86,10 +109,15 @@ async function restoreSession() {
 }
 
 async function requestCode(phone, purpose) {
-  return client.request(
-    `${API_BASE_PATH}/auth/code/request`,
-    jsonOptions('POST', { phone, purpose })
-  )
+  notice.value = ''
+  try {
+    return await client.request(
+      `${API_BASE_PATH}/auth/code/request`,
+      jsonOptions('POST', { phone, purpose })
+    )
+  } catch (error) {
+    throw isServiceUnavailable(error) ? serviceUnavailableProblem(error) : error
+  }
 }
 
 async function getStatus() {
@@ -97,10 +125,21 @@ async function getStatus() {
 }
 
 async function verifyCode(payload) {
-  const session = await client.request(
-    `${API_BASE_PATH}/auth/code/verify`,
-    jsonOptions('POST', payload)
-  )
+  notice.value = ''
+  let session
+  try {
+    session = await client.request(
+      `${API_BASE_PATH}/auth/code/verify`,
+      jsonOptions('POST', payload)
+    )
+  } catch (error) {
+    if (isServiceUnavailable(error)) {
+      const problem = serviceUnavailableProblem(error)
+      clearSession(SERVICE_UNAVAILABLE_MESSAGE)
+      throw problem
+    }
+    throw error
+  }
   return applySession(session)
 }
 
@@ -112,11 +151,23 @@ async function logout() {
   }
 }
 
+async function authorizedRequest(path, options = {}, policy = {}) {
+  try {
+    return await client.request(path, options, { ...policy, authorize:true })
+  } catch (error) {
+    if (isServiceUnavailable(error)) {
+      const problem = serviceUnavailableProblem(error)
+      clearSession(SERVICE_UNAVAILABLE_MESSAGE)
+      throw problem
+    }
+    throw error
+  }
+}
+
 async function updateProfile(profile) {
-  customer.value = await client.request(
+  customer.value = await authorizedRequest(
     `${API_BASE_PATH}/customers/me`,
-    jsonOptions('PUT', profile),
-    { authorize: true }
+    jsonOptions('PUT', profile)
   )
   return customer.value
 }
@@ -124,28 +175,26 @@ async function updateProfile(profile) {
 async function uploadPhoto(file) {
   const body = new globalThis.FormData()
   body.append('file', file)
-  await client.request(
+  await authorizedRequest(
     `${API_BASE_PATH}/customers/me/photo`,
-    { method: 'PUT', body },
-    { authorize: true }
+    { method: 'PUT', body }
   )
   customer.value = { ...customer.value, hasPhoto: true }
 }
 
 async function deletePhoto() {
-  await client.request(
+  await authorizedRequest(
     `${API_BASE_PATH}/customers/me/photo`,
-    { method: 'DELETE' },
-    { authorize: true }
+    { method: 'DELETE' }
   )
   customer.value = { ...customer.value, hasPhoto: false }
 }
 
 async function getPhoto() {
-  return client.request(
+  return authorizedRequest(
     `${API_BASE_PATH}/customers/me/photo`,
     {},
-    { authorize: true, responseType: 'blob' }
+    { responseType: 'blob' }
   )
 }
 
@@ -154,6 +203,7 @@ export function useSession() {
     customer: readonly(customer),
     restoring: readonly(restoring),
     restoreProblem: readonly(restoreProblem),
+    notice: readonly(notice),
     restoreSession,
     getStatus,
     requestCode,
@@ -170,5 +220,6 @@ export function resetSessionForTests() {
   clearSession()
   restoring.value = true
   restoreProblem.value = null
+  notice.value = ''
   refreshPromise = null
 }

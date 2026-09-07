@@ -135,7 +135,7 @@ describe('AuthView', () => {
         title: 'Пользователь не найден',
         detail: 'Пользователь с таким телефоном не найден'
       }))
-      .mockRejectedValueOnce()
+      .mockResolvedValueOnce(response(502, null, 'text/html'))
     vi.stubGlobal('fetch', fetch)
 
     const wrapper = mountView()
@@ -146,6 +146,6 @@ describe('AuthView', () => {
 
     await wrapper.get('.auth-form').trigger('submit')
     await flushPromises()
-    expect(wrapper.get('.form-error').text()).toBe('Проверьте подключение к интернету и повторите попытку')
+    expect(wrapper.get('.form-error').text()).toBe('Сервис недоступен. Пожалуйста, повторите позже.')
   })
 })

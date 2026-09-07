@@ -19,6 +19,12 @@ export const { INTERNAL_PROBLEM_TYPES, createInternalProblem, normalizeProblem, 
   logger: uiLogger,
   suppressedEvent: EVENTS.operationSuppressed,
   additions: {
+    serviceUnavailable: {
+      suffix: 'service-unavailable',
+      code: 'ui_service_unavailable',
+      title: 'Сервис недоступен',
+      detail: 'Сервис недоступен. Пожалуйста, повторите позже.'
+    },
     photoPreviewUnavailable: {
       suffix: 'photo-preview-unavailable',
       code: 'ui_photo_preview_unavailable',

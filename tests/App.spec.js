@@ -55,6 +55,18 @@ describe('App authentication flow', () => {
     expect(wrapper.text()).toContain('Регистрация')
   })
 
+  it('forces sign-in with a safe message when session restore receives a gateway error', async () => {
+    vi.stubGlobal('fetch', vi.fn((url) => {
+      if (url === '/api/v1/status/status') return Promise.resolve(response(200, { appVersion:'0.0.6' }))
+      if (url === '/api/v1/auth/refresh') return Promise.resolve(response(502, null, 'text/html'))
+      throw new Error(`Unexpected request: ${url}`)
+    }))
+
+    const wrapper = mountApp()
+    await vi.waitFor(() => expect(wrapper.find('.auth-card').exists()).toBe(true))
+    expect(wrapper.get('.form-error').text()).toBe('Сервис недоступен. Пожалуйста, повторите позже.')
+  })
+
   it('restores a session and renders the customer dashboard', async () => {
     vi.stubGlobal('fetch', vi.fn((url) => {
       if (url === '/api/v1/status/status') return Promise.resolve(response(200, { appVersion: '0.0.3' }))

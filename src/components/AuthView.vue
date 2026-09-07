@@ -14,7 +14,7 @@ import {
 } from '../errors/problem.js'
 import { useSession } from '../stores/session.js'
 
-const { requestCode, verifyCode } = useSession()
+const { notice, requestCode, verifyCode } = useSession()
 const appIcon = '/sarafan-gzhel-icon.png'
 const mode = ref('login')
 const step = ref('phone')
@@ -34,7 +34,7 @@ const error = computed(() => problem.value
             [CORE_PROBLEM_TYPES.customerNotFound]: 'Пользователь с таким телефоном не найден. Выберите регистрацию.'
           }
     })
-  : '')
+  : notice.value)
 const phoneErrors = computed(() => problemFieldErrors(problem.value, 'phone'))
 const codeErrors = computed(() => problemFieldErrors(problem.value, 'code'))
 const termsErrors = computed(() => problemFieldErrors(problem.value, 'termsAccepted'))
