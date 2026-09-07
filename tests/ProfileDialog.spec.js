@@ -9,6 +9,10 @@ import ProfileDialog from '../src/components/ProfileDialog.vue'
 import { createSarafanVuetify } from '../src/plugins/vuetify.js'
 import { resetSessionForTests, useSession } from '../src/stores/session.js'
 import { problemResponse, response } from './fixtures/http.js'
+import { createInternalProblem } from '../src/errors/problem.js'
+
+const consent = vi.hoisted(() => ({ requirePersonalData:vi.fn() }))
+vi.mock('../src/stores/consents.js', () => ({ useConsents:() => consent }))
 
 const originalUrl = globalThis.URL
 
@@ -45,6 +49,7 @@ async function setFile(input, file) {
 describe('ProfileDialog', () => {
   beforeEach(() => {
     resetSessionForTests()
+    consent.requirePersonalData.mockReset().mockResolvedValue()
     vi.stubGlobal('URL', {
       createObjectURL: vi.fn().mockReturnValue('blob:profile-photo'),
       revokeObjectURL: vi.fn()
@@ -140,6 +145,23 @@ describe('ProfileDialog', () => {
     await wrapper.setProps({ modelValue: false })
     await wrapper.setProps({ modelValue: true })
     await vi.waitFor(() => expect(globalThis.URL.createObjectURL).toHaveBeenCalledTimes(2))
+    wrapper.unmount()
+  })
+
+  it('retains the form and sends no profile or photo data when renewal is required', async () => {
+    const customer = { id:12, phone:'+79991234567', hasPhoto:false, profile:{ firstName:'Мария' } }
+    const fetch = vi.fn(() => Promise.resolve(sessionResponse(customer)))
+    vi.stubGlobal('fetch', fetch)
+    await useSession().verifyCode({ phone:customer.phone, purpose:'login', code:'4567' })
+    const wrapper = mountDialog(); await wrapper.setProps({ modelValue:true }); await flushPromises()
+    consent.requirePersonalData.mockRejectedValue(createInternalProblem('invalidInput', { detail:'Требуется актуальное согласие' }))
+    document.querySelector('.profile-dialog form').dispatchEvent(new globalThis.Event('submit', { bubbles:true, cancelable:true }))
+    await flushPromises()
+    expect(document.querySelector('.form-error').textContent).toContain('Требуется актуальное согласие')
+    expect([...document.querySelectorAll('input')].some(x => x.value === 'Мария')).toBe(true)
+    await setFile(document.querySelector('input[type=file]'), new globalThis.File(['png'], 'photo.png', { type:'image/png' }))
+    expect(consent.requirePersonalData).toHaveBeenCalledTimes(2)
+    expect(fetch).toHaveBeenCalledTimes(1)
     wrapper.unmount()
   })
 

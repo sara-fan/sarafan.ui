@@ -1,9 +1,3 @@
-<!--
-Copyright (C) 2026 Maxim [maxirmx] Samsonov (www.sw.consulting)
-All rights reserved.
-This file is a part of the Sarafan application
--->
-
 # Repository instructions
 
 ## Specification and repository guidance
@@ -17,7 +11,7 @@ This file is a part of the Sarafan application
 
 ## Copyright headers
 
-- Add the Sarafan copyright header to every file you create or modify whenever the file format safely supports comments.
+- Add the Sarafan copyright header to every file you create or modify whenever the file format safely supports comments. Markdown (`.md`) files are exempt and must not contain the header.
 - Use the comment syntax appropriate for the file type. Keep shebangs, encoding declarations, XML declarations, and other required first-line directives before the header.
 - Do not add a header where comments are unsupported or would alter behavior, and do not modify generated files, dependency files, build output, coverage output, lockfiles, or binary files solely to add a header.
 - Preserve an existing copyright or license header instead of adding a duplicate.
@@ -71,3 +65,14 @@ For other comment-capable formats, use the same three lines with that format's n
 - Keep container shell entrypoints as LF text through `.gitattributes`; verify container startup as well as image builds when changing deployment inputs.
 
 - Application logger adapters fix service/version identity, event catalogue, severities and catalogue validation after configurable test/runtime options; callers cannot override these invariants.
+
+## Versioned customer consent
+
+- Consent history contains only versioned events with a document ID and content digest. Do not add legacy record labels or fallbacks; pre-versioned records are deleted by the Core consent migration, and existing customers without a new receipt have missing consent.
+
+- Spec v1.16 §4.18 and UI #16 govern the separate куки and personal-data flows. Resolve actual current document IDs/hashes before phone submission; keep the short-lived onboarding receipt in memory. Authentication alone never grants processing permission.
+- Legal and consent requests use the shared transport through `consentRequest`. Their transport/protocol/5xx failures are recoverable and retain the limited session, an explicit exception to the general service-unavailability rule; authentication/refresh failures still follow identity policy. Preserve failed consent choices and their retry keys; the bodyless withdrawal request has no client-generated key.
+- Treat legal-document DTOs as lifecycle-free immutable records with a required `effectiveAt`. Use Core's `document`, `serverNow` and `nextChangeAt` envelope as the authority: refresh at the next effective boundary and require renewed consent when the effective document changes. Do not infer draft, publication, cancellation, disposal or revision state in the customer client.
+- Only safe canonical legal nodes are mounted. Customer and staff readers must retain identical formatting rules and show the exact saved artifact. No Markdown rendering in the browser, raw HTML mounting or external embedded resources.
+- Load Core's `cookieCategories` ops catalogue before куки status and session restoration. Category values, Russian names and required flags come only from ops; do not compile client mappings or fallbacks. Keep every required category unchecked until the visitor explicitly selects it, and keep the customer application unavailable while mandatory consent is missing, refused, withdrawn, expired or stale. Browser receipts never authorize another browser. Use `куки` in Russian user-facing text while retaining English technical identifiers.
+- Scope personal history and the nullable latest withdrawal request to the current identity, discard late results after logout, and keep legal/request access available during renewal. Present one action, `Прекратить использовать систему и отозвать согласие на обработку персональных данных`; disable it while the latest request is pending and enable it after processing. Explain that it records manual work and does not itself change consent, access, the account or data. Future quote/contact persistence must use the same server consent gate.

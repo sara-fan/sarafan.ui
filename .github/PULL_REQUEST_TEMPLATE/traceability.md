@@ -1,10 +1,4 @@
 <!--
-Copyright (C) 2026 Maxim [maxirmx] Samsonov (www.sw.consulting)
-All rights reserved.
-This file is a part of the Sarafan application
--->
-
-<!--
 This template is optional. You may write your own PR description instead.
 Adapt the sections to the change and follow any applicable issue or repository requirements.
 Find the current specification at https://github.com/sara-fan/sarafan.spec#source-of-truth.

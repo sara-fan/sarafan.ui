@@ -1,7 +1,3 @@
-<!-- Copyright (C) 2026 Maxim [maxirmx] Samsonov (www.sw.consulting) -->
-<!-- All rights reserved. -->
-<!-- This file is a part of the Sarafan application -->
-
 # Sarafan UI
 
 [![ci](https://github.com/maxirmx/sarafan.ui/actions/workflows/ci.yml/badge.svg)](https://github.com/maxirmx/sarafan.ui/actions/workflows/ci.yml)
@@ -78,3 +74,9 @@ Use the [traceability template](.github/PULL_REQUEST_TEMPLATE/traceability.md) i
 To select it on GitHub, append `&template=traceability.md` to a PR creation URL that already has query parameters, or `?template=traceability.md` if it has none. You can also copy the template into the description. See [GitHub's query parameter documentation](https://docs.github.com/en/pull-requests/reference/using-query-parameters-to-create-a-pull-request).
 
 The template is opt-in, is not the default PR body, and has no CI enforcement. Applicable issue and repository requirements still apply when using a custom description.
+
+## Customer consent
+
+The coordinated implementation follows [spec v1.16 §4.18](https://github.com/sara-fan/sarafan.spec/issues/30). [Core API and rollout guide](https://github.com/sara-fan/sarafan.core/blob/v007/docs/customer-consents.md); [contract and text templates](https://github.com/sara-fan/sarafan.spec/blob/consents/spec/Consent%20implementation%20contract.md). An Administrator creates each immutable legal document once with its effective Moscow date. Legal-document kinds are numeric API values; Russian names and readable hash aliases come from Core `/api/v1/legal/ops`, with no compiled client fallback. Registration can process personal data only after the required documents become effective; no consent is silently granted to existing customers.
+
+For a separate local Core instance, set `SARAFAN_API_TARGET=http://127.0.0.1:25180` before starting Vite. This changes only the development proxy.

@@ -12,9 +12,15 @@ import {
   presentProblem,
   problemFieldErrors
 } from '../errors/problem.js'
+import { useConsents } from '../stores/consents.js'
 import { useSession } from '../stores/session.js'
+import { LEGAL_DOCUMENT_KIND } from '../consentFormatting.js'
 
 const { notice, requestCode, verifyCode } = useSession()
+const consentStore = useConsents()
+const termsDocument = ref(null)
+const pdDocument = ref(null)
+const onboardingToken = ref('')
 const appIcon = '/sarafan-gzhel-icon.png'
 const mode = ref('login')
 const step = ref('phone')
@@ -24,6 +30,8 @@ const termsAccepted = ref(false)
 const personalDataAccepted = ref(false)
 const busy = ref(false)
 const problem = ref(null)
+let consentRetryFingerprint = ''
+let consentRetryKey = ''
 
 const isRegistration = computed(() => mode.value === 'register')
 const error = computed(() => problem.value
@@ -40,11 +48,48 @@ const codeErrors = computed(() => problemFieldErrors(problem.value, 'code'))
 const termsErrors = computed(() => problemFieldErrors(problem.value, 'termsAccepted'))
 const personalDataErrors = computed(() => problemFieldErrors(problem.value, 'personalDataAccepted'))
 
-watch(mode, () => {
+watch(mode, async () => {
   step.value = 'phone'
   code.value = ''
   problem.value = null
+  termsAccepted.value = false
+  personalDataAccepted.value = false
+  onboardingToken.value = ''
+  consentRetryFingerprint = ''
+  consentRetryKey = ''
+  if (mode.value === 'register') await loadDocuments()
 })
+
+async function loadDocuments() {
+  problem.value = null
+  termsDocument.value = null
+  pdDocument.value = null
+  busy.value = true
+  try {
+    const [terms, pd] = await Promise.all([
+      consentStore.current(LEGAL_DOCUMENT_KIND.USER_AGREEMENT),
+      consentStore.current(LEGAL_DOCUMENT_KIND.PERSONAL_DATA_CONSENT)
+    ])
+    termsDocument.value = terms.document
+    pdDocument.value = pd.document
+    if (!terms.document || !pd.document) throw createInternalProblem('invalidInput', { detail:'Нет действующих документов для регистрации.' })
+  } catch (error) { problem.value = normalizeProblem(error) }
+  finally { busy.value = false }
+}
+function consentPayload(normalizedPhone) {
+  const fingerprint = JSON.stringify([
+    normalizedPhone,
+    termsDocument.value?.id,
+    pdDocument.value?.id,
+    pdDocument.value?.contentHash
+  ])
+  if (fingerprint !== consentRetryFingerprint) {
+    consentRetryFingerprint = fingerprint
+    consentRetryKey = globalThis.crypto.randomUUID()
+  }
+  return { termsAccepted:termsAccepted.value, termsDocumentId:termsDocument.value?.id,
+    personalDataConsent:{ documentId:pdDocument.value?.id, contentHash:pdDocument.value?.contentHash, decision:'grant', categories:[], idempotencyKey:consentRetryKey } }
+}
 
 async function submitPhone() {
   const normalizedPhone = phone.value.trim()
@@ -56,14 +101,27 @@ async function submitPhone() {
     return
   }
 
+  if (isRegistration.value && (!termsDocument.value || !pdDocument.value || !termsAccepted.value || !personalDataAccepted.value)) {
+    problem.value = createInternalProblem('invalidInput', { detail:'Прочитайте документы и отдельно подтвердите условия и согласие до отправки телефона.' })
+    return
+  }
   phone.value = normalizedPhone
   busy.value = true
   problem.value = null
   try {
-    await requestCode(normalizedPhone, mode.value)
+    const receipt = await requestCode(normalizedPhone, mode.value, isRegistration.value ? consentPayload(normalizedPhone) : {})
+    if (isRegistration.value && (typeof receipt?.onboardingToken !== 'string' || receipt.onboardingToken.length < 32)) throw createInternalProblem('protocolError')
+    onboardingToken.value = receipt?.onboardingToken || ''
     step.value = 'code'
   } catch (value) {
     problem.value = normalizeProblem(value)
+    if (['https://sarafan.sw.consulting/problems/consent-version-changed', 'https://sarafan.sw.consulting/problems/onboarding-consent-expired'].includes(problem.value.type)) {
+      step.value = 'phone'
+      termsAccepted.value = false
+      personalDataAccepted.value = false
+      onboardingToken.value = ''
+      await loadDocuments()
+    }
   } finally {
     busy.value = false
   }
@@ -97,10 +155,17 @@ async function submitCode() {
       purpose: mode.value,
       code: normalizedCode,
       termsAccepted: termsAccepted.value,
-      personalDataAccepted: personalDataAccepted.value
+      onboardingToken: onboardingToken.value
     })
   } catch (value) {
     problem.value = normalizeProblem(value)
+    if (['https://sarafan.sw.consulting/problems/consent-version-changed', 'https://sarafan.sw.consulting/problems/onboarding-consent-expired'].includes(problem.value.type)) {
+      step.value = 'phone'
+      termsAccepted.value = false
+      personalDataAccepted.value = false
+      onboardingToken.value = ''
+      await loadDocuments()
+    }
   } finally {
     busy.value = false
   }
@@ -216,6 +281,7 @@ async function submitCode() {
         <button
           type="button"
           role="tab"
+          :disabled="busy"
           :aria-selected="mode === 'login'"
           :class="{ 'auth-tab--active': mode === 'login' }"
           @click="mode = 'login'"
@@ -225,6 +291,7 @@ async function submitCode() {
         <button
           type="button"
           role="tab"
+          :disabled="busy"
           :aria-selected="mode === 'register'"
           :class="{ 'auth-tab--active': mode === 'register' }"
           @click="mode = 'register'"
@@ -244,6 +311,43 @@ async function submitCode() {
             {{ isRegistration ? 'Создайте аккаунт' : 'Рады видеть снова' }}
           </h1>
           <p>Укажите телефон — мы отправим одноразовый код для безопасного входа.</p>
+        </div>
+        <div
+          v-if="isRegistration"
+          class="consent-list"
+        >
+          <v-checkbox
+            v-model="termsAccepted"
+            hide-details
+            label="Я принимаю условия использования сервиса"
+            :disabled="busy"
+            :error-messages="termsErrors"
+          />
+          <v-checkbox
+            v-model="personalDataAccepted"
+            hide-details
+            label="Я согласен на обработку персональных данных"
+            :disabled="busy"
+            :error-messages="personalDataErrors"
+          />
+          <p>
+            <a
+              v-if="termsDocument"
+              :href="`#legal/${termsDocument.id}`"
+            >Условия · версия {{ termsDocument.displayVersion }}</a>
+          </p>
+          <p>
+            <a
+              v-if="pdDocument"
+              :href="`#legal/${pdDocument.id}`"
+            >Согласие на персональные данные · версия {{ pdDocument.displayVersion }}</a>
+          </p>
+          <v-btn
+            :disabled="busy"
+            @click="loadDocuments"
+          >
+            Обновить документы
+          </v-btn>
         </div>
         <v-text-field
           v-model="phone"
@@ -297,25 +401,7 @@ async function submitCode() {
           :disabled="busy"
           :error-messages="codeErrors"
         />
-        <div
-          v-if="isRegistration"
-          class="consent-list"
-        >
-          <v-checkbox
-            v-model="termsAccepted"
-            hide-details
-            label="Я принимаю условия использования сервиса"
-            :disabled="busy"
-            :error-messages="termsErrors"
-          />
-          <v-checkbox
-            v-model="personalDataAccepted"
-            hide-details
-            label="Я согласен на обработку персональных данных"
-            :disabled="busy"
-            :error-messages="personalDataErrors"
-          />
-        </div>
+
         <p
           v-if="error"
           class="form-error"

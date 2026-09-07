@@ -108,12 +108,12 @@ async function restoreSession() {
   }
 }
 
-async function requestCode(phone, purpose) {
+async function requestCode(phone, purpose, consents = {}) {
   notice.value = ''
   try {
     return await client.request(
       `${API_BASE_PATH}/auth/code/request`,
-      jsonOptions('POST', { phone, purpose })
+      jsonOptions('POST', { phone, purpose, ...consents })
     )
   } catch (error) {
     throw isServiceUnavailable(error) ? serviceUnavailableProblem(error) : error
@@ -122,6 +122,14 @@ async function requestCode(phone, purpose) {
 
 async function getStatus() {
   return client.request(`${API_BASE_PATH}/status/status`)
+}
+
+// Consent failures remain recoverable so legal documents and the manual withdrawal request stay accessible.
+async function consentRequest(path, options = {}, authorize = false, responseType = 'json') {
+  if (!/^\/api\/v1\/(legal\/(ops|current\/\d+|documents\/[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}(?:\/source)?)|consents\/(cookies|me(?:\/(personal-data|browser|withdrawal-request))?))$/iu.test(path)) {
+    throw createInternalProblem('invalidInput')
+  }
+  return client.request(path, options, { authorize, responseType })
 }
 
 async function verifyCode(payload) {
@@ -206,6 +214,7 @@ export function useSession() {
     notice: readonly(notice),
     restoreSession,
     getStatus,
+    consentRequest,
     requestCode,
     verifyCode,
     logout,
