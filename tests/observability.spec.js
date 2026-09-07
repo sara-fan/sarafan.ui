@@ -62,7 +62,7 @@ describe('UI observability', () => {
     expect(logger.log(EVENTS.applicationError)).toBe(true)
     expect(logger.log({ ...EVENTS.applicationError })).toBe(false)
     expect(records[0].resource['service.name']).toBe('sarafan.ui')
-    expect(records[0].resource['service.version']).toBe('0.0.6')
+    expect(records[0].resource['service.version']).toBe('0.0.7')
   })
   it('defines immutable OpenTelemetry severities and stable catalogue events', () => {
     expect(SEVERITY).toMatchObject({
@@ -146,7 +146,7 @@ describe('UI observability', () => {
       spanId: SPAN_ID,
       resource: {
         'service.name': 'sarafan.ui',
-        'service.version': '0.0.6',
+        'service.version': '0.0.7',
         'deployment.environment.name': 'test'
       },
       instrumentationScope: 'sarafan.ui.observability'

@@ -11,6 +11,15 @@ export { JSON_ACCEPT } from '@sara-fan/ui-shared/http'
 export const PHOTO_ACCEPT = 'image/avif, image/webp, image/png, image/jpeg, application/problem+json'
 
 const API_ROUTE_TEMPLATES = new Set([
+  '/api/v1/legal/ops',
+  '/api/v1/legal/current/{kind}',
+  '/api/v1/legal/documents/{id}',
+  '/api/v1/legal/documents/{id}/source',
+  '/api/v1/consents/cookies',
+  '/api/v1/consents/me',
+  '/api/v1/consents/me/personal-data',
+  '/api/v1/consents/me/browser',
+  '/api/v1/consents/me/withdrawal-request',
   '/api/v1/auth/code/request',
   '/api/v1/auth/code/verify',
   '/api/v1/auth/logout',
@@ -22,7 +31,7 @@ const API_ROUTE_TEMPLATES = new Set([
 
 function routeTemplate(path) {
   try {
-    const pathname = new globalThis.URL(path, 'https://sarafan.invalid').pathname
+    const pathname = new globalThis.URL(path, 'https://sarafan.invalid').pathname.replace(/(\/legal\/current\/)\d+$/u, '$1{kind}').replace(/(\/legal\/documents\/)[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?=\/source$|$)/iu, '$1{id}')
     return API_ROUTE_TEMPLATES.has(pathname) ? pathname : undefined
   } catch {
     return undefined

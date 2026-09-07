@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from '../src/App.vue'
 import { createSarafanVuetify } from '../src/plugins/vuetify.js'
 import { resetSessionForTests } from '../src/stores/session.js'
+import { resetConsentsForTests } from '../src/stores/consents.js'
 import { problemResponse, response } from './fixtures/http.js'
 
 const customer = {
@@ -22,6 +23,26 @@ const customer = {
   }
 }
 
+const legalOps = {
+  kinds: [
+    { value: 0, name: 'Согласие на куки', routeAlias: 'cookie-consent' },
+    { value: 1, name: 'Согласие на обработку персональных данных', routeAlias: 'personal-data-consent' },
+    { value: 2, name: 'Пользовательское соглашение', routeAlias: 'user-agreement' },
+    { value: 3, name: 'Правила заказа товаров', routeAlias: 'order-rules' },
+    { value: 4, name: 'Политика обработки персональных данных', routeAlias: 'privacy-policy' }
+  ],
+  cookieCategories: [{ value: 0, name: 'Обязательные', required: true }]
+}
+const cookieReceipt = {
+  status: 'current', categories: [0], documentId: '11111111-1111-1111-1111-111111111111',
+  serverNow: '2026-09-08T12:00:00Z', expiresAt: '2026-09-09T12:00:00Z', nextChangeAt: null
+}
+function consentBootstrap(url, receipt = cookieReceipt) {
+  if (url === '/api/v1/legal/ops') return Promise.resolve(response(200, legalOps))
+  if (url === '/api/v1/consents/cookies') return Promise.resolve(response(200, receipt))
+  return null
+}
+
 function mountApp() {
   return mount(App, {
     global: { plugins: [createSarafanVuetify()] }
@@ -29,14 +50,65 @@ function mountApp() {
 }
 
 describe('App authentication flow', () => {
-  beforeEach(resetSessionForTests)
+  beforeEach(() => {
+    resetSessionForTests()
+    resetConsentsForTests()
+  })
 
   afterEach(() => {
     vi.unstubAllGlobals()
   })
 
+  it('loads mandatory куки status before restoring the recoverable session', async () => {
+    const fetch = vi.fn((url) => {
+      const bootstrap = consentBootstrap(url, { ...cookieReceipt, status: 'missing', categories: [], documentId: null, expiresAt: null })
+      if (bootstrap) return bootstrap
+      if (url === '/api/v1/status/status') return Promise.resolve(response(200, { appVersion: '0.0.7' }))
+      if (url === '/api/v1/auth/refresh') {
+        return Promise.resolve(problemResponse(401, 'invalid-refresh-token', {
+          title: 'Недействительный сеанс', detail: 'Войдите в систему повторно'
+        }))
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    })
+    vi.stubGlobal('fetch', fetch)
+
+    const wrapper = mountApp()
+    await vi.waitFor(() => expect(wrapper.text()).toContain('необходимо принять обязательные куки'))
+    await vi.waitFor(() => expect(fetch.mock.calls.some(([url]) => url === '/api/v1/auth/refresh')).toBe(true))
+    const urls = fetch.mock.calls.map(([url]) => url)
+    expect(urls.indexOf('/api/v1/legal/ops')).toBeLessThan(urls.indexOf('/api/v1/consents/cookies'))
+    expect(urls.indexOf('/api/v1/consents/cookies')).toBeLessThan(urls.indexOf('/api/v1/auth/refresh'))
+    expect(wrapper.find('.auth-card').exists()).toBe(false)
+  })
+
+  it('keeps consent history available to a restored customer while ordinary service is blocked', async () => {
+    const missing = { ...cookieReceipt, status: 'missing', categories: [], documentId: null, expiresAt: null }
+    const fetch = vi.fn((url) => {
+      const bootstrap = consentBootstrap(url, missing)
+      if (bootstrap) return bootstrap
+      if (url === '/api/v1/status/status') return Promise.resolve(response(200, { appVersion: '0.0.7' }))
+      if (url === '/api/v1/auth/refresh') return Promise.resolve(response(200, {
+        accessToken: 'access-token', expiresAt: '2026-09-08T12:15:00Z', customer
+      }))
+      if (url === '/api/v1/consents/me') return Promise.resolve(response(200, {
+        customerId:customer.id, serverNow:'2026-09-08T12:00:00Z', nextChangeAt:null,
+        statuses:[], history:[], withdrawalRequest:null
+      }))
+      throw new Error(`Unexpected request: ${url}`)
+    })
+    vi.stubGlobal('fetch', fetch)
+
+    const wrapper = mountApp()
+    await vi.waitFor(() => expect(wrapper.text()).toContain('Мои согласия и обращения'))
+    expect(wrapper.find('.app-frame').exists()).toBe(false)
+    expect(fetch.mock.calls.some(([url]) => url === '/api/v1/consents/me')).toBe(true)
+    expect(fetch.mock.calls.some(([url]) => url === '/api/v1/consents/me/browser')).toBe(false)
+  })
+
   it('shows authentication when no refresh session is available', async () => {
     vi.stubGlobal('fetch', vi.fn((url) => {
+      const bootstrap = consentBootstrap(url); if (bootstrap) return bootstrap
       if (url === '/api/v1/status/status') return Promise.resolve(response(200, { appVersion: '0.0.3' }))
       if (url === '/api/v1/auth/refresh') {
         return Promise.resolve(problemResponse(401, 'invalid-refresh-token', {
@@ -57,6 +129,7 @@ describe('App authentication flow', () => {
 
   it('forces sign-in with a safe message when session restore receives a gateway error', async () => {
     vi.stubGlobal('fetch', vi.fn((url) => {
+      const bootstrap = consentBootstrap(url); if (bootstrap) return bootstrap
       if (url === '/api/v1/status/status') return Promise.resolve(response(200, { appVersion:'0.0.6' }))
       if (url === '/api/v1/auth/refresh') return Promise.resolve(response(502, null, 'text/html'))
       throw new Error(`Unexpected request: ${url}`)
@@ -69,6 +142,7 @@ describe('App authentication flow', () => {
 
   it('restores a session and renders the customer dashboard', async () => {
     vi.stubGlobal('fetch', vi.fn((url) => {
+      const bootstrap = consentBootstrap(url); if (bootstrap) return bootstrap
       if (url === '/api/v1/status/status') return Promise.resolve(response(200, { appVersion: '0.0.3' }))
       if (url === '/api/v1/auth/refresh') {
         return Promise.resolve(response(200, {
@@ -94,6 +168,7 @@ describe('App authentication flow', () => {
 
   it('requests and verifies a one-time login code', async () => {
     const fetch = vi.fn((url) => {
+      const bootstrap = consentBootstrap(url); if (bootstrap) return bootstrap
       if (url === '/api/v1/status/status') return Promise.resolve(response(200, { appVersion: '0.0.3' }))
       if (url === '/api/v1/auth/refresh') {
         return Promise.resolve(problemResponse(401, 'invalid-refresh-token', {
@@ -140,6 +215,7 @@ describe('App authentication flow', () => {
       profile: { phone: customer.phone }
     }
     vi.stubGlobal('fetch', vi.fn((url) => {
+      const bootstrap = consentBootstrap(url); if (bootstrap) return bootstrap
       if (url === '/api/v1/status/status') {
         return Promise.resolve(problemResponse(503, 'verification-unavailable', {
           title: 'Подтверждение временно недоступно',
@@ -177,6 +253,7 @@ describe('App authentication flow', () => {
 
   it('keeps running when the version request fails and completes server logout', async () => {
     vi.stubGlobal('fetch', vi.fn((url) => {
+      const bootstrap = consentBootstrap(url); if (bootstrap) return bootstrap
       if (url === '/api/v1/status/status') throw new Error('status offline')
       if (url === '/api/v1/auth/refresh') {
         return Promise.resolve(response(200, {
@@ -198,6 +275,7 @@ describe('App authentication flow', () => {
   it('shows and retries a recoverable session restoration failure', async () => {
     let refreshAttempts = 0
     vi.stubGlobal('fetch', vi.fn((url) => {
+      const bootstrap = consentBootstrap(url); if (bootstrap) return bootstrap
       if (url === '/api/v1/status/status') return Promise.resolve(response(200, { appVersion: '0.0.4' }))
       if (url === '/api/v1/auth/refresh') {
         refreshAttempts += 1

@@ -12,12 +12,14 @@ import {
   problemFieldErrors
 } from '../errors/problem.js'
 import { useSession } from '../stores/session.js'
+import { useConsents } from '../stores/consents.js'
 
 const props = defineProps({
   modelValue: { type: Boolean, required: true }
 })
 const emit = defineEmits(['update:modelValue'])
 const { customer, deletePhoto, getPhoto, updateProfile, uploadPhoto } = useSession()
+const consents = useConsents()
 
 const fields = [
   'lastName', 'firstName', 'patronymic', 'email', 'passportSeries', 'passportNumber',
@@ -80,6 +82,7 @@ async function save() {
   problem.value = null
   saved.value = false
   try {
+    await consents.requirePersonalData()
     await updateProfile(Object.fromEntries(
       fields.map((field) => [field, form[field] || null])
     ))
@@ -106,6 +109,7 @@ async function selectPhoto(event) {
   busy.value = true
   problem.value = null
   try {
+    await consents.requirePersonalData()
     await uploadPhoto(file)
     await loadPhoto()
   } catch (value) {
@@ -144,6 +148,7 @@ onBeforeUnmount(releasePhoto)
           <div>
             <span class="section-kicker">Данные получателя</span>
             <h2>Мой профиль</h2>
+            <p><a href="#legal/privacy-policy">Политика обработки данных</a> · <a href="#consents">Мои согласия и обращения</a></p>
             <p>Телефон {{ customer?.phone }} подтверждён и не редактируется.</p>
           </div>
           <v-btn

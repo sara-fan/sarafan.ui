@@ -6,15 +6,20 @@
 import { computed, onMounted, ref } from 'vue'
 
 import { version } from '../package.json'
+import ConsentCenter from './components/ConsentCenter.vue'
 import AuthView from './components/AuthView.vue'
 import ProfileDialog from './components/ProfileDialog.vue'
 import { presentProblem, suppressProblem } from './errors/problem.js'
 import { useSession } from './stores/session.js'
+import { useConsents } from './stores/consents.js'
 
 const appIcon = '/sarafan-gzhel-icon.png'
 const coreVersion = ref('')
 const profileOpen = ref(false)
 const { customer, getStatus, logout, restoreProblem, restoreSession, restoring } = useSession()
+const consentStore = useConsents()
+const { serviceAllowed } = consentStore
+let sessionStarted = false
 const restoreMessage = computed(() => restoreProblem.value ? presentProblem(restoreProblem.value) : '')
 const firstName = computed(() => customer.value?.profile?.firstName || 'покупатель')
 const lastName = computed(() => customer.value?.profile?.lastName || '')
@@ -52,16 +57,23 @@ async function signOut() {
   }
 }
 
-onMounted(() => {
+async function startSession() {
+  if (sessionStarted) return
+  sessionStarted = true
+  await restoreSession()
+}
+
+onMounted(async () => {
   fetchCoreVersion()
-  restoreSession()
+  try { await consentStore.loadCookies() } catch { /* The consent centre exposes the recoverable error. */ }
+  await startSession()
 })
 </script>
 
 <template>
   <v-app class="sarafan-app">
     <section
-      v-if="restoring"
+      v-if="serviceAllowed && restoring"
       class="session-loading"
       aria-label="Восстановление сессии"
     >
@@ -76,7 +88,7 @@ onMounted(() => {
     </section>
 
     <section
-      v-else-if="restoreProblem"
+      v-else-if="serviceAllowed && restoreProblem"
       class="session-loading session-error"
       role="alert"
     >
@@ -94,10 +106,10 @@ onMounted(() => {
       </v-btn>
     </section>
 
-    <AuthView v-else-if="!customer" />
+    <AuthView v-else-if="serviceAllowed && !customer" />
 
     <div
-      v-else
+      v-else-if="serviceAllowed"
       class="app-frame"
     >
       <aside class="sidebar">
@@ -589,7 +601,7 @@ onMounted(() => {
     </div>
 
     <nav
-      v-if="customer"
+      v-if="serviceAllowed && customer"
       class="mobile-nav"
       aria-label="Мобильная навигация"
     >
@@ -649,8 +661,9 @@ onMounted(() => {
     </nav>
 
     <ProfileDialog
-      v-if="customer"
+      v-if="serviceAllowed && customer"
       v-model="profileOpen"
     />
+    <ConsentCenter />
   </v-app>
 </template>
