@@ -2,11 +2,15 @@
 // Copyright (C) 2026 Maxim [maxirmx] Samsonov (www.sw.consulting)
 // All rights reserved.
 // This file is a part of the Sarafan application
+
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useSession } from '../stores/session.js'
 import { useConsents } from '../stores/consents.js'
 import { LEGAL_DOCUMENT_KIND, CONSENT_STATUSES, downloadBytes, moscowTime } from '../consentFormatting.js'
 import { normalizeProblem, presentProblem, createInternalProblem } from '../errors/problem.js'
+import ConsentButton from './ConsentButton.vue'
+import ConsentCheckbox from './ConsentCheckbox.vue'
+import ConsentDialog from './ConsentDialog.vue'
 import LegalDocumentReader from './LegalDocumentReader.vue'
 
 const session = useSession()
@@ -21,19 +25,60 @@ const personalDocument = ref(null)
 const categories = ref([])
 const accepted = ref(false)
 const problem = ref(null)
+const cookieDocumentProblem = ref(null)
 const busy = ref(false)
+const cookieDocumentBusy = ref(false)
 let documentEpoch = 0
+let cookieDocumentEpoch = 0
 let choiceKey = globalThis.crypto.randomUUID()
 let choiceSignature = ''
 let personalKey = globalThis.crypto.randomUUID()
 let personalSignature = ''
-const status = computed(() => mine.value?.statuses.find(x => x.kind === LEGAL_DOCUMENT_KIND.PERSONAL_DATA_CONSENT))
+
+const status = computed(() => mine.value?.statuses.find(item => item.kind === LEGAL_DOCUMENT_KIND.PERSONAL_DATA_CONSENT))
+const latestPersonalGrant = computed(() => (mine.value?.history || [])
+  .filter(item => item.kind === LEGAL_DOCUMENT_KIND.PERSONAL_DATA_CONSENT && item.decision === 'grant')
+  .sort((left, right) => Date.parse(right.at) - Date.parse(left.at))[0] || null)
 const withdrawalPending = computed(() => mine.value?.withdrawalRequest?.processed === false)
 const cookieRequired = computed(() => !store.serviceAllowed.value)
-const canGrantCookies = computed(() => store.requiredCookieCategories().every(category => categories.value.includes(category)))
+const cookieCanRefuse = computed(() => !['refused', 'withdrawn'].includes(cookies.value?.status))
+const cookieNeedsGrant = computed(() => cookies.value?.status !== 'current')
+const cookieGrantCategories = computed(() => {
+  const available = new Set(cookieDocument.value?.cookieCategories || [])
+  return store.requiredCookieCategories().filter(category => available.has(category))
+})
+const canGrantCookies = computed(() => cookieGrantCategories.value.length > 0
+  && cookieGrantCategories.value.every(category => categories.value.includes(category)))
 const message = computed(() => problem.value ? presentProblem(problem.value) : '')
+const cookieNoticeError = computed(() => {
+  const value = problem.value || cookieDocumentProblem.value || cookieProblem.value || opsProblem.value
+  return value ? presentProblem(value) : ''
+})
+const cookieNoticeTitle = computed(() => {
+  if (cookieNoticeError.value && !cookieDocument.value) return 'Не удалось загрузить настройки куки'
+  if (cookies.value?.status === 'refused') return 'Обязательные куки отклонены'
+  if (cookies.value?.status === 'withdrawn') return 'Согласие на куки отозвано'
+  if (cookies.value?.status === 'renewal-required') return 'Требуется новое согласие на куки'
+  return 'Согласие на куки'
+})
+const cookieNoticeCopy = computed(() => {
+  if (['refused', 'withdrawn'].includes(cookies.value?.status)) {
+    return 'Сервис остаётся недоступен. Чтобы продолжить, заново выберите обязательную категорию и подтвердите согласие.'
+  }
+  if (cookies.value?.status === 'renewal-required') {
+    return 'Документ изменился. Ознакомьтесь с актуальной версией и подтвердите обязательную категорию заново.'
+  }
+  return 'Для использования сервиса необходимо принять обязательные куки. Сначала выберите обязательную категорию.'
+})
+
 const label = value => CONSENT_STATUSES[value] || value
 function resetChoice() { choiceKey = globalThis.crypto.randomUUID(); choiceSignature = '' }
+function toggleCategory(category, selected) {
+  categories.value = selected
+    ? [...new Set([...categories.value, category])]
+    : categories.value.filter(value => value !== category)
+  resetChoice()
+}
 
 async function perform(action, onVersionChanged) {
   busy.value = true
@@ -48,6 +93,33 @@ async function perform(action, onVersionChanged) {
   }
   finally { busy.value = false }
 }
+
+async function fetchCookieDocument(refreshStatus = false) {
+  const epoch = ++cookieDocumentEpoch
+  cookieDocumentBusy.value = true
+  cookieDocumentProblem.value = null
+  try {
+    if (refreshStatus) await store.loadCookies()
+    const result = (await store.current(LEGAL_DOCUMENT_KIND.COOKIE_CONSENT)).document
+    if (!result) throw createInternalProblem('invalidInput', { detail:'Документ о куки пока не действует. Использование сервиса недоступно.' })
+    if (epoch === cookieDocumentEpoch) cookieDocument.value = result
+    return result
+  } catch (error) {
+    if (epoch === cookieDocumentEpoch) {
+      cookieDocument.value = null
+      cookieDocumentProblem.value = normalizeProblem(error)
+    }
+    throw error
+  } finally {
+    if (epoch === cookieDocumentEpoch) cookieDocumentBusy.value = false
+  }
+}
+
+async function prepareCookieNotice(refreshStatus = false) {
+  try { await fetchCookieDocument(refreshStatus) }
+  catch { /* The notice presents a safe, recoverable error. */ }
+}
+
 async function openLegal() {
   if (globalThis.location.hash === '#consents' && session.customer.value) { await openPersonal(); return }
   const target = globalThis.location.hash.slice(7)
@@ -63,24 +135,23 @@ async function openLegal() {
     if (epoch === documentEpoch) document.value = result
   })
 }
+
 function closeLegal() {
   documentEpoch++
   documentOpen.value = false
   globalThis.history.replaceState(null, '', globalThis.location.pathname + globalThis.location.search)
+  if (cookieRequired.value && !cookieDocument.value) prepareCookieNotice()
 }
+
 async function download(value) { await perform(async () => downloadBytes(await store.source(value.id), value.id)) }
+
 async function openCookies() {
   cookieOpen.value = true
-  cookieDocument.value = null
-  categories.value = [...(cookies.value?.categories || [])]
+  categories.value = []
   resetChoice()
-  await perform(async () => {
-    await store.loadCookies()
-    categories.value = [...(cookies.value?.categories || [])]
-    cookieDocument.value = (await store.current(LEGAL_DOCUMENT_KIND.COOKIE_CONSENT)).document
-    if (!cookieDocument.value) throw createInternalProblem('invalidInput', { detail:'Документ о куки пока не действует. Использование сервиса недоступно.' })
-  })
+  await perform(() => fetchCookieDocument(true))
 }
+
 async function chooseCookies(decision) {
   await perform(async () => {
     let text = cookieDocument.value
@@ -92,27 +163,33 @@ async function chooseCookies(decision) {
     choiceSignature = signature
     await store.decideCookies(text, decision, selected, choiceKey)
     resetChoice()
+    categories.value = []
     cookieOpen.value = false
   }, async () => {
     categories.value = []
     cookieDocument.value = null
     resetChoice()
-    cookieDocument.value = (await store.current(LEGAL_DOCUMENT_KIND.COOKIE_CONSENT)).document
+    await fetchCookieDocument()
   })
 }
-async function openPersonal() {
+
+async function showPersonal(refreshMine) {
   personalOpen.value = true
   accepted.value = false
   personalDocument.value = null
   await perform(async () => {
-    await store.loadMine()
+    if (refreshMine) await store.loadMine()
     personalDocument.value = (await store.current(LEGAL_DOCUMENT_KIND.PERSONAL_DATA_CONSENT)).document
   })
 }
+
+async function openPersonal() { await showPersonal(true) }
+
 function closePersonal() {
   personalOpen.value = false
   if (globalThis.location.hash === '#consents') globalThis.history.replaceState(null, '', globalThis.location.pathname + globalThis.location.search)
 }
+
 async function grant() {
   if (!accepted.value || !personalDocument.value) return
   await perform(async () => {
@@ -129,13 +206,24 @@ async function grant() {
     personalDocument.value = (await store.current(LEGAL_DOCUMENT_KIND.PERSONAL_DATA_CONSENT)).document
   })
 }
+
 async function requestWithdrawal() { await perform(() => store.requestWithdrawal()) }
+
 async function refreshOps() {
-  await perform(() => store.loadOps())
+  await perform(async () => {
+    await store.loadOps()
+    if (cookieRequired.value) await fetchCookieDocument()
+  })
 }
-function visible() {
-  if (globalThis.document.visibilityState === 'visible') perform(() => Promise.all([store.loadCookies(), store.loadMine()]))
+
+async function visible() {
+  if (globalThis.document.visibilityState !== 'visible') return
+  await perform(async () => {
+    await Promise.all([store.loadCookies(), store.loadMine()])
+    if (cookieRequired.value) await fetchCookieDocument()
+  })
 }
+
 watch(() => session.customer.value?.id, async (id, _previous, cleanup) => {
   let active = true
   cleanup(() => { active = false })
@@ -146,270 +234,397 @@ watch(() => session.customer.value?.id, async (id, _previous, cleanup) => {
   try {
     if (store.serviceAllowed.value) await store.associate()
     if (active) await store.loadMine()
+    if (active && globalThis.location.hash === '#consents' && !personalOpen.value) await showPersonal(false)
   }
   catch (error) { if (active) problem.value = normalizeProblem(error) }
 }, { immediate:true })
-onMounted(() => {
-  if (globalThis.location.hash === '#consents' || globalThis.location.hash.startsWith('#legal/')) openLegal()
-  else refreshOps()
+
+watch(cookieRequired, (required, previous) => {
+  if (required && previous === false) {
+    categories.value = []
+    cookieDocument.value = null
+    resetChoice()
+    prepareCookieNotice()
+  }
+})
+
+onMounted(async () => {
+  if (globalThis.location.hash === '#consents' || globalThis.location.hash.startsWith('#legal/')) await openLegal()
+  else await refreshOps()
   globalThis.addEventListener('hashchange', openLegal)
   globalThis.addEventListener('focus', visible)
   globalThis.document.addEventListener('visibilitychange', visible)
 })
+
 onUnmounted(() => {
   documentEpoch++
+  cookieDocumentEpoch++
   globalThis.removeEventListener('hashchange', openLegal)
   globalThis.removeEventListener('focus', visible)
   globalThis.document.removeEventListener('visibilitychange', visible)
   store.dispose()
 })
 </script>
+
 <template>
-  <footer
-    class="consent-footer"
+  <nav
+    v-if="store.serviceAllowed.value && !session.customer.value"
+    class="consent-utilities"
     aria-label="Документы и согласия"
   >
-    <a
-      v-for="item in ops?.kinds || []"
-      :key="item.value"
-      :href="`#legal/${item.routeAlias}`"
-    >{{ item.name }}</a>
-    <span
-      v-if="opsProblem"
-      role="alert"
-    >{{ presentProblem(opsProblem) }} <button
-      type="button"
-      @click="refreshOps"
-    >Повторить загрузку документов</button></span>
-    <button
-      type="button"
+    <div class="consent-utility-links">
+      <a
+        v-for="item in ops?.kinds || []"
+        :key="item.value"
+        :href="`#legal/${item.routeAlias}`"
+      >{{ item.name }}</a>
+    </div>
+    <ConsentButton
+      variant="quiet"
       @click="openCookies"
     >
       Настройки куки
-    </button>
-    <button
-      v-if="session.customer.value"
-      type="button"
-      @click="openPersonal"
-    >
-      Мои согласия и обращения
-    </button>
+    </ConsentButton>
     <p
-      v-if="session.customer.value && status?.status !== 'current'"
-      role="status"
+      v-if="opsProblem"
+      role="alert"
     >
-      Для сохранения персональных данных требуется актуальное согласие. Документы, история, отзыв и выход доступны.
+      {{ presentProblem(opsProblem) }}
+      <ConsentButton
+        variant="quiet"
+        @click="refreshOps"
+      >
+        Повторить загрузку документов
+      </ConsentButton>
     </p>
+  </nav>
+
+  <section
+    v-if="cookieRequired && !cookieOpen && !documentOpen && !personalOpen"
+    class="cookie-notice"
+    role="region"
+    aria-labelledby="cookie-notice-title"
+  >
+    <h2 id="cookie-notice-title">
+      {{ cookieNoticeTitle }}
+    </h2>
+    <p>{{ cookieNoticeCopy }}</p>
     <p
-      v-if="personalProblem && !personalOpen"
+      v-if="cookieNoticeError"
+      class="consent-alert"
+      role="alert"
+    >
+      {{ cookieNoticeError }}
+    </p>
+    <div
+      v-if="cookieDocument"
+      class="cookie-notice__choices"
+    >
+      <ConsentCheckbox
+        v-for="category in cookieGrantCategories"
+        :key="category"
+        :model-value="categories.includes(category)"
+        :disabled="busy"
+        @update:model-value="toggleCategory(category, $event)"
+      >
+        {{ store.cookieCategoryName(category) }}
+        <small>Необходимы для входа, безопасности и работы сервиса.</small>
+      </ConsentCheckbox>
+    </div>
+    <div class="cookie-notice__actions">
+      <ConsentButton
+        variant="primary"
+        :disabled="busy || cookieDocumentBusy || !cookieDocument || !canGrantCookies"
+        @click="chooseCookies('grant')"
+      >
+        Принять обязательные куки
+      </ConsentButton>
+      <ConsentButton
+        v-if="cookieCanRefuse"
+        variant="secondary"
+        :disabled="busy || cookieDocumentBusy || !cookieDocument"
+        @click="chooseCookies('refuse')"
+      >
+        Отказаться
+      </ConsentButton>
+      <ConsentButton
+        variant="quiet"
+        :disabled="busy"
+        @click="openCookies"
+      >
+        Настроить куки
+      </ConsentButton>
+      <ConsentButton
+        v-if="cookieNoticeError"
+        variant="quiet"
+        :disabled="busy || cookieDocumentBusy"
+        @click="prepareCookieNotice(true)"
+      >
+        Повторить загрузку
+      </ConsentButton>
+    </div>
+    <nav
+      class="consent-utility-links cookie-notice__links"
+      aria-label="Юридические документы"
+    >
+      <a
+        v-for="item in ops?.kinds || []"
+        :key="item.value"
+        :href="`#legal/${item.routeAlias}`"
+      >{{ item.name }}</a>
+      <button
+        v-if="session.customer.value"
+        type="button"
+        class="consent-registration__retry"
+        @click="openPersonal"
+      >
+        Мои согласия и обращения
+      </button>
+    </nav>
+    <p
+      v-if="personalProblem"
+      class="consent-alert"
       role="alert"
     >
       {{ presentProblem(personalProblem) }}
     </p>
-  </footer>
-  <section
-    v-if="cookieRequired && !cookieOpen"
-    class="cookie-notice"
-    aria-label="Использование куки"
+  </section>
+
+  <ConsentDialog
+    v-model="cookieOpen"
+    title="Настройки куки"
+    title-id="cookie-dialog-title"
   >
-    <strong>Согласие на куки</strong>
-    <p>Для использования сервиса необходимо принять обязательные куки.</p>
     <p
-      v-if="cookieProblem"
+      v-if="message"
+      class="consent-alert"
       role="alert"
     >
-      {{ presentProblem(cookieProblem) }}
+      {{ message }}
     </p>
-    <v-btn @click="openCookies">
-      Настроить куки
-    </v-btn>
-  </section>
-  <v-dialog
-    v-model="cookieOpen"
-    max-width="850"
-    scrollable
-  >
-    <v-card
-      class="consent-panel"
-      title="Настройки куки"
+    <section class="consent-section consent-section--soft">
+      <h3>Состояние в этом браузере</h3>
+      <dl class="consent-summary">
+        <dt>Статус</dt>
+        <dd><span class="consent-status">{{ label(cookies?.status || 'unavailable') }}</span></dd>
+        <dt>Выбранные категории</dt>
+        <dd>{{ cookies?.categories?.length ? cookies.categories.map(store.cookieCategoryName).join(', ') : 'Нет' }}</dd>
+      </dl>
+      <p>Выбор относится только к этому браузеру и не переносится на другие устройства.</p>
+    </section>
+    <section
+      v-if="cookieDocument"
+      class="consent-section"
     >
-      <v-card-text>
-        <p
-          v-if="message"
-          role="alert"
-        >
-          {{ message }}
-        </p>
-        <p>Отметьте обязательную категорию и подтвердите согласие, чтобы использовать сервис.</p>
-        <LegalDocumentReader
-          v-if="cookieDocument"
-          :document="cookieDocument"
-          @download="download(cookieDocument)"
-        />
-        <v-checkbox
-          v-for="category in cookieDocument?.cookieCategories || []"
-          :key="category"
-          v-model="categories"
-          :value="category"
-          :label="store.cookieCategoryName(category)"
-          :disabled="busy"
-          @update:model-value="resetChoice"
-        />
-        <p v-if="cookies">
-          Состояние: {{ label(cookies.status) }}. Выбор относится к этому браузеру.
-        </p>
-      </v-card-text>
-      <v-card-actions class="consent-actions">
-        <v-btn
-          :disabled="busy || !cookieDocument"
-          @click="chooseCookies('refuse')"
-        >
-          Отказаться
-        </v-btn>
-        <v-btn
-          :disabled="busy || !cookieDocument || !canGrantCookies"
-          @click="chooseCookies('grant')"
-        >
-          Принять обязательные куки
-        </v-btn>
-        <v-btn
-          v-if="cookies?.documentId"
-          :disabled="busy"
-          @click="chooseCookies('withdraw')"
-        >
-          Отозвать согласие на куки
-        </v-btn>
-        <v-btn
-          :disabled="busy"
-          @click="openCookies"
-        >
-          Обновить документ
-        </v-btn>
-        <v-btn @click="cookieOpen = false">
-          Закрыть
-        </v-btn>
-      </v-card-actions>
-    </v-card>
-  </v-dialog>
-  <v-dialog
+      <h3>Актуальный документ</h3>
+      <LegalDocumentReader
+        :document="cookieDocument"
+        @download="download(cookieDocument)"
+      />
+    </section>
+    <section
+      v-if="cookieNeedsGrant && cookieDocument"
+      class="consent-section"
+    >
+      <h3>Новое подтверждение</h3>
+      <p>Выберите все обязательные категории. Ранее сделанный выбор не считается подтверждением этой версии.</p>
+      <ConsentCheckbox
+        v-for="category in cookieGrantCategories"
+        :key="category"
+        :model-value="categories.includes(category)"
+        :disabled="busy"
+        @update:model-value="toggleCategory(category, $event)"
+      >
+        {{ store.cookieCategoryName(category) }}
+      </ConsentCheckbox>
+    </section>
+    <template #actions>
+      <ConsentButton
+        v-if="cookieNeedsGrant"
+        variant="primary"
+        :disabled="busy || !cookieDocument || !canGrantCookies"
+        @click="chooseCookies('grant')"
+      >
+        Принять обязательные куки
+      </ConsentButton>
+      <ConsentButton
+        v-if="cookieNeedsGrant && cookieCanRefuse"
+        variant="secondary"
+        :disabled="busy || !cookieDocument"
+        @click="chooseCookies('refuse')"
+      >
+        Отказаться
+      </ConsentButton>
+      <ConsentButton
+        v-if="cookies?.status === 'current' && cookies?.documentId"
+        variant="danger"
+        :disabled="busy"
+        @click="chooseCookies('withdraw')"
+      >
+        Отозвать согласие на куки
+      </ConsentButton>
+      <ConsentButton
+        variant="quiet"
+        :disabled="busy"
+        @click="openCookies"
+      >
+        Обновить документ
+      </ConsentButton>
+      <ConsentButton
+        variant="secondary"
+        @click="cookieOpen = false"
+      >
+        Закрыть
+      </ConsentButton>
+    </template>
+  </ConsentDialog>
+
+  <ConsentDialog
     :model-value="personalOpen"
-    max-width="900"
-    scrollable
+    title="Мои согласия и обращения"
+    title-id="personal-consent-dialog-title"
     @update:model-value="!$event && closePersonal()"
   >
-    <v-card
-      class="consent-panel"
-      title="Мои согласия и обращения"
+    <p
+      v-if="message"
+      class="consent-alert"
+      role="alert"
     >
-      <v-card-text>
-        <p
-          v-if="message"
-          role="alert"
+      {{ message }}
+    </p>
+    <section class="consent-section consent-section--soft">
+      <h3>Согласие на обработку персональных данных</h3>
+      <dl class="consent-summary">
+        <dt>Статус</dt>
+        <dd><span class="consent-status">{{ label(status?.status || 'unavailable') }}</span></dd>
+        <dt>Принятая версия</dt>
+        <dd>{{ latestPersonalGrant?.displayVersion || '—' }}</dd>
+        <dt>Дата принятия</dt>
+        <dd>{{ moscowTime(latestPersonalGrant?.at) }}</dd>
+        <dt>Актуальная версия</dt>
+        <dd>{{ personalDocument?.displayVersion || '—' }}</dd>
+      </dl>
+    </section>
+    <section
+      v-if="personalDocument"
+      class="consent-section"
+    >
+      <h3>Актуальный документ</h3>
+      <LegalDocumentReader
+        :document="personalDocument"
+        @download="download(personalDocument)"
+      />
+    </section>
+    <section
+      v-if="status?.status !== 'current' && personalDocument"
+      class="consent-section"
+    >
+      <h3>Подтверждение согласия</h3>
+      <ConsentCheckbox
+        :model-value="accepted"
+        :disabled="busy"
+        @update:model-value="accepted = $event"
+      >
+        Я даю отдельное согласие на хранение и обработку персональных данных по этому документу
+      </ConsentCheckbox>
+    </section>
+    <section class="consent-section">
+      <h3>Прекращение использования системы</h3>
+      <p>Запрос будет записан для ручной обработки сотрудниками. Его отправка сама по себе не отключает учётную запись, не удаляет данные и не изменяет состояние согласия.</p>
+      <ConsentButton
+        variant="danger"
+        block
+        :disabled="busy || withdrawalPending"
+        @click="requestWithdrawal"
+      >
+        Прекратить использовать систему и отозвать согласие на обработку персональных данных
+      </ConsentButton>
+      <p
+        v-if="mine?.withdrawalRequest"
+        class="withdrawal-record"
+        role="status"
+      >
+        Запрос от {{ moscowTime(mine.withdrawalRequest.requestedAt) }} ·
+        {{ mine.withdrawalRequest.processed ? 'Обработан' : 'Ожидает ручной обработки' }}
+      </p>
+    </section>
+    <section class="consent-section">
+      <h3>История</h3>
+      <p>Записи куки связаны с аккаунтом в момент наблюдения. Они не разрешают куки на других устройствах.</p>
+      <ol
+        v-if="mine?.history?.length"
+        class="consent-history"
+      >
+        <li
+          v-for="event in mine.history"
+          :key="event.id"
         >
-          {{ message }}
-        </p>
-        <p>Персональные данные: {{ label(status?.status || 'unavailable') }}</p>
-        <LegalDocumentReader
-          v-if="personalDocument"
-          :document="personalDocument"
-          @download="download(personalDocument)"
-        />
-        <v-checkbox
-          v-if="status?.status !== 'current' && personalDocument"
-          v-model="accepted"
-          label="Я даю отдельное согласие на хранение и обработку персональных данных по этому документу"
-          :disabled="busy"
-        />
-        <v-btn
-          v-if="status?.status !== 'current'"
-          :disabled="busy || !accepted"
-          @click="grant"
-        >
-          Дать согласие
-        </v-btn>
-        <p>Запрос будет записан для ручной обработки сотрудниками. Его отправка сама по себе не отключает учётную запись, не удаляет данные и не изменяет состояние согласия.</p>
-        <v-btn
-          :disabled="busy || withdrawalPending"
-          @click="requestWithdrawal"
-        >
-          Прекратить использовать систему и отозвать согласие на обработку персональных данных
-        </v-btn>
-        <p
-          v-if="mine?.withdrawalRequest"
-          class="withdrawal-record"
-        >
-          Запрос от {{ moscowTime(mine.withdrawalRequest.requestedAt) }} ·
-          {{ mine.withdrawalRequest.processed ? 'Обработан' : 'Ожидает ручной обработки' }}
-        </p>
-        <h3>История</h3>
-        <p>Записи куки связаны с аккаунтом в момент наблюдения. Они не разрешают куки на других устройствах.</p>
-        <ol class="consent-history">
-          <li
-            v-for="event in mine?.history || []"
-            :key="event.id"
-          >
-            {{ store.kindName(event.kind) }} · {{ label(event.decision) }} · {{ moscowTime(event.at) }}
-            <a
-              :href="`#legal/${event.documentId}`"
-            >Версия {{ event.displayVersion }}</a>
-            <small v-if="event.associatedAt">Связано с аккаунтом {{ moscowTime(event.associatedAt) }}</small>
-          </li>
-        </ol>
-      </v-card-text>
-      <v-card-actions>
-        <v-btn
-          :disabled="busy"
-          @click="openPersonal"
-        >
-          Обновить
-        </v-btn><v-btn @click="closePersonal">
-          Закрыть
-        </v-btn>
-      </v-card-actions>
-    </v-card>
-  </v-dialog>
-  <v-dialog
+          {{ store.kindName(event.kind) }} · {{ label(event.decision) }} · {{ moscowTime(event.at) }}
+          <a :href="`#legal/${event.documentId}`">Версия {{ event.displayVersion }}</a>
+          <small v-if="event.associatedAt">Связано с аккаунтом {{ moscowTime(event.associatedAt) }}</small>
+        </li>
+      </ol>
+      <p v-else>
+        Записей пока нет.
+      </p>
+    </section>
+    <template #actions>
+      <ConsentButton
+        v-if="status?.status !== 'current'"
+        variant="primary"
+        :disabled="busy || !personalDocument || !accepted"
+        @click="grant"
+      >
+        Дать согласие
+      </ConsentButton>
+      <ConsentButton
+        variant="quiet"
+        :disabled="busy"
+        @click="openPersonal"
+      >
+        Обновить
+      </ConsentButton>
+      <ConsentButton
+        variant="secondary"
+        @click="closePersonal"
+      >
+        Закрыть
+      </ConsentButton>
+    </template>
+  </ConsentDialog>
+
+  <ConsentDialog
     :model-value="documentOpen"
-    max-width="950"
-    scrollable
+    title="Юридический документ"
+    title-id="legal-document-dialog-title"
     @update:model-value="!$event && closeLegal()"
   >
-    <v-card
-      class="consent-panel"
-      title="Документ"
+    <p
+      v-if="message"
+      class="consent-alert"
+      role="alert"
     >
-      <v-card-text>
-        <p
-          v-if="message"
-          role="alert"
-        >
-          {{ message }}
-        </p><LegalDocumentReader
-          v-if="document"
-          :document="document"
-          @download="download(document)"
-        />
-      </v-card-text>
-      <v-card-actions>
-        <v-btn @click="openLegal">
-          Повторить
-        </v-btn><v-btn @click="closeLegal">
-          Закрыть
-        </v-btn>
-      </v-card-actions>
-    </v-card>
-  </v-dialog>
+      {{ message }}
+    </p>
+    <LegalDocumentReader
+      v-if="document"
+      :document="document"
+      @download="download(document)"
+    />
+    <template #actions>
+      <ConsentButton
+        variant="quiet"
+        :disabled="busy"
+        @click="openLegal"
+      >
+        Повторить
+      </ConsentButton>
+      <ConsentButton
+        variant="secondary"
+        @click="closeLegal"
+      >
+        Закрыть
+      </ConsentButton>
+    </template>
+  </ConsentDialog>
 </template>
-<style scoped>
-.consent-footer { padding:1rem 1.5rem 6rem; display:flex; gap:.8rem 1.2rem; flex-wrap:wrap; background:#f4f8fc; }
-.consent-footer a, .consent-footer button { color:#1565c0; text-decoration:underline; }
-.consent-footer p { flex-basis:100%; }
-.cookie-notice { position:fixed; z-index:1100; bottom:1rem; left:1rem; right:1rem; max-width:44rem; padding:1rem; border:1px solid #1976d2; border-radius:8px; background:white; box-shadow:0 4px 24px #17345633; }
-.consent-actions { flex-wrap:wrap; }
-.consent-panel :deep(.v-btn) { max-width:100%; height:auto; min-height:2.5rem; }
-.consent-panel :deep(.v-btn__content) { white-space:normal; padding:.3rem 0; }
-.consent-history { padding-left:1.4rem; }
-.consent-history li, .withdrawal-record { padding:.6rem 0; border-bottom:1px solid #ccd9e8; }
-.consent-history small { display:block; }
-@media print { .consent-footer, .cookie-notice { display:none; } }
-</style>
