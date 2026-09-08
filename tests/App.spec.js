@@ -37,9 +37,20 @@ const cookieReceipt = {
   status: 'current', categories: [0], documentId: '11111111-1111-1111-1111-111111111111',
   serverNow: '2026-09-08T12:00:00Z', expiresAt: '2026-09-09T12:00:00Z', nextChangeAt: null
 }
+const cookieDocument = {
+  id: cookieReceipt.documentId,
+  kind: 0,
+  title: 'Согласие на куки',
+  displayVersion: '1',
+  contentHash: 'a'.repeat(64),
+  html: '<h1>Согласие на куки</h1><p>Текст документа.</p>',
+  effectiveAt: '2026-09-08T12:00:00Z',
+  cookieCategories: [0]
+}
 function consentBootstrap(url, receipt = cookieReceipt) {
   if (url === '/api/v1/legal/ops') return Promise.resolve(response(200, legalOps))
   if (url === '/api/v1/consents/cookies') return Promise.resolve(response(200, receipt))
+  if (url === '/api/v1/legal/current/0') return Promise.resolve(response(200, { serverNow:'2026-09-08T12:00:00Z', document:cookieDocument }))
   return null
 }
 
@@ -75,6 +86,9 @@ describe('App authentication flow', () => {
 
     const wrapper = mountApp()
     await vi.waitFor(() => expect(wrapper.text()).toContain('необходимо принять обязательные куки'))
+    await vi.waitFor(() => expect(wrapper.findAll('input[type="checkbox"]')).toHaveLength(1))
+    expect(wrapper.findAll('button').some(item => item.text() === 'Отказаться')).toBe(true)
+    expect(wrapper.findAll('button').some(item => item.text() === 'Настроить куки')).toBe(true)
     await vi.waitFor(() => expect(fetch.mock.calls.some(([url]) => url === '/api/v1/auth/refresh')).toBe(true))
     const urls = fetch.mock.calls.map(([url]) => url)
     expect(urls.indexOf('/api/v1/legal/ops')).toBeLessThan(urls.indexOf('/api/v1/consents/cookies'))

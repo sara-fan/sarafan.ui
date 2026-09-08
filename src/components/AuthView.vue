@@ -15,6 +15,7 @@ import {
 import { useConsents } from '../stores/consents.js'
 import { useSession } from '../stores/session.js'
 import { LEGAL_DOCUMENT_KIND } from '../consentFormatting.js'
+import ConsentCheckbox from './ConsentCheckbox.vue'
 
 const { notice, requestCode, verifyCode } = useSession()
 const consentStore = useConsents()
@@ -47,6 +48,14 @@ const phoneErrors = computed(() => problemFieldErrors(problem.value, 'phone'))
 const codeErrors = computed(() => problemFieldErrors(problem.value, 'code'))
 const termsErrors = computed(() => problemFieldErrors(problem.value, 'termsAccepted'))
 const personalDataErrors = computed(() => problemFieldErrors(problem.value, 'personalDataAccepted'))
+const termsDescribedBy = computed(() => [
+  termsDocument.value ? 'registration-terms-document' : null,
+  termsErrors.value.length ? 'registration-terms-error' : null
+].filter(Boolean).join(' ') || undefined)
+const personalDataDescribedBy = computed(() => [
+  pdDocument.value ? 'registration-personal-document' : null,
+  personalDataErrors.value.length ? 'registration-personal-error' : null
+].filter(Boolean).join(' ') || undefined)
 
 watch(mode, async () => {
   step.value = 'phone'
@@ -314,40 +323,70 @@ async function submitCode() {
         </div>
         <div
           v-if="isRegistration"
-          class="consent-list"
+          class="consent-list consent-registration"
         >
-          <v-checkbox
-            v-model="termsAccepted"
-            hide-details
-            label="Я принимаю условия использования сервиса"
-            :disabled="busy"
-            :error-messages="termsErrors"
-          />
-          <v-checkbox
-            v-model="personalDataAccepted"
-            hide-details
-            label="Я согласен на обработку персональных данных"
-            :disabled="busy"
-            :error-messages="personalDataErrors"
-          />
-          <p>
+          <div class="consent-registration__item">
+            <ConsentCheckbox
+              id="registration-terms"
+              :model-value="termsAccepted"
+              :disabled="busy"
+              :error="termsErrors.length > 0"
+              :aria-describedby="termsDescribedBy"
+              @update:model-value="termsAccepted = $event"
+            >
+              Я принимаю условия использования сервиса
+              <small v-if="termsDocument">Пользовательское соглашение · версия {{ termsDocument.displayVersion }}</small>
+            </ConsentCheckbox>
             <a
               v-if="termsDocument"
+              id="registration-terms-document"
+              class="consent-document-link"
               :href="`#legal/${termsDocument.id}`"
-            >Условия · версия {{ termsDocument.displayVersion }}</a>
-          </p>
-          <p>
+            >Открыть пользовательское соглашение</a>
+            <p
+              v-if="termsErrors.length"
+              id="registration-terms-error"
+              class="consent-field-error"
+              role="alert"
+            >
+              {{ termsErrors.join(' ') }}
+            </p>
+          </div>
+          <div class="consent-registration__item">
+            <ConsentCheckbox
+              id="registration-personal-data"
+              :model-value="personalDataAccepted"
+              :disabled="busy"
+              :error="personalDataErrors.length > 0"
+              :aria-describedby="personalDataDescribedBy"
+              @update:model-value="personalDataAccepted = $event"
+            >
+              Я даю отдельное согласие на обработку персональных данных
+              <small v-if="pdDocument">Согласие на обработку персональных данных · версия {{ pdDocument.displayVersion }}</small>
+            </ConsentCheckbox>
             <a
               v-if="pdDocument"
+              id="registration-personal-document"
+              class="consent-document-link"
               :href="`#legal/${pdDocument.id}`"
-            >Согласие на персональные данные · версия {{ pdDocument.displayVersion }}</a>
-          </p>
-          <v-btn
+            >Открыть согласие на обработку персональных данных</a>
+            <p
+              v-if="personalDataErrors.length"
+              id="registration-personal-error"
+              class="consent-field-error"
+              role="alert"
+            >
+              {{ personalDataErrors.join(' ') }}
+            </p>
+          </div>
+          <button
+            type="button"
+            class="consent-registration__retry"
             :disabled="busy"
             @click="loadDocuments"
           >
             Обновить документы
-          </v-btn>
+          </button>
         </div>
         <v-text-field
           v-model="phone"

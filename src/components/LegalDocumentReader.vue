@@ -5,6 +5,7 @@
 import { computed, defineComponent, ref } from 'vue'
 import { documentNodes, moscowTime } from '../consentFormatting.js'
 import { presentProblem } from '../errors/problem.js'
+import ConsentButton from './ConsentButton.vue'
 const root = ref(null)
 const props = defineProps({ document: { type:Object, required:true } })
 defineEmits(['download'])
@@ -26,27 +27,28 @@ function printDocument() {
   <article
     ref="root"
     class="legal-document"
+    :aria-label="document.title"
   >
-    <header>
-      <h2>{{ document.title }}</h2>
+    <header class="legal-document__meta">
       <p>Версия {{ document.displayVersion }} · {{ moscowTime(document.effectiveAt) }}</p>
       <div class="legal-document__actions">
-        <button
-          type="button"
+        <ConsentButton
+          variant="quiet"
           @click="$emit('download')"
         >
           Скачать Markdown
-        </button>
-        <button
-          type="button"
+        </ConsentButton>
+        <ConsentButton
+          variant="quiet"
           @click="printDocument"
         >
           Печать
-        </button>
+        </ConsentButton>
       </div>
     </header>
     <p
       v-if="parsed.problem"
+      class="consent-alert"
       role="alert"
     >
       {{ presentProblem(parsed.problem) }}
@@ -59,19 +61,6 @@ function printDocument() {
     </div>
   </article>
 </template>
-<style scoped>
-.legal-document { max-width: 60rem; color: #172c46; line-height: 1.65; overflow-wrap: anywhere; }
-.legal-document h2 { margin: 0 0 .5rem; }
-.legal-document__actions { display:flex; gap:1rem; margin:1rem 0; flex-wrap:wrap; }
-.legal-document button { border:1px solid #1976d2; padding:.45rem .8rem; border-radius:4px; color:#1565c0; }
-.legal-document__body :deep(table) { display:block; overflow-x:auto; border-collapse:collapse; max-width:100%; }
-.legal-document__body :deep(th), .legal-document__body :deep(td) { border:1px solid #bacbdf; padding:.5rem; }
-.legal-document__body :deep(ul), .legal-document__body :deep(ol) { padding-left:1.8rem; }
-.legal-document__body :deep(p) { margin:.7rem 0; }
-.legal-document__body :deep(a) { color:#1565c0; text-decoration:underline; }
-@media print { .legal-document__actions { display:none; } .legal-document__body :deep(table) { display:table; } }
-</style>
-
 <style>
 @media print {
   body:has(> #sarafan-print-document) > :not(#sarafan-print-document) { display:none !important; }

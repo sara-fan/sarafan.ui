@@ -4,6 +4,7 @@
 
 import { describe, expect, it, vi } from 'vitest'
 
+import { version } from '../package.json'
 import { installErrorBoundaries, reportBoundaryFailure } from '../src/observability/boundaries.js'
 import { EVENTS, SEVERITY, isCatalogueEvent } from '../src/observability/catalogue.js'
 import { createConsoleSink, formatConsoleRecord } from '../src/observability/console-sink.js'
@@ -62,7 +63,7 @@ describe('UI observability', () => {
     expect(logger.log(EVENTS.applicationError)).toBe(true)
     expect(logger.log({ ...EVENTS.applicationError })).toBe(false)
     expect(records[0].resource['service.name']).toBe('sarafan.ui')
-    expect(records[0].resource['service.version']).toBe('0.0.7')
+    expect(records[0].resource['service.version']).toBe(version)
   })
   it('defines immutable OpenTelemetry severities and stable catalogue events', () => {
     expect(SEVERITY).toMatchObject({
@@ -146,7 +147,7 @@ describe('UI observability', () => {
       spanId: SPAN_ID,
       resource: {
         'service.name': 'sarafan.ui',
-        'service.version': '0.0.7',
+        'service.version': version,
         'deployment.environment.name': 'test'
       },
       instrumentationScope: 'sarafan.ui.observability'
@@ -174,6 +175,10 @@ describe('UI observability', () => {
     expect(sanitizeAttributes(EVENTS.operationSuppressed, {
       'operation.name': 'status.version.load'
     })).toEqual({ 'operation.name': 'status.version.load' })
+    expect(EVENTS.operationSuppressed.body({})).toBe('An expected failure was suppressed for unknown operation.')
+    expect(EVENTS.eventsDropped.body({})).toBe('Dropped 0 repeated unknown events.')
+    expect(EVENTS.eventsDropped.body({ 'event.name':'sarafan.ui.application.error', 'event.dropped_count':3 }))
+      .toBe('Dropped 3 repeated sarafan.ui.application.error events.')
   })
 
   it('obeys master control and thresholds and contains sink failures', () => {
