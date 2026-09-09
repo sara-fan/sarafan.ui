@@ -19,6 +19,7 @@ import { createSarafanVuetify } from '../src/plugins/vuetify.js'
 import { ACCESS, createAppRouter, routes } from '../src/router.js'
 import HomeView from '../src/views/HomeView.vue'
 import NotFoundView from '../src/views/NotFoundView.vue'
+import OrdersView from '../src/views/OrdersView.vue'
 import PendingView from '../src/views/PendingView.vue'
 
 const h = vi.hoisted(() => ({ store: {} }))
@@ -43,6 +44,7 @@ describe('router and page shells', () => {
   it('declares public, limited, customer, detail, and fallback routes', async () => {
     expect(new Set(routes.map(route => route.meta.access))).toEqual(new Set(Object.values(ACCESS)))
     const detail = routes.find(route => route.name === 'order-details')
+    expect(routes.find(route => route.name === 'orders').component).toBe(OrdersView)
     expect(detail.props({ params: { orderId: 'A-17' } })).toEqual({
       title: 'Заказ',
       copy: 'Детали заказа A-17 будут подключены отдельной задачей MVP.'
@@ -78,6 +80,22 @@ describe('router and page shells', () => {
     await missing.get('button').trigger('click')
     await flushPromises()
     expect(router.currentRoute.value.name).toBe('home')
+  })
+
+  it('renders the main-branch order placeholders and opens order details', async () => {
+    const router = await routerAt('/orders')
+    const wrapper = mount(OrdersView, { global: { plugins: [router] } })
+
+    expect(wrapper.findAll('.order-card')).toHaveLength(2)
+    expect(wrapper.text()).toContain('Nike Air Max 90 Essential')
+    expect(wrapper.text()).toContain('Mini Quilted Shoulder Bag')
+    expect(wrapper.text()).toContain('Проверяем заказ')
+    expect(wrapper.text()).toContain('Ожидает оплаты')
+    expect(wrapper.findAll('[role="progressbar"]').map(item => item.attributes('aria-valuenow'))).toEqual(['46', '68'])
+
+    await wrapper.findAll('.order-card__action')[0].trigger('click')
+    await flushPromises()
+    expect(router.currentRoute.value).toMatchObject({ name: 'order-details', params: { orderId: 'SRF-000123' } })
   })
 })
 

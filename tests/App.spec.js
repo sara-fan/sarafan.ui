@@ -86,14 +86,14 @@ describe('App routing and privacy gates', () => {
     const { wrapper } = await mountApp('/orders')
     await flushPromises()
     expect(wrapper.text()).toContain('Настройте обязательные куки')
-    expect(wrapper.text()).not.toContain('Список заказов будет подключён')
+    expect(wrapper.text()).not.toContain('Nike Air Max 90 Essential')
     expect(wrapper.findAll('.site-footer')).toHaveLength(1)
 
     h.consents.serviceAllowed.value = true
     h.session.restoring.value = true
     await flushPromises()
     expect(wrapper.text()).toContain('Восстанавливаем сессию')
-    expect(wrapper.text()).not.toContain('Список заказов будет подключён')
+    expect(wrapper.text()).not.toContain('Nike Air Max 90 Essential')
 
     h.session.restoring.value = false
     h.session.restoreProblem.value = createInternalProblem('sessionRestoreUnavailable')
@@ -105,7 +105,7 @@ describe('App routing and privacy gates', () => {
     h.session.restoreProblem.value = null
     h.session.customer.value = { id: 7, phone: '+79990000007', hasPhoto: false, profile: {} }
     await flushPromises()
-    expect(wrapper.text()).toContain('Список заказов будет подключён')
+    expect(wrapper.text()).toContain('Nike Air Max 90 Essential')
   })
 
   it('redirects an unauthenticated protected bookmark to the public home route', async () => {
