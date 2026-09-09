@@ -296,7 +296,7 @@ describe('session store', () => {
     expect(session.restoreProblem.value).not.toHaveProperty('status')
   })
 
-  it('forces sign-in without duplicating an already logged server restore failure', async () => {
+  it('keeps a server restore failure recoverable without exposing its transport detail', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
       problemResponse(503, 'service-unavailable')
     ))
@@ -304,9 +304,11 @@ describe('session store', () => {
     const session = useSession()
     await session.restoreSession()
 
-    expect(session.restoreProblem.value).toBeNull()
+    expect(session.restoreProblem.value).toMatchObject({
+      type: INTERNAL_PROBLEM_TYPES.sessionRestoreUnavailable
+    })
     expect(session.notice.value).toBe('Сервис недоступен. Пожалуйста, повторите позже.')
-    expect(loggerMocks.log.mock.calls.filter(([event]) => event === EVENTS.sessionRestoreFailed)).toHaveLength(0)
+    expect(loggerMocks.log.mock.calls.filter(([event]) => event === EVENTS.sessionRestoreFailed)).toHaveLength(1)
     expect(loggerMocks.log.mock.calls.some(([event, attributes, context]) =>
       event === EVENTS.apiRequestFailed
       && attributes['http.response.status_code'] === 503

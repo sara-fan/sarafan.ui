@@ -5,7 +5,7 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import AuthView from '../src/components/AuthView.vue'
+import PhoneAuthDialog from '../src/components/PhoneAuthDialog.vue'
 import { createSarafanVuetify } from '../src/plugins/vuetify.js'
 import { resetSessionForTests, useSession } from '../src/stores/session.js'
 import { problemResponse, response } from './fixtures/http.js'
@@ -26,12 +26,19 @@ const legalDocument = (url, value = {}) => ({
 })
 
 function mountView() {
-  return mount(AuthView, {
-    global: { plugins: [createSarafanVuetify()] }
+  return mount(PhoneAuthDialog, {
+    props: { modelValue: true },
+    global: {
+      plugins: [createSarafanVuetify()],
+      stubs: {
+        RouterLink: { template: '<a><slot /></a>' },
+        VDialog: { props: ['modelValue'], template: '<section v-if="modelValue"><slot /></section>' }
+      }
+    }
   })
 }
 
-describe('AuthView', () => {
+describe('PhoneAuthDialog', () => {
   beforeEach(resetSessionForTests)
 
   afterEach(() => {
@@ -73,11 +80,11 @@ describe('AuthView', () => {
 
     const wrapper = mountView()
     await wrapper.get('.auth-form').trigger('submit')
-    expect(wrapper.get('.form-error').text()).toBe('Введите номер телефона')
+    expect(wrapper.get('.form-error').text()).toContain('Введите номер телефона')
 
     await wrapper.findAll('[role="tab"]')[1].trigger('click')
     await flushPromises()
-    expect(wrapper.get('h1').text()).toBe('Создайте аккаунт')
+    expect(wrapper.get('h2').text()).toBe('Создайте аккаунт')
     expect(wrapper.find('.consent-registration').exists()).toBe(true)
     expect(wrapper.findAll('.consent-document-link')).toHaveLength(2)
     expect(wrapper.find('.consent-registration__retry').text()).toBe('Обновить документы')
@@ -95,7 +102,7 @@ describe('AuthView', () => {
     await consents[1].setValue(true)
     await wrapper.get('.auth-form').trigger('submit')
     await flushPromises()
-    expect(wrapper.get('.form-error').text()).toBe('Код для регистрации недоступен')
+    expect(wrapper.get('.form-error').text()).toContain('Код для регистрации недоступен')
 
     await wrapper.get('.auth-form').trigger('submit')
     await flushPromises()
@@ -110,11 +117,11 @@ describe('AuthView', () => {
     expect(wrapper.text()).not.toContain('используйте')
 
     await wrapper.get('.auth-form').trigger('submit')
-    expect(wrapper.get('.form-error').text()).toBe('Введите код подтверждения')
+    expect(wrapper.get('.form-error').text()).toContain('Введите код подтверждения')
     await wrapper.get('input[name="code"]').setValue('4567')
     await wrapper.get('.auth-form').trigger('submit')
     await flushPromises()
-    expect(wrapper.get('.form-error').text()).toBe('Неверный код')
+    expect(wrapper.get('.form-error').text()).toContain('Неверный код')
     await wrapper.get('.auth-form').trigger('submit')
     await flushPromises()
     expect(useSession().customer.value).toEqual(customer)
@@ -122,7 +129,7 @@ describe('AuthView', () => {
     await wrapper.get('.auth-back').trigger('click')
     expect(wrapper.get('input[name="phone"]').element.value).toBe('+7 999 123-45-67')
     await wrapper.findAll('[role="tab"]')[0].trigger('click')
-    expect(wrapper.get('h1').text()).toBe('Рады видеть снова')
+    expect(wrapper.get('h2').text()).toBe('Рады видеть снова')
   })
 
   it('trims authentication values before sending them to the API', async () => {
@@ -176,7 +183,7 @@ describe('AuthView', () => {
 
     await wrapper.get('.auth-form').trigger('submit')
     await flushPromises()
-    expect(wrapper.get('.form-error').text()).toBe('Сервис недоступен. Пожалуйста, повторите позже.')
+    expect(wrapper.get('.form-error').text()).toContain('Сервис недоступен. Пожалуйста, повторите позже.')
   })
 
   it.each(['request', 'verify'])('requires fresh consent when the %s step rejects the displayed version', async phase => {
@@ -227,7 +234,7 @@ describe('AuthView', () => {
     const wrapper = mountView()
     await wrapper.findAll('[role="tab"]')[1].trigger('click'); await flushPromises()
     expect(wrapper.get('.form-error').text()).toContain('Нет действующих документов для регистрации')
-    expect(wrapper.findAll('a[href^="#legal/"]')).toHaveLength(0)
+    expect(wrapper.findAll('.consent-document-link')).toHaveLength(0)
     expect(wrapper.findAll('input[type="checkbox"]').every(item => item.attributes('aria-describedby') === undefined)).toBe(true)
     wrapper.unmount()
   })

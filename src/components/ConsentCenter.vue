@@ -4,17 +4,20 @@
 // This file is a part of the Sarafan application
 
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { useSession } from '../stores/session.js'
 import { useConsents } from '../stores/consents.js'
 import { LEGAL_DOCUMENT_KIND, CONSENT_STATUSES, downloadBytes, moscowTime } from '../consentFormatting.js'
 import { normalizeProblem, presentProblem, createInternalProblem } from '../errors/problem.js'
-import ConsentButton from './ConsentButton.vue'
-import ConsentCheckbox from './ConsentCheckbox.vue'
-import ConsentDialog from './ConsentDialog.vue'
+import UiButton from './ui/UiButton.vue'
+import UiSelectionControl from './ui/UiSelectionControl.vue'
+import UiDialog from './ui/UiDialog.vue'
 import LegalDocumentReader from './LegalDocumentReader.vue'
 
 const session = useSession()
 const store = useConsents()
+const route = useRoute()
+const router = useRouter()
 const { cookies, mine, ops, opsProblem, cookieProblem, personalProblem } = store
 const cookieOpen = ref(false)
 const personalOpen = ref(false)
@@ -120,10 +123,13 @@ async function prepareCookieNotice(refreshStatus = false) {
   catch { /* The notice presents a safe, recoverable error. */ }
 }
 
-async function openLegal() {
-  if (globalThis.location.hash === '#consents' && session.customer.value) { await openPersonal(); return }
-  const target = globalThis.location.hash.slice(7)
-  if (!globalThis.location.hash.startsWith('#legal/')) return
+async function openLegal(target = route.params.documentRef) {
+  if (route.name === 'consents') {
+    if (session.customer.value) await openPersonal()
+    else await openCookies()
+    return
+  }
+  if (route.name !== 'legal-document' || typeof target !== 'string') return
   const epoch = ++documentEpoch
   documentOpen.value = true
   document.value = null
@@ -139,13 +145,14 @@ async function openLegal() {
 function closeLegal() {
   documentEpoch++
   documentOpen.value = false
-  globalThis.history.replaceState(null, '', globalThis.location.pathname + globalThis.location.search)
+  if (route.name === 'legal-document') router.replace({ name: 'home' })
   if (cookieRequired.value && !cookieDocument.value) prepareCookieNotice()
 }
 
 async function download(value) { await perform(async () => downloadBytes(await store.source(value.id), value.id)) }
 
 async function openCookies() {
+  personalOpen.value = false
   cookieOpen.value = true
   categories.value = []
   resetChoice()
@@ -165,6 +172,7 @@ async function chooseCookies(decision) {
     resetChoice()
     categories.value = []
     cookieOpen.value = false
+    if (route.name === 'consents') await router.replace({ name: 'home' })
   }, async () => {
     categories.value = []
     cookieDocument.value = null
@@ -174,6 +182,7 @@ async function chooseCookies(decision) {
 }
 
 async function showPersonal(refreshMine) {
+  cookieOpen.value = false
   personalOpen.value = true
   accepted.value = false
   personalDocument.value = null
@@ -187,7 +196,7 @@ async function openPersonal() { await showPersonal(true) }
 
 function closePersonal() {
   personalOpen.value = false
-  if (globalThis.location.hash === '#consents') globalThis.history.replaceState(null, '', globalThis.location.pathname + globalThis.location.search)
+  if (route.name === 'consents') router.replace({ name: 'home' })
 }
 
 async function grant() {
@@ -234,7 +243,7 @@ watch(() => session.customer.value?.id, async (id, _previous, cleanup) => {
   try {
     if (store.serviceAllowed.value) await store.associate()
     if (active) await store.loadMine()
-    if (active && globalThis.location.hash === '#consents' && !personalOpen.value) await showPersonal(false)
+    if (active && route.name === 'consents' && !personalOpen.value) await showPersonal(false)
   }
   catch (error) { if (active) problem.value = normalizeProblem(error) }
 }, { immediate:true })
@@ -249,17 +258,33 @@ watch(cookieRequired, (required, previous) => {
 })
 
 onMounted(async () => {
-  if (globalThis.location.hash === '#consents' || globalThis.location.hash.startsWith('#legal/')) await openLegal()
+  if (route.name === 'consents' || route.name === 'legal-document') await openLegal()
   else await refreshOps()
-  globalThis.addEventListener('hashchange', openLegal)
   globalThis.addEventListener('focus', visible)
   globalThis.document.addEventListener('visibilitychange', visible)
 })
 
+watch(
+  () => [route.name, route.params.documentRef],
+  async ([name, target], _previous, cleanup) => {
+    let active = true
+    cleanup(() => { active = false })
+    if (name === 'legal-document') {
+      await openLegal(target)
+      if (!active) documentEpoch++
+    } else if (name === 'consents') {
+      await openLegal()
+    } else {
+      documentEpoch++
+      documentOpen.value = false
+      personalOpen.value = false
+    }
+  }
+)
+
 onUnmounted(() => {
   documentEpoch++
   cookieDocumentEpoch++
-  globalThis.removeEventListener('hashchange', openLegal)
   globalThis.removeEventListener('focus', visible)
   globalThis.document.removeEventListener('visibilitychange', visible)
   store.dispose()
@@ -267,38 +292,6 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <nav
-    v-if="store.serviceAllowed.value && !session.customer.value"
-    class="consent-utilities"
-    aria-label="Документы и согласия"
-  >
-    <div class="consent-utility-links">
-      <a
-        v-for="item in ops?.kinds || []"
-        :key="item.value"
-        :href="`#legal/${item.routeAlias}`"
-      >{{ item.name }}</a>
-    </div>
-    <ConsentButton
-      variant="quiet"
-      @click="openCookies"
-    >
-      Настройки куки
-    </ConsentButton>
-    <p
-      v-if="opsProblem"
-      role="alert"
-    >
-      {{ presentProblem(opsProblem) }}
-      <ConsentButton
-        variant="quiet"
-        @click="refreshOps"
-      >
-        Повторить загрузку документов
-      </ConsentButton>
-    </p>
-  </nav>
-
   <section
     v-if="cookieRequired && !cookieOpen && !documentOpen && !personalOpen"
     class="cookie-notice"
@@ -320,7 +313,7 @@ onUnmounted(() => {
       v-if="cookieDocument"
       class="cookie-notice__choices"
     >
-      <ConsentCheckbox
+      <UiSelectionControl
         v-for="category in cookieGrantCategories"
         :key="category"
         :model-value="categories.includes(category)"
@@ -329,49 +322,51 @@ onUnmounted(() => {
       >
         {{ store.cookieCategoryName(category) }}
         <small>Необходимы для входа, безопасности и работы сервиса.</small>
-      </ConsentCheckbox>
+      </UiSelectionControl>
     </div>
     <div class="cookie-notice__actions">
-      <ConsentButton
+      <UiButton
         variant="primary"
         :disabled="busy || cookieDocumentBusy || !cookieDocument || !canGrantCookies"
         @click="chooseCookies('grant')"
       >
         Принять обязательные куки
-      </ConsentButton>
-      <ConsentButton
+      </UiButton>
+      <UiButton
         v-if="cookieCanRefuse"
         variant="secondary"
         :disabled="busy || cookieDocumentBusy || !cookieDocument"
         @click="chooseCookies('refuse')"
       >
         Отказаться
-      </ConsentButton>
-      <ConsentButton
+      </UiButton>
+      <UiButton
         variant="quiet"
         :disabled="busy"
         @click="openCookies"
       >
         Настроить куки
-      </ConsentButton>
-      <ConsentButton
+      </UiButton>
+      <UiButton
         v-if="cookieNoticeError"
         variant="quiet"
         :disabled="busy || cookieDocumentBusy"
         @click="prepareCookieNotice(true)"
       >
         Повторить загрузку
-      </ConsentButton>
+      </UiButton>
     </div>
     <nav
       class="consent-utility-links cookie-notice__links"
       aria-label="Юридические документы"
     >
-      <a
+      <RouterLink
         v-for="item in ops?.kinds || []"
         :key="item.value"
-        :href="`#legal/${item.routeAlias}`"
-      >{{ item.name }}</a>
+        :to="{ name: 'legal-document', params: { documentRef: item.routeAlias } }"
+      >
+        {{ item.name }}
+      </RouterLink>
       <button
         v-if="session.customer.value"
         type="button"
@@ -390,7 +385,7 @@ onUnmounted(() => {
     </p>
   </section>
 
-  <ConsentDialog
+  <UiDialog
     v-model="cookieOpen"
     title="Настройки куки"
     title-id="cookie-dialog-title"
@@ -428,7 +423,7 @@ onUnmounted(() => {
     >
       <h3>Новое подтверждение</h3>
       <p>Выберите все обязательные категории. Ранее сделанный выбор не считается подтверждением этой версии.</p>
-      <ConsentCheckbox
+      <UiSelectionControl
         v-for="category in cookieGrantCategories"
         :key="category"
         :model-value="categories.includes(category)"
@@ -436,50 +431,50 @@ onUnmounted(() => {
         @update:model-value="toggleCategory(category, $event)"
       >
         {{ store.cookieCategoryName(category) }}
-      </ConsentCheckbox>
+      </UiSelectionControl>
     </section>
     <template #actions>
-      <ConsentButton
+      <UiButton
         v-if="cookieNeedsGrant"
         variant="primary"
         :disabled="busy || !cookieDocument || !canGrantCookies"
         @click="chooseCookies('grant')"
       >
         Принять обязательные куки
-      </ConsentButton>
-      <ConsentButton
+      </UiButton>
+      <UiButton
         v-if="cookieNeedsGrant && cookieCanRefuse"
         variant="secondary"
         :disabled="busy || !cookieDocument"
         @click="chooseCookies('refuse')"
       >
         Отказаться
-      </ConsentButton>
-      <ConsentButton
+      </UiButton>
+      <UiButton
         v-if="cookies?.status === 'current' && cookies?.documentId"
         variant="danger"
         :disabled="busy"
         @click="chooseCookies('withdraw')"
       >
         Отозвать согласие на куки
-      </ConsentButton>
-      <ConsentButton
+      </UiButton>
+      <UiButton
         variant="quiet"
         :disabled="busy"
         @click="openCookies"
       >
         Обновить документ
-      </ConsentButton>
-      <ConsentButton
+      </UiButton>
+      <UiButton
         variant="secondary"
         @click="cookieOpen = false"
       >
         Закрыть
-      </ConsentButton>
+      </UiButton>
     </template>
-  </ConsentDialog>
+  </UiDialog>
 
-  <ConsentDialog
+  <UiDialog
     :model-value="personalOpen"
     title="Мои согласия и обращения"
     title-id="personal-consent-dialog-title"
@@ -520,25 +515,25 @@ onUnmounted(() => {
       class="consent-section"
     >
       <h3>Подтверждение согласия</h3>
-      <ConsentCheckbox
+      <UiSelectionControl
         :model-value="accepted"
         :disabled="busy"
         @update:model-value="accepted = $event"
       >
         Я даю отдельное согласие на хранение и обработку персональных данных по этому документу
-      </ConsentCheckbox>
+      </UiSelectionControl>
     </section>
     <section class="consent-section">
       <h3>Прекращение использования системы</h3>
       <p>Запрос будет записан для ручной обработки сотрудниками. Его отправка сама по себе не отключает учётную запись, не удаляет данные и не изменяет состояние согласия.</p>
-      <ConsentButton
+      <UiButton
         variant="danger"
         block
         :disabled="busy || withdrawalPending"
         @click="requestWithdrawal"
       >
         Прекратить использовать систему и отозвать согласие на обработку персональных данных
-      </ConsentButton>
+      </UiButton>
       <p
         v-if="mine?.withdrawalRequest"
         class="withdrawal-record"
@@ -560,7 +555,9 @@ onUnmounted(() => {
           :key="event.id"
         >
           {{ store.kindName(event.kind) }} · {{ label(event.decision) }} · {{ moscowTime(event.at) }}
-          <a :href="`#legal/${event.documentId}`">Версия {{ event.displayVersion }}</a>
+          <RouterLink :to="{ name: 'legal-document', params: { documentRef: event.documentId } }">
+            Версия {{ event.displayVersion }}
+          </RouterLink>
           <small v-if="event.associatedAt">Связано с аккаунтом {{ moscowTime(event.associatedAt) }}</small>
         </li>
       </ol>
@@ -569,31 +566,31 @@ onUnmounted(() => {
       </p>
     </section>
     <template #actions>
-      <ConsentButton
+      <UiButton
         v-if="status?.status !== 'current'"
         variant="primary"
         :disabled="busy || !personalDocument || !accepted"
         @click="grant"
       >
         Дать согласие
-      </ConsentButton>
-      <ConsentButton
+      </UiButton>
+      <UiButton
         variant="quiet"
         :disabled="busy"
         @click="openPersonal"
       >
         Обновить
-      </ConsentButton>
-      <ConsentButton
+      </UiButton>
+      <UiButton
         variant="secondary"
         @click="closePersonal"
       >
         Закрыть
-      </ConsentButton>
+      </UiButton>
     </template>
-  </ConsentDialog>
+  </UiDialog>
 
-  <ConsentDialog
+  <UiDialog
     :model-value="documentOpen"
     title="Юридический документ"
     title-id="legal-document-dialog-title"
@@ -612,19 +609,19 @@ onUnmounted(() => {
       @download="download(document)"
     />
     <template #actions>
-      <ConsentButton
+      <UiButton
         variant="quiet"
         :disabled="busy"
-        @click="openLegal"
+        @click="openLegal()"
       >
         Повторить
-      </ConsentButton>
-      <ConsentButton
+      </UiButton>
+      <UiButton
         variant="secondary"
         @click="closeLegal"
       >
         Закрыть
-      </ConsentButton>
+      </UiButton>
     </template>
-  </ConsentDialog>
+  </UiDialog>
 </template>

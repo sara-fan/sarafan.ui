@@ -19,6 +19,7 @@
     "@fontsource-variable/inter": "5.3.0",
     "@sara-fan/ui-shared": "https://github.com/sara-fan/sarafan.ui.shared/releases/download/v0.0.1-review.3/sara-fan-ui-shared-0.0.1.tgz",
     "vue": "3.5.41",
+    "vue-router": "5.3.1",
     "vuetify": "4.1.11"
   },
   "devDependencies": {
