@@ -4,15 +4,12 @@
 // This file is a part of the Sarafan application
 
 import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
-import { RouterLink, useRouter } from 'vue-router'
 
-import { LEGAL_DOCUMENT_KIND } from '../consentFormatting.js'
 import {
   createInternalProblem,
   normalizeProblem,
   presentProblem,
-  problemFieldErrors,
-  suppressProblem
+  problemFieldErrors
 } from '../errors/problem.js'
 import { useConsents } from '../stores/consents.js'
 import { useSession } from '../stores/session.js'
@@ -20,8 +17,7 @@ import UiAlert from '../components/ui/UiAlert.vue'
 import UiButton from '../components/ui/UiButton.vue'
 import UiField from '../components/ui/UiField.vue'
 
-const router = useRouter()
-const { customer, deletePhoto, getPhoto, logout, updateProfile, uploadPhoto } = useSession()
+const { customer, deletePhoto, getPhoto, updateProfile, uploadPhoto } = useSession()
 const consents = useConsents()
 const fields = [
   'lastName', 'firstName', 'patronymic', 'email', 'passportSeries', 'passportNumber',
@@ -33,6 +29,7 @@ const busy = ref(false)
 const problem = ref(null)
 const saved = ref(false)
 const photoUrl = ref('')
+const photoInput = ref(null)
 let photoLoadVersion = 0
 
 const profile = computed(() => customer.value?.profile || {})
@@ -41,10 +38,6 @@ const initials = computed(() => {
   const value = `${profile.value.firstName?.[0] || ''}${profile.value.lastName?.[0] || ''}`.trim()
   return value || 'С'
 })
-const deliveryAddress = computed(() => [profile.value.city, profile.value.address].filter(Boolean).join(', ') || '—')
-const privacyAlias = computed(() => consents.ops.value?.kinds
-  .find(item => item.value === LEGAL_DOCUMENT_KIND.PRIVACY_POLICY)?.routeAlias || '')
-
 function releasePhoto() {
   photoLoadVersion += 1
   if (photoUrl.value) globalThis.URL.revokeObjectURL(photoUrl.value)
@@ -58,6 +51,7 @@ function fillForm() {
 function fieldErrors(field) { return problemFieldErrors(problem.value, field) }
 function display(field) { return profile.value[field] || '—' }
 function captureProblem(value, detail) { problem.value = normalizeProblem(value, { detail }) }
+function openPhotoPicker() { photoInput.value?.click() }
 
 async function loadPhoto() {
   releasePhoto()
@@ -138,14 +132,6 @@ async function removePhoto() {
   }
 }
 
-async function signOut() {
-  try { await logout() }
-  catch (value) {
-    suppressProblem(value, { detail: 'Не удалось завершить сеанс на сервере', operation: 'session.logout' })
-  }
-  await router.replace({ name: 'home' })
-}
-
 watch(() => customer.value?.id, async () => {
   fillForm()
   problem.value = null
@@ -160,19 +146,36 @@ onBeforeUnmount(releasePhoto)
   <main class="page-container profile-view">
     <header class="page-heading profile-heading">
       <div>
-        <p class="page-kicker">
-          ЛИЧНЫЙ КАБИНЕТ
-        </p>
         <h1>Профиль</h1>
         <p>Здесь хранятся данные, которые мы подставим при следующем заказе.</p>
       </div>
       <UiButton
         v-if="!editing"
-        variant="secondary"
+        variant="primary"
         @click="startEditing"
       >
         Редактировать
       </UiButton>
+      <div
+        v-else
+        class="profile-heading__actions"
+      >
+        <UiButton
+          variant="secondary"
+          :disabled="busy"
+          @click="cancelEditing"
+        >
+          Отмена
+        </UiButton>
+        <UiButton
+          type="submit"
+          form="profile-edit-form"
+          variant="primary"
+          :loading="busy"
+        >
+          Сохранить
+        </UiButton>
+      </div>
     </header>
 
     <UiAlert
@@ -188,14 +191,20 @@ onBeforeUnmount(releasePhoto)
       Профиль сохранён
     </UiAlert>
 
-    <form
-      v-if="editing"
+    <component
+      :is="editing ? 'form' : 'div'"
+      :id="editing ? 'profile-edit-form' : undefined"
       class="profile-layout"
       @submit.prevent="save"
     >
-      <section class="profile-section">
-        <h2>Аккаунт</h2>
-        <div class="profile-account">
+      <section
+        class="profile-account-panel"
+        aria-labelledby="profile-account-title"
+      >
+        <h2 id="profile-account-title">
+          Аккаунт
+        </h2>
+        <div class="profile-account-panel__summary">
           <span class="profile-avatar">
             <img
               v-if="photoUrl"
@@ -204,217 +213,194 @@ onBeforeUnmount(releasePhoto)
             >
             <span v-else>{{ initials }}</span>
           </span>
-          <div class="profile-photo-actions">
+          <div class="profile-account-panel__identity">
             <strong>{{ customer?.phone || 'Телефон не указан' }}</strong>
-            <small>Телефон аккаунта подтверждён и не редактируется.</small>
-            <label class="photo-action">
-              {{ customer?.hasPhoto ? 'Заменить фото' : 'Загрузить фото' }}
-              <input
-                type="file"
-                accept="image/jpeg,image/png,image/webp"
-                :disabled="busy"
-                @change="selectPhoto"
-              >
-            </label>
-            <button
-              v-if="customer?.hasPhoto"
-              class="photo-remove"
-              type="button"
-              :disabled="busy"
-              @click="removePhoto"
-            >
-              Удалить
-            </button>
+            <small>Телефон подтверждён</small>
           </div>
         </div>
+        <p
+          v-if="!editing"
+          class="profile-account-panel__email-value"
+        >
+          <span>Электронная почта</span>
+          <strong>{{ display('email') }}</strong>
+        </p>
         <UiField
+          v-if="editing"
           v-model="form.email"
+          class="profile-account-panel__email"
           label="Электронная почта"
           type="email"
           maxlength="254"
           :errors="fieldErrors('email')"
         />
-      </section>
-
-      <section class="profile-section">
-        <h2>Получатель</h2>
-        <div class="profile-form-grid">
-          <UiField
-            v-model="form.firstName"
-            label="Имя"
-            maxlength="100"
-            :errors="fieldErrors('firstName')"
-          />
-          <UiField
-            v-model="form.lastName"
-            label="Фамилия"
-            maxlength="100"
-            :errors="fieldErrors('lastName')"
-          />
-          <UiField
-            v-model="form.patronymic"
-            label="Отчество"
-            maxlength="100"
-            :errors="fieldErrors('patronymic')"
-          />
-        </div>
-      </section>
-
-      <section class="profile-section">
-        <div class="profile-section__heading">
-          <h2>Паспортные данные</h2><p>Нужны для таможенного оформления</p>
-        </div>
-        <div class="profile-form-grid">
-          <UiField
-            v-model="form.inn"
-            label="ИНН"
-            inputmode="numeric"
-            maxlength="12"
-            :errors="fieldErrors('inn')"
-          />
-          <UiField
-            v-model="form.passportSeries"
-            label="Серия паспорта"
-            maxlength="32"
-            :errors="fieldErrors('passportSeries')"
-          />
-          <UiField
-            v-model="form.passportNumber"
-            label="Номер паспорта"
-            maxlength="32"
-            :errors="fieldErrors('passportNumber')"
-          />
-          <UiField
-            v-model="form.passportIssueDate"
-            label="Дата выдачи"
-            type="date"
-            :errors="fieldErrors('passportIssueDate')"
-          />
-          <UiField
-            v-model="form.passportIssuedBy"
-            class="profile-form-grid__wide"
-            label="Кем выдан"
-            multiline
-            maxlength="500"
-            :errors="fieldErrors('passportIssuedBy')"
-          />
-        </div>
-      </section>
-
-      <section class="profile-section">
-        <h2>Доставка</h2>
-        <div class="profile-form-grid">
-          <UiField
-            v-model="form.city"
-            label="Город"
-            maxlength="150"
-            :errors="fieldErrors('city')"
-          />
-          <UiField
-            v-model="form.postalCode"
-            label="Индекс"
-            maxlength="20"
-            :errors="fieldErrors('postalCode')"
-          />
-          <UiField
-            v-model="form.address"
-            class="profile-form-grid__wide"
-            label="Последний адрес"
-            multiline
-            maxlength="500"
-            :errors="fieldErrors('address')"
-          />
-        </div>
-      </section>
-
-      <div class="profile-form-actions">
-        <UiButton
-          variant="secondary"
-          :disabled="busy"
-          @click="cancelEditing"
+        <div
+          v-if="editing"
+          class="profile-photo-actions"
         >
-          Отмена
-        </UiButton>
-        <UiButton
-          type="submit"
-          variant="primary"
-          :loading="busy"
-        >
-          Сохранить
-        </UiButton>
+          <UiButton
+            v-if="customer?.hasPhoto"
+            class="photo-remove"
+            variant="danger"
+            :disabled="busy"
+            @click="removePhoto"
+          >
+            Удалить
+          </UiButton>
+          <UiButton
+            variant="primary"
+            :disabled="busy"
+            @click="openPhotoPicker"
+          >
+            {{ customer?.hasPhoto ? 'Заменить фото' : 'Загрузить фото' }}
+          </UiButton>
+          <input
+            ref="photoInput"
+            class="profile-photo-input"
+            type="file"
+            accept="image/jpeg,image/png,image/webp"
+            :disabled="busy"
+            @change="selectPhoto"
+          >
+        </div>
+      </section>
+
+      <div class="profile-details">
+        <section class="profile-details__section">
+          <h2>Получатель</h2>
+          <div
+            v-if="editing"
+            class="profile-form-grid profile-form-grid--recipient"
+          >
+            <UiField
+              v-model="form.firstName"
+              label="Имя"
+              maxlength="100"
+              :errors="fieldErrors('firstName')"
+            />
+            <UiField
+              v-model="form.patronymic"
+              label="Отчество"
+              maxlength="100"
+              :errors="fieldErrors('patronymic')"
+            />
+            <UiField
+              v-model="form.lastName"
+              label="Фамилия"
+              maxlength="100"
+              :errors="fieldErrors('lastName')"
+            />
+          </div>
+          <dl
+            v-else
+            class="profile-data-grid profile-data-grid--recipient"
+          >
+            <div><dt>Имя</dt><dd>{{ display('firstName') }}</dd></div>
+            <div><dt>Отчество</dt><dd>{{ display('patronymic') }}</dd></div>
+            <div><dt>Фамилия</dt><dd>{{ display('lastName') }}</dd></div>
+          </dl>
+        </section>
+
+        <section class="profile-details__section">
+          <div class="profile-details__heading">
+            <h2>Паспортные данные</h2>
+            <p>Нужны для таможенного оформления</p>
+          </div>
+          <div
+            v-if="editing"
+            class="profile-form-grid"
+          >
+            <UiField
+              v-model="form.inn"
+              label="ИНН"
+              inputmode="numeric"
+              maxlength="12"
+              :errors="fieldErrors('inn')"
+            />
+            <UiField
+              v-model="form.passportSeries"
+              label="Серия паспорта"
+              maxlength="32"
+              :errors="fieldErrors('passportSeries')"
+            />
+            <UiField
+              v-model="form.passportNumber"
+              label="Номер паспорта"
+              maxlength="32"
+              :errors="fieldErrors('passportNumber')"
+            />
+            <UiField
+              v-model="form.passportIssueDate"
+              label="Дата выдачи"
+              type="date"
+              :errors="fieldErrors('passportIssueDate')"
+            />
+            <div class="profile-grid__wide">
+              <UiField
+                v-model="form.passportIssuedBy"
+                label="Кем выдан"
+                multiline
+                :rows="2"
+                maxlength="500"
+                :errors="fieldErrors('passportIssuedBy')"
+              />
+            </div>
+          </div>
+          <dl
+            v-else
+            class="profile-data-grid"
+          >
+            <div><dt>ИНН</dt><dd>{{ display('inn') }}</dd></div>
+            <div><dt>Серия паспорта</dt><dd>{{ display('passportSeries') }}</dd></div>
+            <div><dt>Номер паспорта</dt><dd>{{ display('passportNumber') }}</dd></div>
+            <div><dt>Дата выдачи</dt><dd>{{ display('passportIssueDate') }}</dd></div>
+            <div class="profile-grid__wide">
+              <dt>Кем выдан</dt><dd>{{ display('passportIssuedBy') }}</dd>
+            </div>
+          </dl>
+        </section>
+
+        <section class="profile-details__section">
+          <h2>Доставка</h2>
+          <div
+            v-if="editing"
+            class="profile-form-grid"
+          >
+            <UiField
+              v-model="form.postalCode"
+              label="Индекс"
+              maxlength="20"
+              :errors="fieldErrors('postalCode')"
+            />
+            <UiField
+              v-model="form.city"
+              label="Регион, населённый пункт"
+              maxlength="150"
+              :errors="fieldErrors('city')"
+            />
+            <div class="profile-grid__wide">
+              <UiField
+                v-model="form.address"
+                label="Адрес"
+                multiline
+                :rows="2"
+                maxlength="500"
+                :errors="fieldErrors('address')"
+              />
+            </div>
+          </div>
+          <dl
+            v-else
+            class="profile-data-grid"
+          >
+            <div><dt>Индекс</dt><dd>{{ display('postalCode') }}</dd></div>
+            <div><dt>Регион, населённый пункт</dt><dd>{{ display('city') }}</dd></div>
+            <div class="profile-grid__wide">
+              <dt>Адрес</dt><dd>{{ display('address') }}</dd>
+            </div>
+          </dl>
+        </section>
       </div>
-    </form>
-
-    <div
-      v-else
-      class="profile-layout"
-    >
-      <section class="profile-section">
-        <h2>Аккаунт</h2>
-        <div class="profile-account">
-          <span class="profile-avatar">
-            <img
-              v-if="photoUrl"
-              :src="photoUrl"
-              alt="Фотография профиля"
-            >
-            <span v-else>{{ initials }}</span>
-          </span>
-          <div><strong>{{ customer?.phone || '—' }}</strong><p>{{ display('email') }}</p></div>
-        </div>
-      </section>
-
-      <section class="profile-section">
-        <h2>Получатель</h2>
-        <dl class="profile-data-grid">
-          <div><dt>Имя</dt><dd>{{ display('firstName') }}</dd></div>
-          <div><dt>Фамилия</dt><dd>{{ display('lastName') }}</dd></div>
-          <div><dt>Отчество</dt><dd>{{ display('patronymic') }}</dd></div>
-        </dl>
-      </section>
-
-      <section class="profile-section">
-        <div class="profile-section__heading">
-          <h2>Паспортные данные</h2><p>Нужны для таможенного оформления</p>
-        </div>
-        <dl class="profile-data-grid">
-          <div><dt>ИНН</dt><dd>{{ display('inn') }}</dd></div>
-          <div><dt>Серия паспорта</dt><dd>{{ display('passportSeries') }}</dd></div>
-          <div><dt>Номер паспорта</dt><dd>{{ display('passportNumber') }}</dd></div>
-          <div><dt>Дата выдачи</dt><dd>{{ display('passportIssueDate') }}</dd></div>
-          <div><dt>Кем выдан</dt><dd>{{ display('passportIssuedBy') }}</dd></div>
-        </dl>
-      </section>
-
-      <section class="profile-section">
-        <h2>Доставка</h2>
-        <dl class="profile-data-grid">
-          <div><dt>Последний адрес</dt><dd>{{ deliveryAddress }}</dd></div>
-          <div><dt>Индекс</dt><dd>{{ display('postalCode') }}</dd></div>
-        </dl>
-      </section>
-    </div>
-
-    <nav
-      class="profile-privacy"
-      aria-label="Профиль и конфиденциальность"
-    >
-      <RouterLink
-        v-if="privacyAlias"
-        :to="{ name: 'legal-document', params: { documentRef: privacyAlias } }"
-      >
-        Политика обработки данных
-      </RouterLink>
-      <RouterLink :to="{ name: 'consents' }">
-        Мои согласия и обращения
-      </RouterLink>
-    </nav>
-    <UiButton
-      variant="quiet"
-      class="profile-logout"
-      @click="signOut"
-    >
-      Выйти
-    </UiButton>
+    </component>
   </main>
 </template>

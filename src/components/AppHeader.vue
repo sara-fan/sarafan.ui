@@ -6,11 +6,13 @@
 import { ref, watch } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
 
+import BrandLockup from './BrandLockup.vue'
+
 defineProps({
   authenticated: { type: Boolean, default: false },
   authenticationAvailable: { type: Boolean, default: true }
 })
-defineEmits(['authenticate'])
+defineEmits(['authenticate', 'logout'])
 
 const route = useRoute()
 const menuOpen = ref(false)
@@ -19,13 +21,9 @@ watch(() => route.fullPath, () => { menuOpen.value = false })
 
 <template>
   <header class="app-header">
-    <RouterLink
+    <BrandLockup
       class="app-header__brand"
-      :to="{ name: 'home' }"
-      aria-label="Сарафан — главная"
-    >
-      Сарафан
-    </RouterLink>
+    />
     <div class="app-header__actions">
       <nav
         v-if="authenticated"
@@ -38,7 +36,23 @@ watch(() => route.fullPath, () => { menuOpen.value = false })
         <RouterLink :to="{ name: 'profile' }">
           Профиль
         </RouterLink>
+        <button
+          class="app-header__nav-action"
+          type="button"
+          @click="$emit('logout')"
+        >
+          Выйти
+        </button>
       </nav>
+      <button
+        v-if="!authenticated"
+        class="app-header__login"
+        type="button"
+        :disabled="!authenticationAvailable"
+        @click="$emit('authenticate')"
+      >
+        Войти
+      </button>
       <span
         class="global-support"
         aria-label="Поддержка недоступна в демонстрационной версии"
@@ -49,15 +63,6 @@ watch(() => route.fullPath, () => { menuOpen.value = false })
         >?</span>
         <span>Поддержка</span>
       </span>
-      <button
-        v-if="!authenticated"
-        class="app-header__login"
-        type="button"
-        :disabled="!authenticationAvailable"
-        @click="$emit('authenticate')"
-      >
-        Войти
-      </button>
       <button
         v-if="authenticated"
         class="app-header__menu-button"
@@ -87,6 +92,12 @@ watch(() => route.fullPath, () => { menuOpen.value = false })
       <RouterLink :to="{ name: 'profile' }">
         Профиль
       </RouterLink>
+      <button
+        type="button"
+        @click="$emit('logout')"
+      >
+        Выйти
+      </button>
     </nav>
   </header>
 </template>

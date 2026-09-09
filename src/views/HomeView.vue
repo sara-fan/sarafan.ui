@@ -7,7 +7,6 @@ import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 
 import PublicInfoBlock from '../components/PublicInfoBlock.vue'
-import SiteFooter from '../components/SiteFooter.vue'
 import UiButton from '../components/ui/UiButton.vue'
 import UiField from '../components/ui/UiField.vue'
 
@@ -79,5 +78,4 @@ function begin() {
 
     <PublicInfoBlock />
   </main>
-  <SiteFooter />
 </template>

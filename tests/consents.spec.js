@@ -10,7 +10,7 @@ const id = '11111111-1111-1111-1111-111111111111'
 const document = { id, kind:LEGAL_DOCUMENT_KIND.COOKIE_CONSENT, contentHash:'a'.repeat(64), html:'<p>Текст</p>', cookieCategories:[0] }
 const now = '2026-09-07T12:00:00Z'
 const ops = { kinds:[
-  { value:0, name:'Согласие на куки', routeAlias:'cookie-consent' },
+  { value:0, name:'Согласие на использование куки', routeAlias:'cookie-consent' },
   { value:1, name:'Согласие на обработку персональных данных', routeAlias:'personal-data-consent' },
   { value:2, name:'Пользовательское соглашение', routeAlias:'user-agreement' },
   { value:3, name:'Правила заказа товаров', routeAlias:'order-rules' },

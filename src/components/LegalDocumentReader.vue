@@ -5,10 +5,8 @@
 import { computed, defineComponent, ref } from 'vue'
 import { documentNodes, moscowTime } from '../consentFormatting.js'
 import { presentProblem } from '../errors/problem.js'
-import UiButton from './ui/UiButton.vue'
 const root = ref(null)
 const props = defineProps({ document: { type:Object, required:true } })
-defineEmits(['download'])
 const parsed = computed(() => {
   try { return { nodes:documentNodes(props.document.html), problem:null } }
   catch (problem) { return { nodes:[], problem } }
@@ -22,6 +20,7 @@ function printDocument() {
   try { globalThis.print() }
   finally { printable.remove() }
 }
+defineExpose({ printDocument })
 </script>
 <template>
   <article
@@ -31,20 +30,6 @@ function printDocument() {
   >
     <header class="legal-document__meta">
       <p>Версия {{ document.displayVersion }} · {{ moscowTime(document.effectiveAt) }}</p>
-      <div class="legal-document__actions">
-        <UiButton
-          variant="quiet"
-          @click="$emit('download')"
-        >
-          Скачать Markdown
-        </UiButton>
-        <UiButton
-          variant="quiet"
-          @click="printDocument"
-        >
-          Печать
-        </UiButton>
-      </div>
     </header>
     <p
       v-if="parsed.problem"

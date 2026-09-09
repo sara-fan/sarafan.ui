@@ -11,7 +11,7 @@ import { resetSessionForTests, useSession } from '../src/stores/session.js'
 import { problemResponse, response } from './fixtures/http.js'
 
 const legalOps = { kinds:[
-  { value:0, name:'Согласие на куки', routeAlias:'cookie-consent' },
+  { value:0, name:'Согласие на использование куки', routeAlias:'cookie-consent' },
   { value:1, name:'Согласие на обработку персональных данных', routeAlias:'personal-data-consent' },
   { value:2, name:'Пользовательское соглашение', routeAlias:'user-agreement' },
   { value:3, name:'Правила заказа товаров', routeAlias:'order-rules' },

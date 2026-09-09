@@ -30,15 +30,15 @@ export function createSarafanVuetify() {
         sarafanLight: {
           dark: false,
           colors: {
-            primary: '#345d75',
-            secondary: '#284b60',
-            background: '#ffffff',
+            primary: '#1ca3e4',
+            secondary: '#2b6fb3',
+            background: '#f3f9fd',
             surface: '#ffffff',
-            'surface-variant': '#f4f6f7',
-            error: '#8a4b4b',
-            info: '#345d75',
-            success: '#3d6757',
-            warning: '#66717d'
+            'surface-variant': '#e5f3fb',
+            error: '#b4234d',
+            info: '#2478b8',
+            success: '#167d9a',
+            warning: '#8a63b8'
           }
         }
       }
