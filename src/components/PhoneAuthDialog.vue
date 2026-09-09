@@ -6,6 +6,7 @@
 import { computed, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 
+import { BRAND_ICON_URL } from '../branding.js'
 import {
   CORE_PROBLEM_TYPES,
   createInternalProblem,
@@ -218,6 +219,14 @@ async function submitCode() {
     max-width="480"
     @update:model-value="emit('update:modelValue', $event)"
   >
+    <template #header>
+      <img
+        class="auth-dialog__brand"
+        :src="BRAND_ICON_URL"
+        alt=""
+        aria-hidden="true"
+      >
+    </template>
     <div
       class="auth-tabs"
       role="tablist"

@@ -87,13 +87,20 @@ describe('shared application chrome and controls', () => {
     const wrapper = mount(AppHeader, { props: { authenticated: true }, global: { plugins: [router] } })
     expect(wrapper.findAll('.global-support')).toHaveLength(1)
     expect(wrapper.findAll('.app-header__desktop-nav a')).toHaveLength(2)
+    expect(wrapper.get('.app-header__nav-action').text()).toBe('Выйти')
+    expect(wrapper.get('.brand-lockup__partner').attributes()).toMatchObject({ href: 'https://gtc.express/', target: '_blank', rel: 'noopener noreferrer' })
     await wrapper.get('.app-header__menu-button').trigger('click')
     expect(wrapper.get('.app-header__menu-button').attributes('aria-expanded')).toBe('true')
     expect(wrapper.findAll('.app-header__mobile-nav a')).toHaveLength(3)
+    await wrapper.get('.app-header__mobile-nav button').trigger('click')
+    expect(wrapper.emitted('logout')).toHaveLength(1)
     await router.push('/profile')
     await flushPromises()
     expect(wrapper.find('.app-header__mobile-nav').exists()).toBe(false)
     await wrapper.setProps({ authenticated: false })
+    const actions = wrapper.get('.app-header__actions').element.children
+    expect(actions[0].classList.contains('app-header__login')).toBe(true)
+    expect(actions[1].classList.contains('global-support')).toBe(true)
     await wrapper.get('.app-header__login').trigger('click')
     expect(wrapper.emitted('authenticate')).toHaveLength(1)
   })
@@ -101,12 +108,13 @@ describe('shared application chrome and controls', () => {
   it('uses server-provided legal aliases and the required partner attribution', async () => {
     const router = await routerAt()
     const wrapper = mount(SiteFooter, { global: { plugins: [router] } })
-    expect(wrapper.findAll('.site-footer__links a')).toHaveLength(4)
+    expect(wrapper.findAll('.site-footer__links a')).toHaveLength(3)
     expect(wrapper.get('a[href="/legal/privacy-policy"]').exists()).toBe(true)
     expect(wrapper.get('a[href="https://gtc.express/"]').text()).toBe('Совместно с GTC')
+    expect(wrapper.get('.brand-lockup__partner').attributes('target')).toBe('_blank')
     h.store.ops.value = null
     await flushPromises()
-    expect(wrapper.findAll('.site-footer__links a')).toHaveLength(2)
+    expect(wrapper.findAll('.site-footer__links a')).toHaveLength(1)
   })
 
   it('covers button, alert, field, selection, and dialog states', async () => {

@@ -7,6 +7,7 @@ import { computed } from 'vue'
 import { RouterLink } from 'vue-router'
 
 import { useConsents } from '../stores/consents.js'
+import BrandLockup from './BrandLockup.vue'
 
 const { ops } = useConsents()
 const documents = computed(() => ops.value?.kinds || [])
@@ -15,15 +16,13 @@ const documents = computed(() => ops.value?.kinds || [])
 <template>
   <footer class="site-footer">
     <div class="site-footer__inner">
-      <RouterLink
+      <BrandLockup
         class="site-footer__brand"
-        :to="{ name: 'home' }"
-      >
-        Сарафан
-      </RouterLink>
+        inverse
+      />
       <nav
         class="site-footer__links"
-        aria-label="Документы и партнёры"
+        aria-label="Юридические документы"
       >
         <RouterLink
           v-for="document in documents"
@@ -35,11 +34,6 @@ const documents = computed(() => ops.value?.kinds || [])
         <RouterLink :to="{ name: 'consents' }">
           Настройки куки
         </RouterLink>
-        <a
-          href="https://gtc.express/"
-          target="_blank"
-          rel="noopener noreferrer"
-        >Совместно с GTC</a>
       </nav>
     </div>
   </footer>

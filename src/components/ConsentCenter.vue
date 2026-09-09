@@ -7,7 +7,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { useSession } from '../stores/session.js'
 import { useConsents } from '../stores/consents.js'
-import { LEGAL_DOCUMENT_KIND, CONSENT_STATUSES, downloadBytes, moscowTime } from '../consentFormatting.js'
+import { LEGAL_DOCUMENT_KIND, CONSENT_STATUSES, moscowTime } from '../consentFormatting.js'
 import { normalizeProblem, presentProblem, createInternalProblem } from '../errors/problem.js'
 import UiButton from './ui/UiButton.vue'
 import UiSelectionControl from './ui/UiSelectionControl.vue'
@@ -23,6 +23,7 @@ const cookieOpen = ref(false)
 const personalOpen = ref(false)
 const documentOpen = ref(false)
 const document = ref(null)
+const legalReader = ref(null)
 const cookieDocument = ref(null)
 const personalDocument = ref(null)
 const categories = ref([])
@@ -60,9 +61,9 @@ const cookieNoticeError = computed(() => {
 const cookieNoticeTitle = computed(() => {
   if (cookieNoticeError.value && !cookieDocument.value) return 'Не удалось загрузить настройки куки'
   if (cookies.value?.status === 'refused') return 'Обязательные куки отклонены'
-  if (cookies.value?.status === 'withdrawn') return 'Согласие на куки отозвано'
-  if (cookies.value?.status === 'renewal-required') return 'Требуется новое согласие на куки'
-  return 'Согласие на куки'
+  if (cookies.value?.status === 'withdrawn') return 'Согласие на использование куки отозвано'
+  if (cookies.value?.status === 'renewal-required') return 'Требуется новое согласие на использование куки'
+  return 'Согласие на использование куки'
 })
 const cookieNoticeCopy = computed(() => {
   if (['refused', 'withdrawn'].includes(cookies.value?.status)) {
@@ -149,7 +150,7 @@ function closeLegal() {
   if (cookieRequired.value && !cookieDocument.value) prepareCookieNotice()
 }
 
-async function download(value) { await perform(async () => downloadBytes(await store.source(value.id), value.id)) }
+function printLegal() { legalReader.value?.printDocument() }
 
 async function openCookies() {
   personalOpen.value = false
@@ -414,7 +415,6 @@ onUnmounted(() => {
       <h3>Актуальный документ</h3>
       <LegalDocumentReader
         :document="cookieDocument"
-        @download="download(cookieDocument)"
       />
     </section>
     <section
@@ -456,7 +456,7 @@ onUnmounted(() => {
         :disabled="busy"
         @click="chooseCookies('withdraw')"
       >
-        Отозвать согласие на куки
+        Отозвать согласие на использование куки
       </UiButton>
       <UiButton
         variant="quiet"
@@ -507,7 +507,6 @@ onUnmounted(() => {
       <h3>Актуальный документ</h3>
       <LegalDocumentReader
         :document="personalDocument"
-        @download="download(personalDocument)"
       />
     </section>
     <section
@@ -592,8 +591,8 @@ onUnmounted(() => {
 
   <UiDialog
     :model-value="documentOpen"
-    title="Юридический документ"
-    title-id="legal-document-dialog-title"
+    :title="document?.title || 'Юридический документ'"
+    hide-header
     @update:model-value="!$event && closeLegal()"
   >
     <p
@@ -605,16 +604,16 @@ onUnmounted(() => {
     </p>
     <LegalDocumentReader
       v-if="document"
+      ref="legalReader"
       :document="document"
-      @download="download(document)"
     />
     <template #actions>
       <UiButton
-        variant="quiet"
-        :disabled="busy"
-        @click="openLegal()"
+        v-if="document"
+        variant="secondary"
+        @click="printLegal"
       >
-        Повторить
+        Печать
       </UiButton>
       <UiButton
         variant="secondary"

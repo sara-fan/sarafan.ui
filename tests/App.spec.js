@@ -46,6 +46,7 @@ describe('App routing and privacy gates', () => {
   beforeEach(() => {
     Object.assign(h.session, {
       customer: ref(null),
+      logout: vi.fn().mockResolvedValue(),
       restoreProblem: ref(null),
       restoring: ref(false),
       restoreSession: vi.fn().mockResolvedValue()
@@ -63,6 +64,7 @@ describe('App routing and privacy gates', () => {
     await flushPromises()
     expect(wrapper.text()).toContain('Закажите товар — остальное сделаем мы')
     expect(wrapper.find('.route-gate').exists()).toBe(false)
+    expect(wrapper.findAll('.site-footer')).toHaveLength(1)
     expect(h.session.restoreSession).not.toHaveBeenCalled()
     expect(wrapper.get('.app-header__login').attributes('disabled')).toBeDefined()
     wrapper.findComponent(AppHeader).vm.$emit('authenticate')
@@ -85,6 +87,7 @@ describe('App routing and privacy gates', () => {
     await flushPromises()
     expect(wrapper.text()).toContain('Настройте обязательные куки')
     expect(wrapper.text()).not.toContain('Список заказов будет подключён')
+    expect(wrapper.findAll('.site-footer')).toHaveLength(1)
 
     h.consents.serviceAllowed.value = true
     h.session.restoring.value = true
@@ -112,6 +115,21 @@ describe('App routing and privacy gates', () => {
     expect(wrapper.text()).toContain('Закажите товар — остальное сделаем мы')
   })
 
+  it('returns home from a protected restore failure and closes authentication via v-model', async () => {
+    h.consents.serviceAllowed.value = true
+    h.session.restoreProblem.value = createInternalProblem('sessionRestoreUnavailable')
+    const { router, wrapper } = await mountApp('/orders')
+    await flushPromises()
+    await wrapper.findAll('button').find(item => item.text() === 'На главную').trigger('click')
+    await flushPromises()
+    expect(router.currentRoute.value.name).toBe('home')
+    await wrapper.get('.app-header__login').trigger('click')
+    expect(wrapper.find('.phone-auth-stub').exists()).toBe(true)
+    wrapper.findComponent({ name: 'PhoneAuthDialog' }).vm.$emit('update:modelValue', false)
+    await flushPromises()
+    expect(wrapper.find('.phone-auth-stub').exists()).toBe(false)
+  })
+
   it('keeps recoverable restore failures non-blocking on public routes', async () => {
     h.consents.serviceAllowed.value = true
     h.session.restoreProblem.value = createInternalProblem('sessionRestoreUnavailable')
@@ -131,6 +149,23 @@ describe('App routing and privacy gates', () => {
     expect(wrapper.find('.phone-auth-stub').exists()).toBe(false)
     await wrapper.get('.app-header__login').trigger('click')
     expect(wrapper.find('.phone-auth-stub').exists()).toBe(true)
-    expect(wrapper.get('a[href="https://gtc.express/"]').text()).toBe('Совместно с GTC')
+    expect(wrapper.findAll('a[href="https://gtc.express/"]')).toHaveLength(2)
+    expect(wrapper.findAll('a[href="https://gtc.express/"]').every(link => link.text() === 'Совместно с GTC')).toBe(true)
+  })
+
+  it('logs out from the shared header and returns home even when server logout fails', async () => {
+    h.consents.serviceAllowed.value = true
+    h.session.customer.value = { id: 8, phone: '+79990000008', hasPhoto: false, profile: {} }
+    h.session.logout.mockRejectedValueOnce(createInternalProblem('invalidInput'))
+    const { router, wrapper } = await mountApp('/profile')
+    await flushPromises()
+
+    expect(wrapper.find('.profile-privacy').exists()).toBe(false)
+    expect(wrapper.findAll('.app-header__nav-action')).toHaveLength(1)
+    await wrapper.get('.app-header__nav-action').trigger('click')
+    await flushPromises()
+
+    expect(h.session.logout).toHaveBeenCalledTimes(1)
+    expect(router.currentRoute.value.name).toBe('home')
   })
 })

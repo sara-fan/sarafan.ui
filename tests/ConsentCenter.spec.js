@@ -20,7 +20,7 @@ vi.mock('../src/stores/consents.js', () => ({ useConsents:() => h.store }))
 const id = '11111111-1111-1111-1111-111111111111'
 const document = { id, title:'Согласие', displayVersion:'2', contentHash:'a'.repeat(64), html:'<p>Отдельный текст согласия.</p>', effectiveAt:'2026-09-07T09:00:00Z', cookieCategories:[0] }
 const kinds = [
-  { value:0, name:'Согласие на куки', routeAlias:'cookie-consent' },
+  { value:0, name:'Согласие на использование куки', routeAlias:'cookie-consent' },
   { value:1, name:'Согласие на обработку персональных данных', routeAlias:'personal-data-consent' },
   { value:2, name:'Пользовательское соглашение', routeAlias:'user-agreement' },
   { value:3, name:'Правила заказа товаров', routeAlias:'order-rules' },
@@ -36,7 +36,7 @@ async function click(text) { expect(button(text), text).toBeTruthy(); await butt
 async function mountCenter(path = '/') {
   router = createAppRouter(createMemoryHistory())
   await router.push(path)
-  wrapper = mount(ConsentCenter, { global:{ plugins:[createSarafanVuetify(), router], stubs:{ VDialog:{ props:['modelValue'], template:'<section v-if="modelValue"><slot /></section>' } } } })
+  wrapper = mount(ConsentCenter, { global:{ plugins:[createSarafanVuetify(), router], stubs:{ VDialog:{ props:['modelValue'], emits:['update:modelValue'], template:'<section v-if="modelValue"><slot /><button class="dialog-model-keep" hidden @click.stop="$emit(\'update:modelValue\', true)" /><button class="dialog-model-close" hidden @click.stop="$emit(\'update:modelValue\', false)" /></section>' } } } })
   return wrapper
 }
 beforeEach(() => {
@@ -84,18 +84,20 @@ it('requires explicit mandatory куки consent with the canonical document and
   await click('Отказаться')
   expect(h.store.decideCookies).toHaveBeenLastCalledWith(document, 'refuse', [], expect.any(String))
   h.store.cookies.value = { status:'current', categories:[0], documentId:id }
-  await click('Настроить куки'); await click('Отозвать согласие на куки')
+  await click('Настроить куки'); await click('Отозвать согласие на использование куки')
   expect(h.store.read).toHaveBeenCalledWith(id)
   expect(h.store.decideCookies).toHaveBeenLastCalledWith(document, 'withdraw', [], expect.any(String))
   h.store.cookies.value = { status:'withdrawn', categories:[], documentId:id }
   await nextTick()
-  expect(wrapper.text()).toContain('Согласие на куки отозвано')
-  await click('Настроить куки'); await click('Обновить документ'); await click('Закрыть')
+  expect(wrapper.text()).toContain('Согласие на использование куки отозвано')
+  await click('Настроить куки'); await click('Обновить документ')
+  await wrapper.get('.dialog-model-close').trigger('click'); await flushPromises()
 })
 it('keeps service unavailable and permits retry when the куки document is unavailable', async () => {
   h.store.current.mockResolvedValue({ document:null }); h.store.cookieProblem.value = denied()
   await mountCenter(); await flushPromises()
   expect(button('Повторить загрузку')).toBeTruthy()
+  await click('Повторить загрузку')
   await click('Настроить куки')
   expect(wrapper.text()).toContain('Использование сервиса недоступно')
   expect(button('Отказаться').attributes('disabled')).toBeDefined()
@@ -118,7 +120,7 @@ it('presents renewal copy, unknown statuses, and category deselection safely', a
   await mountCenter(); await flushPromises()
   h.store.cookies.value = { status:'renewal-required', categories:[], documentId:id }
   await nextTick()
-  expect(wrapper.text()).toContain('Требуется новое согласие на куки')
+  expect(wrapper.text()).toContain('Требуется новое согласие на использование куки')
   expect(wrapper.text()).toContain('Документ изменился')
   h.store.cookies.value = { status:'unexpected', categories:[], documentId:id }
   await nextTick()
@@ -152,8 +154,7 @@ it('associates an observed browser, renews personal consent and shows the latest
   await click('Прекратить использовать систему и отозвать согласие на обработку персональных данных')
   expect(h.store.requestWithdrawal).toHaveBeenCalledWith()
   await click('Обновить')
-  await wrapper.findComponent(LegalDocumentReader).vm.$emit('download'); await flushPromises()
-  expect(h.store.source).toHaveBeenCalledWith(id)
+  expect(wrapper.findComponent(LegalDocumentReader).exists()).toBe(true)
   await click('Закрыть')
   h.session.customer.value = null; await flushPromises()
   expect(wrapper.text()).not.toContain('Покупатель')
@@ -175,26 +176,34 @@ it('shows personal-data and withdrawal failures without losing consent choices o
   h.store.current.mockResolvedValue({ document:null }); await click('Обновить')
   expect(wrapper.findComponent(LegalDocumentReader).exists()).toBe(false)
 })
-it('makes immutable and current legal links available without login, including print and download', async () => {
+it('makes immutable and current legal links available without login with compact print and close actions', async () => {
   await mountCenter('/legal/privacy-policy'); await flushPromises()
   expect(h.store.current).toHaveBeenCalledWith(LEGAL_DOCUMENT_KIND.PRIVACY_POLICY)
   expect(wrapper.text()).toContain('Отдельный текст согласия.')
-  await click('Скачать Markdown'); expect(h.store.source).toHaveBeenCalledWith(id)
+  expect(wrapper.text()).not.toContain('Юридический документ')
+  expect(button('Скачать Markdown')).toBeUndefined()
+  expect(button('Повторить')).toBeUndefined()
+  expect(button('Печать').classes()).toEqual(expect.arrayContaining(['ui-button--secondary']))
+  expect(button('Закрыть').classes()).toEqual(expect.arrayContaining(['ui-button--secondary']))
   vi.stubGlobal('print', vi.fn()); await click('Печать'); expect(globalThis.print).toHaveBeenCalled()
-  await click('Повторить'); await click('Закрыть'); expect(router.currentRoute.value.name).toBe('home')
+  await wrapper.get('.dialog-model-keep').trigger('click'); expect(router.currentRoute.value.name).toBe('legal-document')
+  await wrapper.get('.dialog-model-close').trigger('click'); await flushPromises(); expect(router.currentRoute.value.name).toBe('home')
   await router.push(`/legal/${id}`); await flushPromises()
   expect(h.store.read).toHaveBeenCalledWith(id)
   await click('Закрыть')
   h.store.current.mockResolvedValue({ document:null })
   await router.push('/legal/privacy-policy'); await flushPromises()
   expect(wrapper.text()).toContain('Документ пока не действует')
-  h.store.current.mockRejectedValueOnce(denied()); await click('Повторить')
+  await click('Закрыть')
+  h.store.current.mockRejectedValueOnce(denied()); await router.push('/legal/privacy-policy'); await flushPromises()
   expect(wrapper.text()).toContain('Сервис недоступен')
 })
 it('ignores a document response after closing and refreshes browser consent on foreground', async () => {
   let resolve
   h.store.current.mockImplementationOnce(() => new Promise(r => { resolve = r }))
-  await mountCenter('/legal/privacy-policy'); await nextTick(); await click('Закрыть'); resolve({ document }); await flushPromises()
+  await mountCenter('/legal/privacy-policy'); await nextTick()
+  expect(() => state().printLegal()).not.toThrow()
+  await click('Закрыть'); resolve({ document }); await flushPromises()
   expect(wrapper.findComponent(LegalDocumentReader).exists()).toBe(false)
   vi.spyOn(globalThis.document, 'visibilityState', 'get').mockReturnValue('hidden')
   globalThis.document.dispatchEvent(new globalThis.Event('visibilitychange')); expect(h.store.loadCookies).not.toHaveBeenCalled()
@@ -211,6 +220,9 @@ it('renders the canonical document heading once and restores focus after a dialo
   wrapper = mount(LegalDocumentReader, { props:{ document:{ ...document, html:'<h1>Согласие</h1><p>Текст.</p>' } } })
   expect(wrapper.findAll('h1, h2')).toHaveLength(1)
   expect(wrapper.get('h1').text()).toBe('Согласие')
+  vi.stubGlobal('print', vi.fn())
+  wrapper.vm.printDocument()
+  expect(globalThis.print).toHaveBeenCalled()
   wrapper.unmount()
 
   const opener = globalThis.document.createElement('button')
@@ -236,6 +248,9 @@ it('renders the canonical document heading once and restores focus after a dialo
     vi.stubGlobal('HTMLElement', HTMLElementCtor)
   }
   opener.remove()
+
+  await wrapper.setProps({ modelValue:true, hideHeader:true })
+  expect(wrapper.find('.ui-dialog__header').exists()).toBe(false)
 })
 
 it('opens consent management from the profile link and clears its hash when closed', async () => {
@@ -254,6 +269,8 @@ it('opens a consent hash that was present before the customer session was restor
   await flushPromises()
   expect(button('Дать согласие')).toBeTruthy()
   expect(h.store.current).toHaveBeenCalledWith(LEGAL_DOCUMENT_KIND.PERSONAL_DATA_CONSENT)
+  await wrapper.get('.dialog-model-close').trigger('click'); await flushPromises()
+  expect(router.currentRoute.value.name).toBe('home')
 })
 
 it('reuses consent decision keys while the withdrawal request has no client key', async () => {

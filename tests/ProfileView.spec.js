@@ -86,7 +86,6 @@ describe('ProfileView', () => {
       if (url === '/api/v1/customers/me/photo' && options.method === 'PUT') return Promise.resolve(response(204))
       if (url === '/api/v1/customers/me/photo' && options.method === 'DELETE') return Promise.resolve(response(204))
       if (url === '/api/v1/customers/me/photo') return Promise.resolve(response(200, photo))
-      if (url === '/api/v1/auth/logout') return Promise.resolve(response(204))
       throw new Error(`Unexpected request: ${url}`)
     })
     vi.stubGlobal('fetch', fetch)
@@ -95,12 +94,39 @@ describe('ProfileView', () => {
     const wrapper = mountView()
     await vi.waitFor(() => expect(wrapper.find('.profile-avatar img').exists()).toBe(true))
     expect(wrapper.text()).toContain('Старая')
-    expect(wrapper.findAll('.profile-privacy a')).toHaveLength(2)
+    expect(wrapper.find('.profile-privacy').exists()).toBe(false)
+    expect(wrapper.findAll('.profile-account-panel')).toHaveLength(1)
+    expect(wrapper.findAll('.profile-details')).toHaveLength(1)
+    expect(wrapper.findAll('.profile-details__section')).toHaveLength(3)
+    expect(wrapper.findAll('.profile-data-grid dd')).toHaveLength(11)
+    expect(wrapper.findAll('.profile-data-grid .profile-grid__wide')).toHaveLength(2)
+    expect(wrapper.findAll('.profile-details__section')[0].findAll('dt').map(item => item.text())).toEqual([
+      'Имя', 'Отчество', 'Фамилия'
+    ])
+    expect(wrapper.findAll('.profile-details__section')[2].findAll('dt').map(item => item.text())).toEqual([
+      'Индекс', 'Регион, населённый пункт', 'Адрес'
+    ])
+    expect(wrapper.get('.profile-account-panel__email-value strong').text()).toBe('—')
+    expect(wrapper.text()).toContain('Регион, населённый пункт')
+    expect(wrapper.findAll('button').find(item => item.text() === 'Редактировать').classes()).toContain('ui-button--primary')
     await startEditing(wrapper)
+    expect(wrapper.findAll('.profile-account-panel')).toHaveLength(1)
+    expect(wrapper.findAll('.profile-details')).toHaveLength(1)
+    expect(wrapper.get('form').classes()).toContain('profile-layout')
+    expect(wrapper.get('form').attributes('id')).toBe('profile-edit-form')
+    expect(wrapper.find('.profile-form-actions').exists()).toBe(false)
+    expect(wrapper.findAll('form .profile-grid__wide')).toHaveLength(2)
+    expect(wrapper.findAll('button').find(item => item.text() === 'Сохранить').attributes()).toMatchObject({ type: 'submit', form: 'profile-edit-form' })
+    expect(wrapper.findAll('button').find(item => item.text() === 'Заменить фото').classes()).toContain('ui-button--primary')
+    expect(wrapper.get('.photo-remove').classes()).toContain('ui-button--danger')
+    const photoInputElement = wrapper.get('input[type="file"]').element
+    const photoInputClick = vi.spyOn(photoInputElement, 'click')
+    await wrapper.findAll('button').find(item => item.text() === 'Заменить фото').trigger('click')
+    expect(photoInputClick).toHaveBeenCalledTimes(1)
 
     const values = [
-      'maria@example.test', 'Мария', 'Новая', 'Ивановна', '770123456789',
-      '45 00', '123456', '2020-01-02', 'ОВД', 'Москва', '101000', 'Тверская, 1'
+      'maria@example.test', 'Мария', 'Ивановна', 'Новая', '770123456789',
+      '45 00', '123456', '2020-01-02', 'ОВД', '101000', 'Москва', 'Тверская, 1'
     ]
     const inputs = wrapper.findAll('form .ui-field__control')
     expect(inputs).toHaveLength(values.length)
@@ -123,8 +149,7 @@ describe('ProfileView', () => {
     expect(globalThis.URL.revokeObjectURL).toHaveBeenCalled()
 
     await wrapper.findAll('button').find(item => item.text() === 'Отмена').trigger('click')
-    await wrapper.findAll('button').find(item => item.text() === 'Выйти').trigger('click')
-    expect(fetch.mock.calls.some(([url]) => url === '/api/v1/auth/logout')).toBe(true)
+    expect(wrapper.findAll('button').some(item => item.text() === 'Выйти')).toBe(false)
   })
 
   it('retains editable data when current personal-data consent is required', async () => {

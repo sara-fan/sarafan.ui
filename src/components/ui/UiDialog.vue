@@ -9,6 +9,7 @@ const props = defineProps({
   modelValue: { type: Boolean, required: true },
   title: { type: String, required: true },
   titleId: { type: String, default: '' },
+  hideHeader: { type: Boolean, default: false },
   persistent: { type: Boolean, default: false },
   maxWidth: { type: [String, Number], default: 520 }
 })
@@ -35,11 +36,15 @@ watch(() => props.modelValue, async (open, previous) => {
     :max-width="maxWidth"
     scrollable
     :persistent="persistent"
-    :aria-labelledby="titleId || generatedTitleId"
+    :aria-labelledby="hideHeader ? undefined : titleId || generatedTitleId"
+    :aria-label="hideHeader ? title : undefined"
     @update:model-value="emit('update:modelValue', $event)"
   >
     <v-card class="ui-dialog">
-      <header class="ui-dialog__header">
+      <header
+        v-if="!hideHeader"
+        class="ui-dialog__header"
+      >
         <h2 :id="titleId || generatedTitleId">
           {{ title }}
         </h2>
