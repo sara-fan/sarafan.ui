@@ -57,6 +57,9 @@ For other comment-capable formats, use the same three lines with that format's n
 ## Shared infrastructure and UI behavior
 
 - Use @sara-fan/ui-shared for problem parsing, HTTP transport, tracing and privacy-safe diagnostics. Keep identity state, runtime configuration, route allowlists, fixed event catalogues and domain-specific problems in this application.
+- Declare route access through `meta.access`: public and limited legal/consent routes render without waiting for session restoration, while customer routes must pass the cookie and session gates before their component mounts.
+- Keep reusable controls in `src/components/ui`, name them by generic UI role, and style them with the shared `--sarafan-*` semantic tokens. Domain components may compose these controls but must not duplicate their visual states.
+- Use Vue Router for application and legal/consent navigation. Route-focused component tests use `createMemoryHistory` so bookmarks and access gates are deterministic and do not mutate browser history.
 - Every user-relevant failure has one presentation owner. Stores reject transport/server failures; no empty catches or unobserved promise rejections. Expected suppression uses the named shared policy.
 - Render one shared page alert immediately below the heading. Put field errors beneath controls without shrinking inputs. Failed forms retain values; navigate only after success. Clear stale alerts on successful navigation.
 - Use shared confirmation/dialog primitives and Sarafan semantic colors, explicit action labels and keyboard-accessible controls. Color is never the only indication of meaning.

@@ -93,8 +93,7 @@ async function restoreSession() {
   try {
     await refreshSession()
   } catch (error) {
-    if (error?.type !== INTERNAL_PROBLEM_TYPES.serviceUnavailable
-      && (!(error instanceof ProblemError) || error.type !== CORE_PROBLEM_TYPES.invalidRefreshToken)) {
+    if (!(error instanceof ProblemError) || error.type !== CORE_PROBLEM_TYPES.invalidRefreshToken) {
       const problem = createInternalProblem('sessionRestoreUnavailable', { cause: error })
       restoreProblem.value = problem
       uiLogger.log(

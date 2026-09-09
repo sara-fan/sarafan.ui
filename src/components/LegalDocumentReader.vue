@@ -5,7 +5,7 @@
 import { computed, defineComponent, ref } from 'vue'
 import { documentNodes, moscowTime } from '../consentFormatting.js'
 import { presentProblem } from '../errors/problem.js'
-import ConsentButton from './ConsentButton.vue'
+import UiButton from './ui/UiButton.vue'
 const root = ref(null)
 const props = defineProps({ document: { type:Object, required:true } })
 defineEmits(['download'])
@@ -32,18 +32,18 @@ function printDocument() {
     <header class="legal-document__meta">
       <p>Версия {{ document.displayVersion }} · {{ moscowTime(document.effectiveAt) }}</p>
       <div class="legal-document__actions">
-        <ConsentButton
+        <UiButton
           variant="quiet"
           @click="$emit('download')"
         >
           Скачать Markdown
-        </ConsentButton>
-        <ConsentButton
+        </UiButton>
+        <UiButton
           variant="quiet"
           @click="printDocument"
         >
           Печать
-        </ConsentButton>
+        </UiButton>
       </div>
     </header>
     <p

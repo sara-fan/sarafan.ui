@@ -22,11 +22,16 @@ defineProps({
   <button
     v-bind="$attrs"
     :type="type"
-    class="consent-button"
-    :class="[`consent-button--${variant}`, { 'consent-button--block': block }]"
+    class="ui-button"
+    :class="[`ui-button--${variant}`, { 'ui-button--block': block }]"
     :disabled="disabled || loading"
     :aria-busy="loading || undefined"
   >
+    <span
+      v-if="loading"
+      class="ui-button__spinner"
+      aria-hidden="true"
+    />
     <slot />
   </button>
 </template>

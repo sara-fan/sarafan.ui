@@ -11,10 +11,12 @@ import { installErrorBoundaries } from './observability/boundaries.js'
 import { EVENTS } from './observability/catalogue.js'
 import { uiLogger } from './observability/logger.js'
 import { createSarafanVuetify } from './plugins/vuetify.js'
+import router from './router.js'
+import './ui.css'
 import './consent-ui.css'
 import './styles.css'
 
 const app = createApp(App)
 installErrorBoundaries(app)
 uiLogger.log(EVENTS.applicationStarted)
-app.use(createSarafanVuetify()).mount('#app')
+app.use(createSarafanVuetify()).use(router).mount('#app')
