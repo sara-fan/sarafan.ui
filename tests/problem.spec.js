@@ -8,6 +8,7 @@ import {
   INTERNAL_PROBLEM_TYPES,
   ProblemError,
   createInternalProblem,
+  isServiceUnavailableProblem,
   normalizeProblem,
   presentProblem,
   problemFieldErrors,
@@ -103,5 +104,14 @@ describe('shared problem model', () => {
 
   it('rejects unknown internal catalogue keys', () => {
     expect(() => createInternalProblem('missing')).toThrow(TypeError)
+  })
+
+  it('classifies transport, protocol, and server failures as service unavailability', () => {
+    expect(isServiceUnavailableProblem(createInternalProblem('networkUnavailable'))).toBe(true)
+    expect(isServiceUnavailableProblem(createInternalProblem('protocolError'))).toBe(true)
+    expect(isServiceUnavailableProblem(createInternalProblem('serviceUnavailable'))).toBe(true)
+    expect(isServiceUnavailableProblem({ status:503 })).toBe(true)
+    expect(isServiceUnavailableProblem({ status:409 })).toBe(false)
+    expect(isServiceUnavailableProblem(null)).toBe(false)
   })
 })

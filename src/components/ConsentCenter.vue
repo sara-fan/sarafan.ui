@@ -5,23 +5,41 @@
 
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
-import { useSession } from '../stores/session.js'
-import { useConsents } from '../stores/consents.js'
+
 import { LEGAL_DOCUMENT_KIND, CONSENT_STATUSES, moscowTime } from '../consentFormatting.js'
-import { normalizeProblem, presentProblem, createInternalProblem } from '../errors/problem.js'
+import {
+  createInternalProblem,
+  isServiceUnavailableProblem,
+  normalizeProblem,
+  presentProblem
+} from '../errors/problem.js'
+import { useConsents } from '../stores/consents.js'
+import { useSession } from '../stores/session.js'
+import LegalDocumentReader from './LegalDocumentReader.vue'
+import ServiceUnavailablePage from './ServiceUnavailablePage.vue'
+import UiAlert from './ui/UiAlert.vue'
 import UiButton from './ui/UiButton.vue'
 import UiSelectionControl from './ui/UiSelectionControl.vue'
-import UiDialog from './ui/UiDialog.vue'
-import LegalDocumentReader from './LegalDocumentReader.vue'
+
+const props = defineProps({
+  mode: {
+    type: String,
+    default: 'notice',
+    validator: value => ['notice', 'consents', 'legal'].includes(value)
+  },
+  section: {
+    type: String,
+    default: 'auto',
+    validator: value => ['auto', 'cookies', 'personal'].includes(value)
+  }
+})
+const emit = defineEmits(['service-unavailable'])
 
 const session = useSession()
 const store = useConsents()
 const route = useRoute()
 const router = useRouter()
 const { cookies, mine, ops, opsProblem, cookieProblem, personalProblem } = store
-const cookieOpen = ref(false)
-const personalOpen = ref(false)
-const documentOpen = ref(false)
 const document = ref(null)
 const legalReader = ref(null)
 const cookieDocument = ref(null)
@@ -38,7 +56,25 @@ let choiceKey = globalThis.crypto.randomUUID()
 let choiceSignature = ''
 let personalKey = globalThis.crypto.randomUUID()
 let personalSignature = ''
+let lastAttempt = null
 
+const authenticated = computed(() => Boolean(session.customer.value))
+const personalPage = computed(() => props.mode === 'consents' && authenticated.value
+  && props.section !== 'cookies')
+const cookiePage = computed(() => props.mode === 'consents'
+  && (props.section !== 'personal' || !authenticated.value))
+const combinedPage = computed(() => cookiePage.value && personalPage.value)
+const consentPageTitle = computed(() => {
+  if (combinedPage.value) return 'Согласия'
+  return cookiePage.value
+    ? 'Согласие на использование куки'
+    : 'Согласие на обработку персональных данных'
+})
+const consentPageCopy = computed(() => combinedPage.value
+  ? 'Здесь можно управлять согласием на использование куки и согласием на обработку персональных данных.'
+  : cookiePage.value
+    ? 'Выбор действует только в этом браузере и не переносится на другие устройства.'
+    : 'Здесь можно проверить актуальность согласия, историю документов и состояние обращения.')
 const status = computed(() => mine.value?.statuses.find(item => item.kind === LEGAL_DOCUMENT_KIND.PERSONAL_DATA_CONSENT))
 const latestPersonalGrant = computed(() => (mine.value?.history || [])
   .filter(item => item.kind === LEGAL_DOCUMENT_KIND.PERSONAL_DATA_CONSENT && item.decision === 'grant')
@@ -53,7 +89,18 @@ const cookieGrantCategories = computed(() => {
 })
 const canGrantCookies = computed(() => cookieGrantCategories.value.length > 0
   && cookieGrantCategories.value.every(category => categories.value.includes(category)))
-const message = computed(() => problem.value ? presentProblem(problem.value) : '')
+const activeProblem = computed(() => {
+  if (props.mode === 'legal') return problem.value
+  if (combinedPage.value) {
+    return problem.value || cookieDocumentProblem.value || cookieProblem.value || personalProblem.value || opsProblem.value
+  }
+  if (personalPage.value) {
+    return problem.value || personalProblem.value || opsProblem.value
+  }
+  return problem.value || cookieDocumentProblem.value || cookieProblem.value || opsProblem.value
+})
+const message = computed(() => activeProblem.value ? presentProblem(activeProblem.value) : '')
+const serviceUnavailable = computed(() => isServiceUnavailableProblem(activeProblem.value))
 const cookieNoticeError = computed(() => {
   const value = problem.value || cookieDocumentProblem.value || cookieProblem.value || opsProblem.value
   return value ? presentProblem(value) : ''
@@ -85,17 +132,50 @@ function toggleCategory(category, selected) {
 }
 
 async function perform(action, onVersionChanged) {
+  let succeeded = false
+  lastAttempt = { action, onVersionChanged }
   busy.value = true
   problem.value = null
-  try { await action() }
-  catch (error) {
+  try {
+    await action()
+    lastAttempt = null
+    succeeded = true
+  } catch (error) {
     problem.value = normalizeProblem(error)
     if (problem.value.type === 'https://sarafan.sw.consulting/problems/consent-version-changed' && onVersionChanged) {
       try { await onVersionChanged() }
       catch (refreshError) { problem.value = normalizeProblem(refreshError) }
     }
+  } finally {
+    busy.value = false
   }
-  finally { busy.value = false }
+  return succeeded
+}
+
+async function retry() {
+  const attempt = lastAttempt
+  if (attempt) {
+    const succeeded = await perform(attempt.action, attempt.onVersionChanged)
+    if (!succeeded || props.mode !== 'notice' || !serviceUnavailable.value) return
+  }
+  if (props.mode === 'notice') {
+    await perform(async () => {
+      await store.loadCookies()
+      if (cookieRequired.value) await fetchCookieDocument()
+    })
+  } else if (props.mode === 'legal') await openLegal()
+  else if (combinedPage.value) {
+    if (problem.value && !cookieDocumentProblem.value && !cookieProblem.value && !personalProblem.value) {
+      const associated = await perform(async () => {
+        if (store.serviceAllowed.value && session.customer.value) await store.associate()
+      })
+      if (!associated) return
+    }
+    await openCookies()
+    await openPersonal()
+  } else if (cookiePage.value && (cookieDocumentProblem.value || cookieProblem.value)) await openCookies()
+  else if (personalPage.value) await openPersonal()
+  else await openCookies()
 }
 
 async function fetchCookieDocument(refreshStatus = false) {
@@ -125,14 +205,8 @@ async function prepareCookieNotice(refreshStatus = false) {
 }
 
 async function openLegal(target = route.params.documentRef) {
-  if (route.name === 'consents') {
-    if (session.customer.value) await openPersonal()
-    else await openCookies()
-    return
-  }
-  if (route.name !== 'legal-document' || typeof target !== 'string') return
+  if (typeof target !== 'string') return
   const epoch = ++documentEpoch
-  documentOpen.value = true
   document.value = null
   await perform(async () => {
     await store.ensureOps()
@@ -143,18 +217,13 @@ async function openLegal(target = route.params.documentRef) {
   })
 }
 
-function closeLegal() {
-  documentEpoch++
-  documentOpen.value = false
-  if (route.name === 'legal-document') router.replace({ name: 'home' })
-  if (cookieRequired.value && !cookieDocument.value) prepareCookieNotice()
-}
-
 function printLegal() { legalReader.value?.printDocument() }
 
 async function openCookies() {
-  personalOpen.value = false
-  cookieOpen.value = true
+  if (props.mode === 'notice') {
+    await router.push({ name: 'consents' })
+    return
+  }
   categories.value = []
   resetChoice()
   await perform(() => fetchCookieDocument(true))
@@ -172,8 +241,6 @@ async function chooseCookies(decision) {
     await store.decideCookies(text, decision, selected, choiceKey)
     resetChoice()
     categories.value = []
-    cookieOpen.value = false
-    if (route.name === 'consents') await router.replace({ name: 'home' })
   }, async () => {
     categories.value = []
     cookieDocument.value = null
@@ -183,8 +250,6 @@ async function chooseCookies(decision) {
 }
 
 async function showPersonal(refreshMine) {
-  cookieOpen.value = false
-  personalOpen.value = true
   accepted.value = false
   personalDocument.value = null
   await perform(async () => {
@@ -193,15 +258,12 @@ async function showPersonal(refreshMine) {
   })
 }
 
-async function openPersonal() { await showPersonal(true) }
-
-function closePersonal() {
-  personalOpen.value = false
-  if (route.name === 'consents') router.replace({ name: 'home' })
+async function openPersonal() {
+  await showPersonal(true)
 }
 
 async function grant() {
-  if (!accepted.value || !personalDocument.value) return
+  if (!accepted.value || !personalDocument.value || !session.customer.value) return
   await perform(async () => {
     const signature = JSON.stringify([session.customer.value.id, personalDocument.value.id, personalDocument.value.contentHash])
     if (personalSignature !== signature) personalKey = globalThis.crypto.randomUUID()
@@ -228,29 +290,41 @@ async function refreshOps() {
 
 async function visible() {
   if (globalThis.document.visibilityState !== 'visible') return
+  if (props.mode === 'legal') {
+    await openLegal()
+    return
+  }
+  if (props.mode === 'consents') {
+    if (cookiePage.value) await openCookies()
+    if (personalPage.value) await openPersonal()
+    return
+  }
   await perform(async () => {
     await Promise.all([store.loadCookies(), store.loadMine()])
     if (cookieRequired.value) await fetchCookieDocument()
   })
 }
 
-watch(() => session.customer.value?.id, async (id, _previous, cleanup) => {
-  let active = true
-  cleanup(() => { active = false })
+watch(() => session.customer.value?.id, async id => {
   store.resetCustomer()
-  personalOpen.value = false
+  problem.value = null
   personalDocument.value = null
-  if (!id) return
+  if (!id) {
+    if (cookiePage.value) await openCookies()
+    return
+  }
   try {
     if (store.serviceAllowed.value) await store.associate()
-    if (active) await store.loadMine()
-    if (active && route.name === 'consents' && !personalOpen.value) await showPersonal(false)
+    if (props.mode === 'notice') await store.loadMine()
+    if (cookiePage.value) await openCookies()
+    if (personalPage.value) await showPersonal(true)
+  } catch (error) {
+    problem.value = normalizeProblem(error)
   }
-  catch (error) { if (active) problem.value = normalizeProblem(error) }
 }, { immediate:true })
 
 watch(cookieRequired, (required, previous) => {
-  if (required && previous === false) {
+  if (props.mode === 'notice' && required && previous === false) {
     categories.value = []
     cookieDocument.value = null
     resetChoice()
@@ -258,43 +332,42 @@ watch(cookieRequired, (required, previous) => {
   }
 })
 
+watch(serviceUnavailable, unavailable => {
+  if (props.mode === 'notice') emit('service-unavailable', unavailable)
+}, { immediate:true })
+
+watch(() => route.params.documentRef, async (target, _previous, cleanup) => {
+  if (props.mode !== 'legal') return
+  let active = true
+  cleanup(() => { active = false })
+  await openLegal(target)
+  if (!active) documentEpoch++
+})
+
 onMounted(async () => {
-  if (route.name === 'consents' || route.name === 'legal-document') await openLegal()
-  else await refreshOps()
+  if (props.mode === 'legal') await openLegal()
+  else if (props.mode === 'notice') await refreshOps()
   globalThis.addEventListener('focus', visible)
   globalThis.document.addEventListener('visibilitychange', visible)
 })
-
-watch(
-  () => [route.name, route.params.documentRef],
-  async ([name, target], _previous, cleanup) => {
-    let active = true
-    cleanup(() => { active = false })
-    if (name === 'legal-document') {
-      await openLegal(target)
-      if (!active) documentEpoch++
-    } else if (name === 'consents') {
-      await openLegal()
-    } else {
-      documentEpoch++
-      documentOpen.value = false
-      personalOpen.value = false
-    }
-  }
-)
 
 onUnmounted(() => {
   documentEpoch++
   cookieDocumentEpoch++
   globalThis.removeEventListener('focus', visible)
   globalThis.document.removeEventListener('visibilitychange', visible)
-  store.dispose()
 })
 </script>
 
 <template>
+  <ServiceUnavailablePage
+    v-if="serviceUnavailable"
+    :busy="busy"
+    @retry="retry"
+  />
+
   <section
-    v-if="cookieRequired && !cookieOpen && !documentOpen && !personalOpen"
+    v-else-if="mode === 'notice' && cookieRequired"
     class="cookie-notice"
     role="region"
     aria-labelledby="cookie-notice-title"
@@ -346,7 +419,7 @@ onUnmounted(() => {
         :disabled="busy"
         @click="openCookies"
       >
-        Настроить куки
+        Согласия
       </UiButton>
       <UiButton
         v-if="cookieNoticeError"
@@ -368,259 +441,274 @@ onUnmounted(() => {
       >
         {{ item.name }}
       </RouterLink>
-      <button
+      <RouterLink
         v-if="session.customer.value"
-        type="button"
-        class="consent-registration__retry"
-        @click="openPersonal"
+        :to="{ name: 'consents' }"
       >
-        Мои согласия и обращения
-      </button>
+        Согласия
+      </RouterLink>
     </nav>
-    <p
-      v-if="personalProblem"
-      class="consent-alert"
-      role="alert"
-    >
-      {{ presentProblem(personalProblem) }}
-    </p>
   </section>
 
-  <UiDialog
-    v-model="cookieOpen"
-    title="Настройки куки"
-    title-id="cookie-dialog-title"
+  <main
+    v-else-if="mode === 'consents'"
+    class="page-container consent-page"
   >
-    <p
-      v-if="message"
-      class="consent-alert"
-      role="alert"
-    >
-      {{ message }}
-    </p>
-    <section class="consent-section consent-section--soft">
-      <h3>Состояние в этом браузере</h3>
-      <dl class="consent-summary">
-        <dt>Статус</dt>
-        <dd><span class="consent-status">{{ label(cookies?.status || 'unavailable') }}</span></dd>
-        <dt>Выбранные категории</dt>
-        <dd>{{ cookies?.categories?.length ? cookies.categories.map(store.cookieCategoryName).join(', ') : 'Нет' }}</dd>
-      </dl>
-      <p>Выбор относится только к этому браузеру и не переносится на другие устройства.</p>
-    </section>
-    <section
-      v-if="cookieDocument"
-      class="consent-section"
-    >
-      <h3>Актуальный документ</h3>
-      <LegalDocumentReader
-        :document="cookieDocument"
-      />
-    </section>
-    <section
-      v-if="cookieNeedsGrant && cookieDocument"
-      class="consent-section"
-    >
-      <h3>Новое подтверждение</h3>
-      <p>Выберите все обязательные категории. Ранее сделанный выбор не считается подтверждением этой версии.</p>
-      <UiSelectionControl
-        v-for="category in cookieGrantCategories"
-        :key="category"
-        :model-value="categories.includes(category)"
-        :disabled="busy"
-        @update:model-value="toggleCategory(category, $event)"
-      >
-        {{ store.cookieCategoryName(category) }}
-      </UiSelectionControl>
-    </section>
-    <template #actions>
-      <UiButton
-        v-if="cookieNeedsGrant"
-        variant="primary"
-        :disabled="busy || !cookieDocument || !canGrantCookies"
-        @click="chooseCookies('grant')"
-      >
-        Принять обязательные куки
-      </UiButton>
-      <UiButton
-        v-if="cookieNeedsGrant && cookieCanRefuse"
-        variant="secondary"
-        :disabled="busy || !cookieDocument"
-        @click="chooseCookies('refuse')"
-      >
-        Отказаться
-      </UiButton>
-      <UiButton
-        v-if="cookies?.status === 'current' && cookies?.documentId"
-        variant="danger"
-        :disabled="busy"
-        @click="chooseCookies('withdraw')"
-      >
-        Отозвать согласие на использование куки
-      </UiButton>
-      <UiButton
-        variant="quiet"
-        :disabled="busy"
-        @click="openCookies"
-      >
-        Обновить документ
-      </UiButton>
+    <header class="page-heading consent-page__heading">
+      <div>
+        <p class="page-kicker">
+          КОНФИДЕНЦИАЛЬНОСТЬ
+        </p>
+        <h1>{{ consentPageTitle }}</h1>
+        <p>{{ consentPageCopy }}</p>
+      </div>
       <UiButton
         variant="secondary"
-        @click="cookieOpen = false"
+        @click="router.push({ name: 'home' })"
       >
-        Закрыть
+        На главную
       </UiButton>
-    </template>
-  </UiDialog>
-
-  <UiDialog
-    :model-value="personalOpen"
-    title="Мои согласия и обращения"
-    title-id="personal-consent-dialog-title"
-    @update:model-value="!$event && closePersonal()"
-  >
-    <p
+    </header>
+    <UiAlert
       v-if="message"
-      class="consent-alert"
-      role="alert"
+      :title="activeProblem.title"
+      class="consent-page__alert"
     >
       {{ message }}
-    </p>
-    <section class="consent-section consent-section--soft">
-      <h3>Согласие на обработку персональных данных</h3>
-      <dl class="consent-summary">
-        <dt>Статус</dt>
-        <dd><span class="consent-status">{{ label(status?.status || 'unavailable') }}</span></dd>
-        <dt>Принятая версия</dt>
-        <dd>{{ latestPersonalGrant?.displayVersion || '—' }}</dd>
-        <dt>Дата принятия</dt>
-        <dd>{{ moscowTime(latestPersonalGrant?.at) }}</dd>
-        <dt>Актуальная версия</dt>
-        <dd>{{ personalDocument?.displayVersion || '—' }}</dd>
-      </dl>
-    </section>
-    <section
-      v-if="personalDocument"
-      class="consent-section"
+    </UiAlert>
+    <div
+      v-if="cookiePage"
+      class="consent-page__panel consent-page__panel--cookies"
     >
-      <h3>Актуальный документ</h3>
-      <LegalDocumentReader
-        :document="personalDocument"
-      />
-    </section>
-    <section
-      v-if="status?.status !== 'current' && personalDocument"
-      class="consent-section"
-    >
-      <h3>Подтверждение согласия</h3>
-      <UiSelectionControl
-        :model-value="accepted"
-        :disabled="busy"
-        @update:model-value="accepted = $event"
+      <h2
+        v-if="combinedPage"
+        class="consent-page__panel-title"
       >
-        Я даю отдельное согласие на хранение и обработку персональных данных по этому документу
-      </UiSelectionControl>
-    </section>
-    <section class="consent-section">
-      <h3>Прекращение использования системы</h3>
-      <p>Запрос будет записан для ручной обработки сотрудниками. Его отправка сама по себе не отключает учётную запись, не удаляет данные и не изменяет состояние согласия.</p>
-      <UiButton
-        variant="danger"
-        block
-        :disabled="busy || withdrawalPending"
-        @click="requestWithdrawal"
+        Согласие на использование куки
+      </h2>
+      <section class="consent-section consent-section--soft">
+        <h3>Состояние в этом браузере</h3>
+        <dl class="consent-summary">
+          <dt>Статус</dt>
+          <dd><span class="consent-status">{{ label(cookies?.status || 'unavailable') }}</span></dd>
+          <dt>Выбранные категории</dt>
+          <dd>{{ cookies?.categories?.length ? cookies.categories.map(store.cookieCategoryName).join(', ') : 'Нет' }}</dd>
+        </dl>
+      </section>
+      <section
+        v-if="cookieDocument"
+        class="consent-section"
       >
-        Прекратить использовать систему и отозвать согласие на обработку персональных данных
-      </UiButton>
-      <p
-        v-if="mine?.withdrawalRequest"
-        class="withdrawal-record"
-        role="status"
+        <h3>Актуальный документ</h3>
+        <LegalDocumentReader :document="cookieDocument" />
+      </section>
+      <section
+        v-if="cookieNeedsGrant && cookieDocument"
+        class="consent-section"
       >
-        Запрос от {{ moscowTime(mine.withdrawalRequest.requestedAt) }} ·
-        {{ mine.withdrawalRequest.processed ? 'Обработан' : 'Ожидает ручной обработки' }}
-      </p>
-    </section>
-    <section class="consent-section">
-      <h3>История</h3>
-      <p>Записи куки связаны с аккаунтом в момент наблюдения. Они не разрешают куки на других устройствах.</p>
-      <ol
-        v-if="mine?.history?.length"
-        class="consent-history"
-      >
-        <li
-          v-for="event in mine.history"
-          :key="event.id"
+        <h3>Новое подтверждение</h3>
+        <p>Выберите все обязательные категории. Ранее сделанный выбор не считается подтверждением этой версии.</p>
+        <UiSelectionControl
+          v-for="category in cookieGrantCategories"
+          :key="category"
+          :model-value="categories.includes(category)"
+          :disabled="busy"
+          @update:model-value="toggleCategory(category, $event)"
         >
-          {{ store.kindName(event.kind) }} · {{ label(event.decision) }} · {{ moscowTime(event.at) }}
-          <RouterLink :to="{ name: 'legal-document', params: { documentRef: event.documentId } }">
-            Версия {{ event.displayVersion }}
-          </RouterLink>
-          <small v-if="event.associatedAt">Связано с аккаунтом {{ moscowTime(event.associatedAt) }}</small>
-        </li>
-      </ol>
-      <p v-else>
-        Записей пока нет.
-      </p>
-    </section>
-    <template #actions>
-      <UiButton
-        v-if="status?.status !== 'current'"
-        variant="primary"
-        :disabled="busy || !personalDocument || !accepted"
-        @click="grant"
+          {{ store.cookieCategoryName(category) }}
+        </UiSelectionControl>
+      </section>
+      <div class="consent-page__actions">
+        <UiButton
+          v-if="cookieNeedsGrant"
+          variant="primary"
+          :disabled="busy || !cookieDocument || !canGrantCookies"
+          @click="chooseCookies('grant')"
+        >
+          Принять обязательные куки
+        </UiButton>
+        <UiButton
+          v-if="cookieNeedsGrant && cookieCanRefuse"
+          variant="secondary"
+          :disabled="busy || !cookieDocument"
+          @click="chooseCookies('refuse')"
+        >
+          Отказаться
+        </UiButton>
+        <UiButton
+          v-if="cookies?.status === 'current' && cookies?.documentId"
+          variant="danger"
+          :disabled="busy"
+          @click="chooseCookies('withdraw')"
+        >
+          Отозвать согласие на использование куки
+        </UiButton>
+        <UiButton
+          variant="quiet"
+          :disabled="busy"
+          @click="openCookies"
+        >
+          Обновить документ
+        </UiButton>
+      </div>
+    </div>
+    <div
+      v-if="personalPage"
+      class="consent-page__panel consent-page__panel--personal"
+    >
+      <h2
+        v-if="combinedPage"
+        class="consent-page__panel-title"
       >
-        Дать согласие
-      </UiButton>
-      <UiButton
-        variant="quiet"
-        :disabled="busy"
-        @click="openPersonal"
+        Согласие на обработку персональных данных
+      </h2>
+      <section class="consent-section consent-section--soft">
+        <h3>Состояние согласия</h3>
+        <dl class="consent-summary">
+          <dt>Статус</dt>
+          <dd><span class="consent-status">{{ label(status?.status || 'unavailable') }}</span></dd>
+          <dt>Принятая версия</dt>
+          <dd>{{ latestPersonalGrant?.displayVersion || '—' }}</dd>
+          <dt>Дата принятия</dt>
+          <dd>{{ moscowTime(latestPersonalGrant?.at) }}</dd>
+          <dt>Актуальная версия</dt>
+          <dd>{{ personalDocument?.displayVersion || '—' }}</dd>
+        </dl>
+      </section>
+      <section
+        v-if="personalDocument"
+        class="consent-section"
       >
-        Обновить
-      </UiButton>
+        <h3>Актуальный документ</h3>
+        <LegalDocumentReader :document="personalDocument" />
+      </section>
+      <section
+        v-if="status?.status !== 'current' && personalDocument"
+        class="consent-section"
+      >
+        <h3>Подтверждение согласия</h3>
+        <UiSelectionControl
+          :model-value="accepted"
+          :disabled="busy"
+          @update:model-value="accepted = $event"
+        >
+          Я даю отдельное согласие на хранение и обработку персональных данных по этому документу
+        </UiSelectionControl>
+      </section>
+      <section class="consent-section">
+        <h3>Прекращение использования системы</h3>
+        <p>Запрос будет записан для ручной обработки сотрудниками. Его отправка сама по себе не отключает учётную запись, не удаляет данные и не изменяет состояние согласия.</p>
+        <UiButton
+          variant="danger"
+          block
+          :disabled="busy || withdrawalPending"
+          @click="requestWithdrawal"
+        >
+          Прекратить использовать систему и отозвать согласие на обработку персональных данных
+        </UiButton>
+        <p
+          v-if="mine?.withdrawalRequest"
+          class="withdrawal-record"
+          role="status"
+        >
+          Запрос от {{ moscowTime(mine.withdrawalRequest.requestedAt) }} ·
+          {{ mine.withdrawalRequest.processed ? 'Обработан' : 'Ожидает ручной обработки' }}
+        </p>
+      </section>
+      <section class="consent-section">
+        <h3>История</h3>
+        <p>Записи куки связаны с аккаунтом в момент наблюдения. Они не разрешают куки на других устройствах.</p>
+        <ol
+          v-if="mine?.history?.length"
+          class="consent-history"
+        >
+          <li
+            v-for="event in mine.history"
+            :key="event.id"
+          >
+            {{ store.kindName(event.kind) }} · {{ label(event.decision) }} · {{ moscowTime(event.at) }}
+            <RouterLink :to="{ name: 'legal-document', params: { documentRef: event.documentId } }">
+              Версия {{ event.displayVersion }}
+            </RouterLink>
+            <small v-if="event.associatedAt">Связано с аккаунтом {{ moscowTime(event.associatedAt) }}</small>
+          </li>
+        </ol>
+        <p v-else>
+          Записей пока нет.
+        </p>
+      </section>
+      <div class="consent-page__actions">
+        <UiButton
+          v-if="status?.status !== 'current'"
+          variant="primary"
+          :disabled="busy || !personalDocument || !accepted"
+          @click="grant"
+        >
+          Дать согласие
+        </UiButton>
+        <UiButton
+          variant="quiet"
+          :disabled="busy"
+          @click="openPersonal"
+        >
+          Обновить
+        </UiButton>
+      </div>
+    </div>
+  </main>
+
+  <main
+    v-else-if="mode === 'legal'"
+    class="page-container consent-page legal-document-page"
+  >
+    <header class="page-heading consent-page__heading">
+      <div>
+        <p class="page-kicker">
+          ЮРИДИЧЕСКИЕ ДОКУМЕНТЫ
+        </p>
+        <h1>{{ document?.title || 'Юридический документ' }}</h1>
+      </div>
       <UiButton
         variant="secondary"
-        @click="closePersonal"
+        @click="router.push({ name: 'home' })"
       >
-        Закрыть
+        На главную
       </UiButton>
-    </template>
-  </UiDialog>
-
-  <UiDialog
-    :model-value="documentOpen"
-    :title="document?.title || 'Юридический документ'"
-    hide-header
-    @update:model-value="!$event && closeLegal()"
-  >
-    <p
+    </header>
+    <UiAlert
       v-if="message"
-      class="consent-alert"
-      role="alert"
+      :title="activeProblem.title"
+      class="consent-page__alert"
     >
       {{ message }}
-    </p>
-    <LegalDocumentReader
+    </UiAlert>
+    <div
       v-if="document"
-      ref="legalReader"
-      :document="document"
-    />
-    <template #actions>
-      <UiButton
-        v-if="document"
-        variant="secondary"
-        @click="printLegal"
-      >
-        Печать
-      </UiButton>
-      <UiButton
-        variant="secondary"
-        @click="closeLegal"
-      >
-        Закрыть
-      </UiButton>
-    </template>
-  </UiDialog>
+      class="consent-page__panel legal-document-page__panel"
+    >
+      <LegalDocumentReader
+        ref="legalReader"
+        :document="document"
+      />
+      <div class="consent-page__actions">
+        <UiButton
+          variant="secondary"
+          @click="printLegal"
+        >
+          Печать
+        </UiButton>
+      </div>
+    </div>
+    <div
+      v-else-if="!message"
+      class="consent-page__loading"
+      aria-label="Загрузка документа"
+    >
+      <span
+        class="route-gate__spinner"
+        aria-hidden="true"
+      />
+      <p>Загружаем документ</p>
+    </div>
+  </main>
 </template>

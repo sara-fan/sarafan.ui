@@ -29,7 +29,11 @@ async function mountApp(path = '/') {
     global: {
       plugins: [createSarafanVuetify(), router],
       stubs: {
-        ConsentCenter: true,
+        ConsentCenter: {
+          name: 'ConsentCenter',
+          emits: ['service-unavailable'],
+          template: '<button class="consent-unavailable-stub" hidden @click="$emit(\'service-unavailable\', true)" />'
+        },
         PhoneAuthDialog: {
           name: 'PhoneAuthDialog',
           props: ['modelValue'],
@@ -78,6 +82,9 @@ describe('App routing and privacy gates', () => {
     h.consents.loadCookies.mockImplementation(async () => { order.push('cookies') })
     h.session.restoreSession.mockImplementation(async () => { order.push('session') })
     await mountApp()
+    await flushPromises()
+    expect(order).toEqual(['cookies', 'session'])
+    h.consents.serviceAllowed.value = false
     await flushPromises()
     expect(order).toEqual(['cookies', 'session'])
   })
@@ -139,6 +146,27 @@ describe('App routing and privacy gates', () => {
     expect(wrapper.text()).toContain('Не удалось восстановить сеанс')
     await wrapper.findAll('button').find(item => item.text() === 'Повторить').trigger('click')
     expect(h.session.restoreSession).toHaveBeenCalled()
+  })
+
+  it('lets the consent controller replace ordinary content with its outage page', async () => {
+    const { router, wrapper } = await mountApp()
+    await flushPromises()
+    expect(wrapper.text()).toContain('Закажите товар — остальное сделаем мы')
+    await wrapper.get('.consent-unavailable-stub').trigger('click')
+    expect(wrapper.text()).not.toContain('Закажите товар — остальное сделаем мы')
+    await router.push('/consents/cookies'); await flushPromises()
+    expect(router.currentRoute.value.name).toBe('cookie-consents')
+    expect(wrapper.find('.consent-unavailable-stub').exists()).toBe(true)
+    for (const [path, name] of [
+      ['/consents', 'consents'],
+      ['/consents/personal-data', 'personal-consents'],
+      ['/legal/cookie-consent', 'legal-document']
+    ]) {
+      await router.push(path); await flushPromises()
+      expect(router.currentRoute.value.name).toBe(name)
+    }
+    await router.push('/'); await flushPromises()
+    expect(wrapper.text()).toContain('Закажите товар — остальное сделаем мы')
   })
 
   it('opens reusable phone authentication and exposes one inert Support entry', async () => {

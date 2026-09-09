@@ -281,6 +281,7 @@ async function submitCode() {
             id="registration-terms-document"
             class="consent-document-link"
             :to="{ name: 'legal-document', params: { documentRef: termsDocument.id } }"
+            @click="emit('update:modelValue', false)"
           >
             Открыть пользовательское соглашение
           </RouterLink>
@@ -310,6 +311,7 @@ async function submitCode() {
             id="registration-personal-document"
             class="consent-document-link"
             :to="{ name: 'legal-document', params: { documentRef: pdDocument.id } }"
+            @click="emit('update:modelValue', false)"
           >
             Открыть согласие на обработку персональных данных
           </RouterLink>

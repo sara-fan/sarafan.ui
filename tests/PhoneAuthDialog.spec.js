@@ -238,4 +238,15 @@ describe('PhoneAuthDialog', () => {
     expect(wrapper.findAll('input[type="checkbox"]').every(item => item.attributes('aria-describedby') === undefined)).toBe(true)
     wrapper.unmount()
   })
+
+  it('closes the authentication dialog when opening a routed legal document', async () => {
+    vi.stubGlobal('fetch', vi.fn(url => Promise.resolve(url === '/api/v1/legal/ops'
+      ? response(200, legalOps)
+      : response(200, { serverNow:'2026-09-07T12:00:00Z', document:legalDocument(url, { displayVersion:'1' }) }))))
+    const wrapper = mountView()
+    await wrapper.findAll('[role="tab"]')[1].trigger('click'); await flushPromises()
+    await wrapper.findAll('.consent-document-link')[0].trigger('click')
+    expect(wrapper.emitted('update:modelValue')).toContainEqual([false])
+    wrapper.unmount()
+  })
 })

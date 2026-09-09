@@ -33,3 +33,10 @@ export const { INTERNAL_PROBLEM_TYPES, createInternalProblem, normalizeProblem, 
     }
   }
 })
+
+export function isServiceUnavailableProblem(problem) {
+  return problem?.type === INTERNAL_PROBLEM_TYPES.networkUnavailable
+    || problem?.type === INTERNAL_PROBLEM_TYPES.protocolError
+    || problem?.type === INTERNAL_PROBLEM_TYPES.serviceUnavailable
+    || (Number.isInteger(problem?.status) && problem.status >= 500)
+}
