@@ -90,7 +90,7 @@ onMounted(async () => {
         class="app-route-content"
       >
         <div
-          v-if="restoreProblem && !customerRoute"
+          v-if="restoreProblem && !customerRoute && !consentRoute"
           class="session-notice page-container"
         >
           <UiAlert :title="restoreProblem.title">

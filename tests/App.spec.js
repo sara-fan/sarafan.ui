@@ -141,12 +141,15 @@ describe('App routing and privacy gates', () => {
   it('keeps recoverable restore failures non-blocking on public routes', async () => {
     h.consents.serviceAllowed.value = true
     h.session.restoreProblem.value = createInternalProblem('sessionRestoreUnavailable')
-    const { wrapper } = await mountApp()
+    const { router, wrapper } = await mountApp()
     await flushPromises()
     expect(wrapper.text()).toContain('Закажите товар — остальное сделаем мы')
     expect(wrapper.text()).toContain('Не удалось восстановить сеанс')
     await wrapper.findAll('button').find(item => item.text() === 'Повторить').trigger('click')
     expect(h.session.restoreSession).toHaveBeenCalled()
+    await router.push('/legal/privacy-policy')
+    await flushPromises()
+    expect(wrapper.find('.session-notice').exists()).toBe(false)
   })
 
   it('lets the consent controller replace ordinary content with its outage page', async () => {

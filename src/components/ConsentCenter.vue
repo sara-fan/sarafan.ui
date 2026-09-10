@@ -6,7 +6,7 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 
-import { LEGAL_DOCUMENT_KIND, CONSENT_STATUSES, documentNodes, moscowTime } from '../consentFormatting.js'
+import { LEGAL_DOCUMENT_KIND, CONSENT_STATUSES, documentNodes, isDocumentId, moscowTime } from '../consentFormatting.js'
 import {
   createInternalProblem,
   isServiceUnavailableProblem,
@@ -64,8 +64,12 @@ let viewEpoch = 0
 let mounted = false
 let cookieRefreshPending = false
 let legalBoundaryTimer = null
+let cookieBoundaryTimer = null
+let cookieBoundaryRefreshPending = null
 let personalBoundary = null
 let personalRefreshPending = null
+let foregroundRefreshPending = false
+let refreshQueueRunning = false
 
 const alwaysCurrent = () => true
 const currentPredicate = value => typeof value === 'function' ? value : alwaysCurrent
@@ -75,6 +79,7 @@ const personalPage = computed(() => props.mode === 'consents' && authenticated.v
   && props.section !== 'cookies')
 const cookiePage = computed(() => props.mode === 'consents'
   && (props.section !== 'personal' || !authenticated.value))
+const cookieViewCurrent = () => mounted && (props.mode === 'notice' || cookiePage.value)
 const combinedPage = computed(() => cookiePage.value && personalPage.value)
 const consentPageTitle = computed(() => {
   if (combinedPage.value) return 'Согласия'
@@ -264,6 +269,9 @@ async function loadCookieStatus() {
 async function fetchCookieDocument(refreshStatus = false, isCurrent = alwaysCurrent) {
   if (!isCurrent()) return null
   cookieRefreshPending = false
+  cookieBoundaryRefreshPending = null
+  globalThis.clearTimeout(cookieBoundaryTimer)
+  cookieBoundaryTimer = null
   const epoch = ++cookieDocumentEpoch
   const ownsRequest = () => epoch === cookieDocumentEpoch && isCurrent()
   cookieDocumentBusy.value = true
@@ -271,8 +279,18 @@ async function fetchCookieDocument(refreshStatus = false, isCurrent = alwaysCurr
   try {
     if (refreshStatus) await loadCookieStatus()
     if (!ownsRequest()) return null
+    const envelope = await store.current(LEGAL_DOCUMENT_KIND.COOKIE_CONSENT)
+    if (!ownsRequest()) return null
+    const delay = nextChangeDelay(envelope)
+    if (delay !== null) {
+      scheduleBoundary(delay, value => { cookieBoundaryTimer = value }, () => {
+        if (epoch !== cookieDocumentEpoch || !cookieViewCurrent()) return
+        cookieBoundaryRefreshPending = cookieViewCurrent
+        void drainQueuedRefreshes()
+      })
+    }
     const result = requireDocument(
-      (await store.current(LEGAL_DOCUMENT_KIND.COOKIE_CONSENT)).document,
+      envelope.document,
       'Документ о куки пока не действует. Использование сервиса недоступно.'
     )
     if (!ownsRequest()) return null
@@ -291,8 +309,8 @@ async function fetchCookieDocument(refreshStatus = false, isCurrent = alwaysCurr
   }
 }
 
-async function prepareCookieNotice(refreshStatus = false) {
-  try { await fetchCookieDocument(refreshStatus) }
+async function prepareCookieNotice(refreshStatus = false, isCurrent = alwaysCurrent) {
+  try { await fetchCookieDocument(refreshStatus, isCurrent) }
   catch { /* The notice presents a safe, recoverable error. */ }
 }
 
@@ -304,19 +322,24 @@ async function openLegal(target = route.params.documentRef, isCurrent = alwaysCu
   const ownsDocument = () => epoch === documentEpoch && isCurrent()
   document.value = null
   await perform(async ownsOperation => {
-    await store.ensureOps()
+    let envelope = null
+    let result
+    if (isDocumentId(target)) result = await store.read(target)
+    else {
+      await store.ensureOps()
+      if (!ownsOperation()) return
+      const kind = store.kindByAlias(target)
+      envelope = kind !== undefined ? await store.current(kind) : null
+      result = envelope ? envelope.document : await store.read(target)
+    }
     if (!ownsOperation()) return
-    const kind = store.kindByAlias(target)
-    const envelope = kind !== undefined ? await store.current(kind) : null
-    const result = envelope ? envelope.document : await store.read(target)
-    if (!ownsOperation()) return
-    document.value = requireDocument(result, 'Документ пока не действует.')
     const delay = nextChangeDelay(envelope)
     if (delay !== null) {
       scheduleBoundary(delay, value => { legalBoundaryTimer = value }, () => {
         if (epoch === documentEpoch && isCurrent()) openLegal(target, isCurrent)
       })
     }
+    document.value = requireDocument(result, 'Документ пока не действует.')
   }, undefined, ownsDocument)
 }
 
@@ -436,8 +459,19 @@ async function refreshNotice(isCurrent = alwaysCurrent) {
   }, undefined, isCurrent)
 }
 
-async function visible() {
-  if (globalThis.document.visibilityState !== 'visible') return
+async function refreshCookieDocumentBoundary(isCurrent = alwaysCurrent) {
+  if (!isCurrent()) return
+  categories.value = []
+  cookieDocument.value = null
+  resetChoice()
+  if (props.mode === 'notice') {
+    if (cookieRequired.value) await prepareCookieNotice(true, isCurrent)
+    return
+  }
+  if (props.mode === 'consents' && cookiePage.value) await openCookies(isCurrent)
+}
+
+async function refreshVisible() {
   const epoch = ++viewEpoch
   const isCurrent = () => mounted && epoch === viewEpoch
   if (props.mode === 'legal') {
@@ -456,6 +490,42 @@ async function visible() {
     await Promise.all([loadCookieStatus(), store.loadMine()])
     if (ownsOperation() && cookieRequired.value) await fetchCookieDocument(false, ownsOperation)
   }, undefined, isCurrent)
+}
+
+async function drainQueuedRefreshes() {
+  if (refreshQueueRunning || !mounted || busy.value || cookieDocumentBusy.value || cookieStatusLoads.value > 0) return
+  refreshQueueRunning = true
+  try {
+    while (mounted && !busy.value && !cookieDocumentBusy.value && cookieStatusLoads.value === 0) {
+      if (cookieRefreshPending) {
+        cookieRefreshPending = false
+        if (cookieRequired.value) await refreshRequiredCookies()
+      } else if (personalRefreshPending) {
+        const isCurrent = personalRefreshPending
+        personalRefreshPending = null
+        await refreshPersonalDocument(isCurrent)
+      } else if (cookieBoundaryRefreshPending) {
+        const isCurrent = cookieBoundaryRefreshPending
+        cookieBoundaryRefreshPending = null
+        await refreshCookieDocumentBoundary(isCurrent)
+      } else if (foregroundRefreshPending) {
+        foregroundRefreshPending = false
+        await refreshVisible()
+      } else break
+    }
+  } finally {
+    refreshQueueRunning = false
+    if (mounted && !busy.value && !cookieDocumentBusy.value && cookieStatusLoads.value === 0
+      && (cookieRefreshPending || personalRefreshPending || cookieBoundaryRefreshPending || foregroundRefreshPending)) {
+      void drainQueuedRefreshes()
+    }
+  }
+}
+
+async function visible() {
+  if (!mounted || globalThis.document.visibilityState !== 'visible') return
+  foregroundRefreshPending = true
+  await drainQueuedRefreshes()
 }
 
 watch(() => session.customer.value?.id, async (id, _previous, cleanup) => {
@@ -521,16 +591,12 @@ watch(cookieRequired, async required => {
     }
     return
   }
-  if (busy.value || cookieStatusLoads.value > 0) {
-    cookieRefreshPending = true
-    return
-  }
-  await refreshRequiredCookies()
+  cookieRefreshPending = true
+  await drainQueuedRefreshes()
 })
 
-watch([busy, cookieStatusLoads], async ([operationBusy, statusLoads]) => {
-  if (operationBusy || statusLoads > 0 || !cookieRefreshPending || !cookieRequired.value) return
-  await refreshRequiredCookies()
+watch([busy, cookieDocumentBusy, cookieStatusLoads], async () => {
+  await drainQueuedRefreshes()
 })
 
 watch(mine, async value => {
@@ -539,22 +605,12 @@ watch(mine, async value => {
   personalBoundary = value.nextChangeAt || null
   const serverNow = Date.parse(value.serverNow)
   const boundary = Date.parse(previousBoundary)
-  if (!previousBoundary || !personalPage.value || !personalDocument.value
+  if (!previousBoundary || !personalPage.value
     || !Number.isFinite(serverNow) || !Number.isFinite(boundary) || serverNow < boundary) return
   const epoch = sessionEpoch
   const isCurrent = () => mounted && epoch === sessionEpoch && personalPage.value
-  if (busy.value) {
-    personalRefreshPending = isCurrent
-    return
-  }
-  await refreshPersonalDocument(isCurrent)
-})
-
-watch(busy, async operationBusy => {
-  if (operationBusy || !personalRefreshPending || problem.value) return
-  const isCurrent = personalRefreshPending
-  personalRefreshPending = null
-  await refreshPersonalDocument(isCurrent)
+  personalRefreshPending = isCurrent
+  await drainQueuedRefreshes()
 })
 
 watch(serviceUnavailable, unavailable => {
@@ -582,7 +638,11 @@ onUnmounted(() => {
   mounted = false
   globalThis.clearTimeout(legalBoundaryTimer)
   legalBoundaryTimer = null
+  globalThis.clearTimeout(cookieBoundaryTimer)
+  cookieBoundaryTimer = null
+  cookieBoundaryRefreshPending = null
   personalRefreshPending = null
+  foregroundRefreshPending = false
   viewEpoch++
   documentEpoch++
   cookieDocumentEpoch++

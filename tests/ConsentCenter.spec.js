@@ -65,7 +65,7 @@ beforeEach(() => {
   globalThis.URL.createObjectURL = vi.fn(() => 'blob:test'); globalThis.URL.revokeObjectURL = vi.fn()
   vi.spyOn(globalThis.HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
 })
-afterEach(() => { wrapper?.unmount(); vi.restoreAllMocks(); globalThis.history.replaceState(null, '', '/') })
+afterEach(() => { wrapper?.unmount(); vi.useRealTimers(); vi.restoreAllMocks(); globalThis.history.replaceState(null, '', '/') })
 
 it('requires explicit mandatory куки consent with the canonical document and recoverable failures', async () => {
   await mountCenter(); await flushPromises()
@@ -369,8 +369,10 @@ it('makes immutable and current legal links available without login as routed pa
   vi.stubGlobal('print', vi.fn()); await click('Печать'); expect(globalThis.print).toHaveBeenCalled()
   await state().retry()
   await click('На главную'); expect(router.currentRoute.value.name).toBe('home')
+  h.store.ensureOps.mockClear()
   await router.push(`/legal/${id}`); await flushPromises()
   expect(h.store.read).toHaveBeenCalledWith(id)
+  expect(h.store.ensureOps).not.toHaveBeenCalled()
   h.store.current.mockResolvedValue({ document:null })
   await router.push('/legal/privacy-policy'); await flushPromises()
   expect(wrapper.text()).toContain('Документ пока не действует')
@@ -424,6 +426,20 @@ it('refreshes a current legal route at the server document boundary', async () =
   await mountCenter('/legal/privacy-policy'); await flushPromises()
   expect(wrapper.get('.consent-page__document-title').text()).toBe('Текущая версия')
   await vi.waitFor(() => expect(wrapper.get('.consent-page__document-title').text()).toBe('Новая версия'))
+  expect(h.store.current).toHaveBeenCalledTimes(2)
+})
+it('recovers a not-yet-effective legal route at its server boundary', async () => {
+  const replacement = { ...document, title:'Версия после границы' }
+  h.store.current
+    .mockResolvedValueOnce({
+      document:null,
+      serverNow:'2026-09-10T08:00:00.000Z',
+      nextChangeAt:'2026-09-10T08:00:00.100Z'
+    })
+    .mockResolvedValue({ document:replacement, serverNow:'2026-09-10T08:00:00.100Z', nextChangeAt:null })
+  await mountCenter('/legal/privacy-policy'); await flushPromises()
+  expect(wrapper.text()).toContain('Документ пока не действует')
+  await vi.waitFor(() => expect(wrapper.get('.consent-page__document-title').text()).toBe('Версия после границы'))
   expect(h.store.current).toHaveBeenCalledTimes(2)
 })
 it('rejects a non-future legal document boundary as a protocol outage', async () => {
@@ -544,6 +560,27 @@ it('reloads the personal document when refreshed history crosses its boundary', 
   await flushPromises()
   expect(h.store.current).toHaveBeenCalledWith(LEGAL_DOCUMENT_KIND.PERSONAL_DATA_CONSENT)
   expect(wrapper.find('.consent-page__panel--personal').text()).toContain('Новое персональное согласие')
+})
+it('recovers a missing personal document when history crosses its boundary', async () => {
+  const replacement = { ...document, html:'<p>Персональное согласие стало доступно.</p>' }
+  h.session.customer.value = { id:7 }
+  h.store.current.mockResolvedValueOnce({ document:null }).mockResolvedValue({ document:replacement })
+  await mountCenter('/consents/personal-data'); await flushPromises()
+  expect(wrapper.text()).toContain('Документ о согласии на обработку персональных данных пока не действует.')
+  h.store.mine.value = {
+    statuses:[], history:[], withdrawalRequest:null,
+    serverNow:'2026-09-10T08:00:00Z', nextChangeAt:'2026-09-10T08:01:00Z'
+  }
+  await nextTick()
+  h.store.mine.value = null
+  await nextTick()
+  h.store.mine.value = {
+    statuses:[], history:[], withdrawalRequest:null,
+    serverNow:'2026-09-10T08:01:00Z', nextChangeAt:null
+  }
+  await flushPromises()
+  expect(wrapper.find('.service-unavailable-page').exists()).toBe(false)
+  expect(wrapper.find('.consent-page__panel--personal').text()).toContain('Персональное согласие стало доступно.')
 })
 it('queues a personal boundary refresh until the active operation completes', async () => {
   const pendingGrant = deferred()
@@ -775,6 +812,23 @@ it('refreshes only the visible explicit consent section when returning to the pa
   expect(h.store.current).toHaveBeenCalledTimes(1)
   expect(h.store.current).toHaveBeenCalledWith(LEGAL_DOCUMENT_KIND.PERSONAL_DATA_CONSENT)
 })
+it('queues a foreground refresh without superseding an active consent operation', async () => {
+  const pendingGrant = deferred()
+  h.session.customer.value = { id:7 }
+  h.store.grant.mockImplementationOnce(() => pendingGrant.promise)
+  vi.spyOn(globalThis.document, 'visibilityState', 'get').mockReturnValue('visible')
+  await mountCenter('/consents/personal-data'); await flushPromises()
+  await wrapper.find('input[type=checkbox]').setValue(true)
+  h.store.current.mockClear()
+  button('Дать согласие').trigger('click')
+  await nextTick()
+  globalThis.dispatchEvent(new globalThis.Event('focus'))
+  await nextTick()
+  expect(h.store.current).not.toHaveBeenCalled()
+  pendingGrant.resolve(); await flushPromises()
+  expect(h.store.current).toHaveBeenCalledTimes(1)
+  expect(state().busy).toBe(false)
+})
 it('stops a combined foreground refresh before the second panel after unmount', async () => {
   h.session.customer.value = { id:7 }
   await mountCenter('/consents'); await flushPromises()
@@ -802,6 +856,27 @@ it('refreshes the cookie document when a routed receipt boundary is crossed', as
   expect(wrapper.findComponent(LegalDocumentReader).exists()).toBe(true)
   expect(state().busy).toBe(false)
   expect(state().cookieDocumentBusy).toBe(false)
+})
+it('refreshes a routed cookie document at the current-document boundary', async () => {
+  vi.useFakeTimers()
+  const current = { ...document, html:'<p>Текущий документ о куки.</p>' }
+  const replacement = { ...document, html:'<p>Новый документ о куки.</p>' }
+  h.store.current
+    .mockResolvedValueOnce({
+      document:current,
+      serverNow:'2026-09-10T08:00:00.000Z',
+      nextChangeAt:'2026-09-10T08:00:00.300Z'
+    })
+    .mockResolvedValue({ document:replacement, serverNow:'2026-09-10T08:00:00.300Z', nextChangeAt:null })
+  await mountCenter('/consents/cookies'); await flushPromises()
+  expect(wrapper.find('.consent-page__panel--cookies').text()).toContain('Текущий документ о куки')
+  expect(vi.getTimerCount()).toBeGreaterThan(0)
+  await vi.advanceTimersByTimeAsync(300)
+  await flushPromises()
+  expect(h.store.current).toHaveBeenCalledTimes(2)
+  expect(state().cookieDocument).toEqual(replacement)
+  expect(wrapper.find('.consent-page__panel--cookies').text()).toContain('Новый документ о куки')
+  vi.useRealTimers()
 })
 it('finishes loading the routed cookie document when refreshed status becomes current', async () => {
   h.store.loadCookies.mockImplementation(async () => { h.store.serviceAllowed.value = true })
