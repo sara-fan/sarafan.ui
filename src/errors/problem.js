@@ -2,7 +2,7 @@
 // All rights reserved.
 // This file is a part of the Sarafan application
 
-import { PROBLEM_TYPE_ROOT, createProblemTools } from '@sara-fan/ui-shared/problems'
+import { PROBLEM_TYPE_ROOT, ProblemError, createProblemTools } from '@sara-fan/ui-shared/problems'
 import { EVENTS } from '../observability/catalogue.js'
 import { uiLogger } from '../observability/logger.js'
 export { PROBLEM_TYPE_ROOT, ProblemError } from '@sara-fan/ui-shared/problems'
@@ -38,5 +38,6 @@ export function isServiceUnavailableProblem(problem) {
   return problem?.type === INTERNAL_PROBLEM_TYPES.networkUnavailable
     || problem?.type === INTERNAL_PROBLEM_TYPES.protocolError
     || problem?.type === INTERNAL_PROBLEM_TYPES.serviceUnavailable
-    || (Number.isInteger(problem?.status) && problem.status >= 500)
+    || (problem instanceof ProblemError && problem.type.startsWith(PROBLEM_TYPE_ROOT)
+      && Number.isInteger(problem.status) && problem.status >= 500)
 }

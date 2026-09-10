@@ -110,7 +110,7 @@ it('requires explicit mandatory куки consent with the canonical document and
   expect(router.currentRoute.value.name).toBe('home')
 })
 it('keeps service unavailable and permits retry when the куки document is unavailable', async () => {
-  h.store.current.mockResolvedValue({ document:null }); h.store.cookieProblem.value = denied()
+  h.store.current.mockResolvedValue({ document:null })
   await mountCenter(); await flushPromises()
   expect(button('Повторить загрузку')).toBeTruthy()
   await click('Повторить загрузку')
@@ -160,6 +160,14 @@ it('recovers every failed panel on the combined consent page with one retry', as
   expect(wrapper.find('.consent-page__panel--personal').findComponent(LegalDocumentReader).exists()).toBe(true)
   expect(h.store.current).toHaveBeenCalledTimes(5)
 })
+it('prioritizes a service outage over an ordinary error from the other consent panel', async () => {
+  h.session.customer.value = { id:7 }
+  h.store.cookieProblem.value = denied()
+  h.store.personalProblem.value = createInternalProblem('invalidInput')
+  await mountCenter('/consents'); await flushPromises()
+  expect(wrapper.find('.service-unavailable-page').exists()).toBe(true)
+  expect(wrapper.text()).toContain('Сервис недоступен. Пожалуйста, повторите позже.')
+})
 it('refuses directly from the initial notice and then shows a grant-only recovery state', async () => {
   await mountCenter(); await flushPromises()
   await click('Отказаться')
@@ -187,6 +195,16 @@ it('links authenticated visitors from the notice to the combined consent page', 
   expect(wrapper.get('a[href="/consents"]').text()).toBe('Согласия')
   await wrapper.get('a[href="/consents"]').trigger('click'); await flushPromises()
   expect(router.currentRoute.value.name).toBe('consents')
+})
+it('retries a failed personal-history load from the notice outage page', async () => {
+  h.session.customer.value = { id:7 }
+  h.store.serviceAllowed.value = true
+  h.store.loadMine.mockRejectedValueOnce(denied())
+  await mountCenter(); await flushPromises()
+  expect(wrapper.find('.service-unavailable-page').exists()).toBe(true)
+  await click('Повторить')
+  expect(h.store.loadMine).toHaveBeenCalledTimes(2)
+  expect(wrapper.find('.service-unavailable-page').exists()).toBe(false)
 })
 it('presents renewal copy, unknown statuses, and category deselection safely', async () => {
   await mountCenter(); await flushPromises()
@@ -288,6 +306,27 @@ it('makes immutable and current legal links available without login as routed pa
   expect(wrapper.text()).toContain('Сервис недоступен. Пожалуйста, повторите позже.')
   expect(wrapper.find('.service-unavailable-page').exists()).toBe(true)
 })
+it('uses the canonical document heading without adding a competing page h1', async () => {
+  h.store.current.mockResolvedValue({
+    document:{ ...document, title:'Название документа', html:'<h1>Канонический заголовок</h1><p>Текст.</p>' }
+  })
+  await mountCenter('/legal/privacy-policy'); await flushPromises()
+  expect(wrapper.get('.consent-page__document-title').text()).toBe('Название документа')
+  expect(wrapper.findAll('h1')).toHaveLength(1)
+  expect(wrapper.get('h1').text()).toBe('Канонический заголовок')
+})
+it('removes foreground listeners when a pending mount load is unmounted', async () => {
+  const pending = deferred()
+  h.store.current.mockImplementationOnce(() => pending.promise)
+  vi.spyOn(globalThis.document, 'visibilityState', 'get').mockReturnValue('visible')
+  await mountCenter('/legal/privacy-policy'); await nextTick()
+  wrapper.unmount()
+  pending.resolve({ document }); await flushPromises()
+  h.store.current.mockClear()
+  globalThis.dispatchEvent(new globalThis.Event('focus')); await flushPromises()
+  globalThis.document.dispatchEvent(new globalThis.Event('visibilitychange')); await flushPromises()
+  expect(h.store.current).not.toHaveBeenCalled()
+})
 it('ignores a stale document response after route changes and refreshes the routed document on foreground', async () => {
   let resolve
   const historical = { ...document, title:'Исторический документ' }
@@ -313,10 +352,10 @@ it('does not let a stale legal failure replace the newly selected document', asy
     .mockResolvedValueOnce({ document:selected })
   await mountCenter('/legal/privacy-policy'); await nextTick()
   await router.push('/legal/user-agreement'); await flushPromises()
-  expect(wrapper.get('h1').text()).toBe('Новый документ')
+  expect(wrapper.get('.consent-page__document-title').text()).toBe('Новый документ')
   stale.reject(denied()); await flushPromises()
   expect(wrapper.find('.service-unavailable-page').exists()).toBe(false)
-  expect(wrapper.get('h1').text()).toBe('Новый документ')
+  expect(wrapper.get('.consent-page__document-title').text()).toBe('Новый документ')
 })
 it('keeps the replacement legal load current after the previous watcher is cleaned up', async () => {
   const stale = deferred()
@@ -329,7 +368,7 @@ it('keeps the replacement legal load current after the previous watcher is clean
   await router.push('/legal/user-agreement'); await nextTick()
   stale.resolve({ document:{ ...document, title:'Устаревший документ' } }); await flushPromises()
   selected.resolve({ document:replacement }); await flushPromises()
-  expect(wrapper.get('h1').text()).toBe('Выбранный документ')
+  expect(wrapper.get('.consent-page__document-title').text()).toBe('Выбранный документ')
   expect(wrapper.find('.service-unavailable-page').exists()).toBe(false)
 })
 it('stops a stale legal load after its catalogue request completes', async () => {
@@ -342,7 +381,7 @@ it('stops a stale legal load after its catalogue request completes', async () =>
   await mountCenter('/legal/privacy-policy'); await nextTick()
   await router.push('/legal/user-agreement'); await flushPromises()
   staleCatalogue.resolve({ kinds, cookieCategories }); await flushPromises()
-  expect(wrapper.get('h1').text()).toBe('Документ после смены маршрута')
+  expect(wrapper.get('.consent-page__document-title').text()).toBe('Документ после смены маршрута')
   expect(h.store.current).toHaveBeenCalledTimes(1)
 })
 it('ignores consent work completed for a previous customer identity', async () => {
@@ -607,6 +646,22 @@ it('reuses consent decision keys while the withdrawal request has no client key'
   expect(h.store.requestWithdrawal).toHaveBeenCalledTimes(2)
   expect(h.store.requestWithdrawal.mock.calls).toEqual([[], []])
 })
+it('starts a new personal consent decision after logout and same-customer login', async () => {
+  h.session.customer.value = { id:7 }
+  await mountCenter('/consents/personal-data'); await flushPromises()
+  await wrapper.find('input[type=checkbox]').setValue(true)
+  h.store.grant.mockRejectedValueOnce(denied())
+  await click('Дать согласие')
+  const failedKey = h.store.grant.mock.calls[0][1]
+
+  h.session.customer.value = null
+  await flushPromises()
+  h.session.customer.value = { id:7 }
+  await flushPromises()
+  await wrapper.find('.consent-page__panel--personal input[type=checkbox]').setValue(true)
+  await click('Дать согласие')
+  expect(h.store.grant.mock.calls[1][1]).not.toBe(failedKey)
+})
 
 it('disables repeat submission while the latest request is pending and enables it after processing', async () => {
   h.session.customer.value = { id:7 }
@@ -640,4 +695,7 @@ it('reloads changed versions and resets affirmation without accepting the replac
   await click('Дать согласие')
   expect(wrapper.findComponent(LegalDocumentReader).exists()).toBe(false)
   expect(wrapper.text()).toContain('Сервис недоступен')
+  await click('Повторить')
+  expect(wrapper.findComponent(LegalDocumentReader).exists()).toBe(true)
+  expect(h.store.grant).toHaveBeenCalledTimes(2)
 })

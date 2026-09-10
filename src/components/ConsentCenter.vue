@@ -94,15 +94,22 @@ const cookieGrantCategories = computed(() => {
 })
 const canGrantCookies = computed(() => cookieGrantCategories.value.length > 0
   && cookieGrantCategories.value.every(category => categories.value.includes(category)))
+const prioritizedProblem = values => values.find(isServiceUnavailableProblem) || values.find(Boolean) || null
 const activeProblem = computed(() => {
   if (props.mode === 'legal') return problem.value
   if (combinedPage.value) {
-    return problem.value || cookieDocumentProblem.value || cookieProblem.value || personalProblem.value || opsProblem.value
+    return prioritizedProblem([
+      problem.value,
+      cookieDocumentProblem.value,
+      cookieProblem.value,
+      personalProblem.value,
+      opsProblem.value
+    ])
   }
   if (personalPage.value) {
-    return problem.value || personalProblem.value || opsProblem.value
+    return prioritizedProblem([problem.value, personalProblem.value, opsProblem.value])
   }
-  return problem.value || cookieDocumentProblem.value || cookieProblem.value || opsProblem.value
+  return prioritizedProblem([problem.value, cookieDocumentProblem.value, cookieProblem.value, opsProblem.value])
 })
 const message = computed(() => activeProblem.value ? presentProblem(activeProblem.value) : '')
 const serviceUnavailable = computed(() => isServiceUnavailableProblem(activeProblem.value))
@@ -129,6 +136,7 @@ const cookieNoticeCopy = computed(() => {
 
 const label = value => CONSENT_STATUSES[value] || value
 function resetChoice() { choiceKey = globalThis.crypto.randomUUID(); choiceSignature = '' }
+function resetPersonalChoice() { personalKey = globalThis.crypto.randomUUID(); personalSignature = '' }
 function toggleCategory(category, selected) {
   categories.value = selected
     ? [...new Set([...categories.value, category])]
@@ -161,7 +169,10 @@ async function perform(action, onVersionChanged, isCurrent = alwaysCurrent) {
     if (problem.value.type === 'https://sarafan.sw.consulting/problems/consent-version-changed' && onVersionChanged) {
       try { await onVersionChanged(ownsOperation) }
       catch (refreshError) {
-        if (ownsOperation()) problem.value = normalizeProblem(refreshError)
+        if (ownsOperation()) {
+          problem.value = normalizeProblem(refreshError)
+          lastAttempt = null
+        }
       }
     }
   } finally {
@@ -181,12 +192,8 @@ async function retry() {
     const associated = await perform(() => store.associate())
     if (!associated) return
   }
-  if (props.mode === 'notice') {
-    await perform(async ownsOperation => {
-      await store.loadCookies()
-      if (ownsOperation() && cookieRequired.value) await fetchCookieDocument(false, ownsOperation)
-    })
-  } else if (props.mode === 'legal') await openLegal()
+  if (props.mode === 'notice') await refreshNotice()
+  else if (props.mode === 'legal') await openLegal()
   else if (combinedPage.value) {
     await openCookies()
     await openPersonal()
@@ -317,11 +324,15 @@ async function grant() {
 
 async function requestWithdrawal() { await perform(() => store.requestWithdrawal()) }
 
-async function refreshOps() {
+async function refreshNotice(isCurrent = alwaysCurrent) {
   await perform(async ownsOperation => {
+    if (session.customer.value) await store.loadMine()
+    if (!ownsOperation()) return
     await store.loadOps()
+    if (!ownsOperation()) return
+    await store.loadCookies()
     if (ownsOperation() && cookieRequired.value) await fetchCookieDocument(false, ownsOperation)
-  })
+  }, undefined, isCurrent)
 }
 
 async function visible() {
@@ -352,19 +363,18 @@ watch(() => session.customer.value?.id, async (id, _previous, cleanup) => {
   })
   invalidateOperations()
   store.resetCustomer()
+  resetPersonalChoice()
   problem.value = null
   personalDocument.value = null
   if (!id) {
-    if (cookiePage.value) await openCookies(isCurrent)
+    if (props.mode === 'notice') await refreshNotice(isCurrent)
+    else if (cookiePage.value) await openCookies(isCurrent)
     return
   }
   try {
     if (store.serviceAllowed.value) await store.associate()
     if (!isCurrent()) return
-    if (props.mode === 'notice') {
-      await store.loadMine()
-      if (!isCurrent()) return
-    }
+    if (props.mode === 'notice') await refreshNotice(isCurrent)
     if (cookiePage.value) {
       await openCookies(isCurrent)
       if (!isCurrent()) return
@@ -398,11 +408,10 @@ watch(() => route.params.documentRef, async (target, _previous, cleanup) => {
   await openLegal(target, () => active)
 })
 
-onMounted(async () => {
-  if (props.mode === 'legal') await openLegal()
-  else if (props.mode === 'notice') await refreshOps()
+onMounted(() => {
   globalThis.addEventListener('focus', visible)
   globalThis.document.addEventListener('visibilitychange', visible)
+  if (props.mode === 'legal') openLegal()
 })
 
 onUnmounted(() => {
@@ -722,7 +731,9 @@ onUnmounted(() => {
         <p class="page-kicker">
           ЮРИДИЧЕСКИЕ ДОКУМЕНТЫ
         </p>
-        <h1>{{ document?.title || 'Юридический документ' }}</h1>
+        <div class="consent-page__document-title">
+          {{ document?.title || 'Юридический документ' }}
+        </div>
       </div>
       <UiButton
         variant="secondary"
