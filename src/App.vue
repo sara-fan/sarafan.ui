@@ -67,8 +67,6 @@ watch(
 )
 
 onMounted(async () => {
-  try { await consentStore.loadCookies() }
-  catch { /* ConsentCenter owns the recoverable presentation. */ }
   await startSession()
 })
 </script>

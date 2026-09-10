@@ -63,6 +63,9 @@ let sessionEpoch = 0
 let viewEpoch = 0
 let mounted = false
 let cookieRefreshPending = false
+let legalBoundaryTimer = null
+let personalBoundary = null
+let personalRefreshPending = null
 
 const alwaysCurrent = () => true
 const currentPredicate = value => typeof value === 'function' ? value : alwaysCurrent
@@ -155,8 +158,25 @@ const cookieNoticeCopy = computed(() => {
 const label = value => CONSENT_STATUSES[value] || value
 function requireDocument(value, detail) {
   if (!value) throw createInternalProblem('invalidInput', { detail })
+  if (!Number.isFinite(Date.parse(value.effectiveAt))) throw createInternalProblem('protocolError')
   documentNodes(value.html)
   return value
+}
+function nextChangeDelay(envelope) {
+  if (envelope?.nextChangeAt == null) return null
+  const delay = Date.parse(envelope.nextChangeAt) - Date.parse(envelope.serverNow)
+  if (!Number.isFinite(delay) || delay <= 0) throw createInternalProblem('protocolError')
+  return delay
+}
+function scheduleBoundary(delay, assign, action) {
+  function schedule(remaining) {
+    const chunk = Math.min(remaining, 2147483647)
+    assign(globalThis.setTimeout(() => {
+      if (remaining > chunk) schedule(remaining - chunk)
+      else action()
+    }, chunk))
+  }
+  schedule(delay)
 }
 function resetChoice() { choiceKey = globalThis.crypto.randomUUID(); choiceSignature = '' }
 function resetPersonalChoice() { personalKey = globalThis.crypto.randomUUID(); personalSignature = '' }
@@ -278,6 +298,8 @@ async function prepareCookieNotice(refreshStatus = false) {
 
 async function openLegal(target = route.params.documentRef, isCurrent = alwaysCurrent) {
   if (typeof target !== 'string') return
+  globalThis.clearTimeout(legalBoundaryTimer)
+  legalBoundaryTimer = null
   const epoch = ++documentEpoch
   const ownsDocument = () => epoch === documentEpoch && isCurrent()
   document.value = null
@@ -285,9 +307,16 @@ async function openLegal(target = route.params.documentRef, isCurrent = alwaysCu
     await store.ensureOps()
     if (!ownsOperation()) return
     const kind = store.kindByAlias(target)
-    const result = kind !== undefined ? (await store.current(kind)).document : await store.read(target)
+    const envelope = kind !== undefined ? await store.current(kind) : null
+    const result = envelope ? envelope.document : await store.read(target)
     if (!ownsOperation()) return
     document.value = requireDocument(result, 'Документ пока не действует.')
+    const delay = nextChangeDelay(envelope)
+    if (delay !== null) {
+      scheduleBoundary(delay, value => { legalBoundaryTimer = value }, () => {
+        if (epoch === documentEpoch && isCurrent()) openLegal(target, isCurrent)
+      })
+    }
   }, undefined, ownsDocument)
 }
 
@@ -346,6 +375,19 @@ async function showPersonal(isCurrent = alwaysCurrent) {
     )
     if (!ownsOperation()) return
     personalDocument.value = result
+  }, undefined, isCurrent)
+}
+
+async function refreshPersonalDocument(isCurrent = alwaysCurrent) {
+  if (!isCurrent()) return
+  accepted.value = false
+  personalDocument.value = null
+  await perform(async ownsOperation => {
+    const result = requireDocument(
+      (await store.current(LEGAL_DOCUMENT_KIND.PERSONAL_DATA_CONSENT)).document,
+      'Документ о согласии на обработку персональных данных пока не действует.'
+    )
+    if (ownsOperation()) personalDocument.value = result
   }, undefined, isCurrent)
 }
 
@@ -432,6 +474,8 @@ watch(() => session.customer.value?.id, async (id, _previous, cleanup) => {
   invalidateOperations()
   store.resetCustomer()
   resetPersonalChoice()
+  personalBoundary = null
+  personalRefreshPending = null
   problem.value = null
   personalDocument.value = null
   if (!id) {
@@ -489,6 +533,30 @@ watch([busy, cookieStatusLoads], async ([operationBusy, statusLoads]) => {
   await refreshRequiredCookies()
 })
 
+watch(mine, async value => {
+  if (!value) return
+  const previousBoundary = personalBoundary
+  personalBoundary = value.nextChangeAt || null
+  const serverNow = Date.parse(value.serverNow)
+  const boundary = Date.parse(previousBoundary)
+  if (!previousBoundary || !personalPage.value || !personalDocument.value
+    || !Number.isFinite(serverNow) || !Number.isFinite(boundary) || serverNow < boundary) return
+  const epoch = sessionEpoch
+  const isCurrent = () => mounted && epoch === sessionEpoch && personalPage.value
+  if (busy.value) {
+    personalRefreshPending = isCurrent
+    return
+  }
+  await refreshPersonalDocument(isCurrent)
+})
+
+watch(busy, async operationBusy => {
+  if (operationBusy || !personalRefreshPending || problem.value) return
+  const isCurrent = personalRefreshPending
+  personalRefreshPending = null
+  await refreshPersonalDocument(isCurrent)
+})
+
 watch(serviceUnavailable, unavailable => {
   if (props.mode === 'notice') emit('service-unavailable', unavailable)
 }, { immediate:true })
@@ -512,6 +580,9 @@ onMounted(() => {
 
 onUnmounted(() => {
   mounted = false
+  globalThis.clearTimeout(legalBoundaryTimer)
+  legalBoundaryTimer = null
+  personalRefreshPending = null
   viewEpoch++
   documentEpoch++
   cookieDocumentEpoch++

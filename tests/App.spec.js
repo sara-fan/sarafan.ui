@@ -76,17 +76,18 @@ describe('App routing and privacy gates', () => {
     expect(wrapper.find('.phone-auth-stub').exists()).toBe(false)
   })
 
-  it('loads cookie status before attempting recoverable session restoration', async () => {
+  it('leaves initial cookie loading to the consent controller before restoring a ready session', async () => {
     const order = []
     h.consents.serviceAllowed.value = true
     h.consents.loadCookies.mockImplementation(async () => { order.push('cookies') })
     h.session.restoreSession.mockImplementation(async () => { order.push('session') })
     await mountApp()
     await flushPromises()
-    expect(order).toEqual(['cookies', 'session'])
+    expect(order).toEqual(['session'])
+    expect(h.consents.loadCookies).not.toHaveBeenCalled()
     h.consents.serviceAllowed.value = false
     await flushPromises()
-    expect(order).toEqual(['cookies', 'session'])
+    expect(order).toEqual(['session'])
   })
 
   it('does not mount a protected route until cookie and session gates pass', async () => {

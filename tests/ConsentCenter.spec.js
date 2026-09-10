@@ -402,6 +402,39 @@ it('keeps a semantic route heading when the canonical document is rejected', asy
   expect(wrapper.find('.service-unavailable-page').exists()).toBe(false)
   expect(wrapper.findComponent(LegalDocumentReader).exists()).toBe(true)
 })
+it('rejects invalid legal effective dates before rendering and permits retry', async () => {
+  h.store.current.mockResolvedValue({ document:{ ...document, effectiveAt:'not-a-date' } })
+  await mountCenter('/legal/privacy-policy'); await flushPromises()
+  expect(wrapper.find('.service-unavailable-page').exists()).toBe(true)
+  h.store.current.mockResolvedValue({ document })
+  await click('Повторить')
+  expect(wrapper.find('.service-unavailable-page').exists()).toBe(false)
+  expect(wrapper.findComponent(LegalDocumentReader).exists()).toBe(true)
+})
+it('refreshes a current legal route at the server document boundary', async () => {
+  const current = { ...document, title:'Текущая версия' }
+  const replacement = { ...document, title:'Новая версия' }
+  h.store.current
+    .mockResolvedValueOnce({
+      document:current,
+      serverNow:'2026-09-10T08:00:00.000Z',
+      nextChangeAt:'2026-09-10T08:00:00.100Z'
+    })
+    .mockResolvedValue({ document:replacement, serverNow:'2026-09-10T08:00:00.100Z', nextChangeAt:null })
+  await mountCenter('/legal/privacy-policy'); await flushPromises()
+  expect(wrapper.get('.consent-page__document-title').text()).toBe('Текущая версия')
+  await vi.waitFor(() => expect(wrapper.get('.consent-page__document-title').text()).toBe('Новая версия'))
+  expect(h.store.current).toHaveBeenCalledTimes(2)
+})
+it('rejects a non-future legal document boundary as a protocol outage', async () => {
+  h.store.current.mockResolvedValue({
+    document,
+    serverNow:'2026-09-10T08:00:00Z',
+    nextChangeAt:'2026-09-10T08:00:00Z'
+  })
+  await mountCenter('/legal/privacy-policy'); await flushPromises()
+  expect(wrapper.find('.service-unavailable-page').exists()).toBe(true)
+})
 it('loads a legal document without associating the authenticated browser', async () => {
   h.session.customer.value = { id:7 }
   h.store.serviceAllowed.value = true
@@ -490,6 +523,55 @@ it('keeps a pending legal load current when the customer session changes', async
   expect(wrapper.findComponent(LegalDocumentReader).exists()).toBe(true)
   expect(wrapper.text()).toContain('Отдельный текст согласия.')
   expect(h.store.current).toHaveBeenCalledTimes(1)
+})
+it('reloads the personal document when refreshed history crosses its boundary', async () => {
+  const replacement = { ...document, html:'<p>Новое персональное согласие.</p>' }
+  h.session.customer.value = { id:7 }
+  await mountCenter('/consents/personal-data'); await flushPromises()
+  h.store.current.mockClear()
+  h.store.current.mockResolvedValue({ document:replacement })
+  h.store.mine.value = {
+    statuses:[], history:[], withdrawalRequest:null,
+    serverNow:'2026-09-10T08:00:00Z', nextChangeAt:'2026-09-10T08:01:00Z'
+  }
+  await nextTick()
+  h.store.mine.value = null
+  await nextTick()
+  h.store.mine.value = {
+    statuses:[], history:[], withdrawalRequest:null,
+    serverNow:'2026-09-10T08:01:00Z', nextChangeAt:null
+  }
+  await flushPromises()
+  expect(h.store.current).toHaveBeenCalledWith(LEGAL_DOCUMENT_KIND.PERSONAL_DATA_CONSENT)
+  expect(wrapper.find('.consent-page__panel--personal').text()).toContain('Новое персональное согласие')
+})
+it('queues a personal boundary refresh until the active operation completes', async () => {
+  const pendingGrant = deferred()
+  const replacement = { ...document, html:'<p>Согласие после границы.</p>' }
+  h.session.customer.value = { id:7 }
+  h.store.grant.mockImplementationOnce(() => pendingGrant.promise)
+  await mountCenter('/consents/personal-data'); await flushPromises()
+  h.store.mine.value = {
+    statuses:[], history:[], withdrawalRequest:null,
+    serverNow:'2026-09-10T08:00:00Z', nextChangeAt:'2026-09-10T08:01:00Z'
+  }
+  await nextTick()
+  await wrapper.find('input[type=checkbox]').setValue(true)
+  h.store.current.mockClear()
+  h.store.current.mockResolvedValue({ document:replacement })
+  button('Дать согласие').trigger('click')
+  await nextTick()
+  h.store.mine.value = null
+  await nextTick()
+  h.store.mine.value = {
+    statuses:[], history:[], withdrawalRequest:null,
+    serverNow:'2026-09-10T08:01:00Z', nextChangeAt:null
+  }
+  await nextTick()
+  expect(h.store.current).not.toHaveBeenCalled()
+  pendingGrant.resolve(); await flushPromises()
+  expect(h.store.current).toHaveBeenCalledWith(LEGAL_DOCUMENT_KIND.PERSONAL_DATA_CONSENT)
+  expect(wrapper.find('.consent-page__panel--personal').text()).toContain('Согласие после границы.')
 })
 it('ignores consent work completed for a previous customer identity', async () => {
   const staleAssociation = deferred()
