@@ -170,6 +170,17 @@ describe('session store', () => {
     })
   })
 
+  it('presents a network failure during code request as service unavailability', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')))
+
+    const session = useSession()
+    await expect(session.requestCode('+79990000004', 'login')).rejects.toMatchObject({
+      type: INTERNAL_PROBLEM_TYPES.serviceUnavailable,
+      code: 'ui_service_unavailable',
+      detail: 'Сервис недоступен. Пожалуйста, повторите позже.'
+    })
+  })
+
   it('forces logoff after an authenticated request receives a gateway error', async () => {
     const customer = { id: 4, phone: '+79990000004', profile: { phone: '+79990000004' } }
     const fetch = vi.fn()

@@ -160,7 +160,7 @@ export function createConsentStore(session) {
   async function requirePersonalData() {
     await loadMine()
     if (mine.value?.statuses.find(x => x.kind === LEGAL_DOCUMENT_KIND.PERSONAL_DATA_CONSENT)?.status !== 'current') {
-      throw createInternalProblem('invalidInput', { detail:'Откройте «Мои согласия и обращения» и дайте актуальное согласие. Введённые данные сохранены в форме.' })
+      throw createInternalProblem('invalidInput', { detail:'Откройте «Согласия» и дайте актуальное согласие. Введённые данные сохранены в форме.' })
     }
   }
   async function grant(document, key = globalThis.crypto.randomUUID()) {

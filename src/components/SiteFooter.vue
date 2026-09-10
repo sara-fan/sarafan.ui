@@ -32,7 +32,7 @@ const documents = computed(() => ops.value?.kinds || [])
           {{ document.name }}
         </RouterLink>
         <RouterLink :to="{ name: 'consents' }">
-          Настройки куки
+          Согласия
         </RouterLink>
       </nav>
     </div>

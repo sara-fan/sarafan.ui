@@ -2,7 +2,7 @@
 // All rights reserved.
 // This file is a part of the Sarafan application
 
-import { flushPromises, mount } from '@vue/test-utils'
+import { flushPromises, mount, shallowMount } from '@vue/test-utils'
 import { ref } from 'vue'
 import { createMemoryHistory } from 'vue-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -18,6 +18,8 @@ import UiSelectionControl from '../src/components/ui/UiSelectionControl.vue'
 import { createSarafanVuetify } from '../src/plugins/vuetify.js'
 import { ACCESS, createAppRouter, routes } from '../src/router.js'
 import HomeView from '../src/views/HomeView.vue'
+import ConsentsView from '../src/views/ConsentsView.vue'
+import LegalDocumentView from '../src/views/LegalDocumentView.vue'
 import NotFoundView from '../src/views/NotFoundView.vue'
 import OrdersView from '../src/views/OrdersView.vue'
 import PendingView from '../src/views/PendingView.vue'
@@ -52,6 +54,27 @@ describe('router and page shells', () => {
     const router = await routerAt('/does-not-exist')
     expect(router.currentRoute.value.name).toBe('not-found')
     expect(createAppRouter().hasRoute('home')).toBe(true)
+    expect(routes.find(route => route.name === 'consents').component).toBe(ConsentsView)
+    expect(routes.find(route => route.name === 'legal-document').component).toBe(LegalDocumentView)
+    expect(routes.find(route => route.name === 'cookie-consents').props).toEqual({ section:'cookies' })
+    expect(routes.find(route => route.name === 'personal-consents').props).toEqual({ section:'personal' })
+  })
+
+  it('renders the consent and legal route wrappers without dialog overlays', async () => {
+    const consent = shallowMount(ConsentsView, {
+      props:{ section:'personal' },
+      global:{ stubs:{ ConsentCenter:true } }
+    })
+    const initialCenter = consent.getComponent({ name:'ConsentCenter' })
+    expect(initialCenter.props()).toMatchObject({ mode:'consents', section:'personal' })
+    const initialUid = initialCenter.vm.$.uid
+    await consent.setProps({ section:'cookies' })
+    const replacementCenter = consent.getComponent({ name:'ConsentCenter' })
+    expect(replacementCenter.props()).toMatchObject({ mode:'consents', section:'cookies' })
+    expect(replacementCenter.vm.$.uid).not.toBe(initialUid)
+
+    const legal = shallowMount(LegalDocumentView, { global:{ stubs:{ ConsentCenter:true } } })
+    expect(legal.getComponent({ name:'ConsentCenter' }).props('mode')).toBe('legal')
   })
 
   it('submits the public product URL through Vue Router state', async () => {
@@ -128,6 +151,7 @@ describe('shared application chrome and controls', () => {
     const wrapper = mount(SiteFooter, { global: { plugins: [router] } })
     expect(wrapper.findAll('.site-footer__links a')).toHaveLength(3)
     expect(wrapper.get('a[href="/legal/privacy-policy"]').exists()).toBe(true)
+    expect(wrapper.get('a[href="/consents"]').text()).toBe('Согласия')
     expect(wrapper.get('a[href="https://gtc.express/"]').text()).toBe('Совместно с GTC')
     expect(wrapper.get('.brand-lockup__partner').attributes('target')).toBe('_blank')
     h.store.ops.value = null

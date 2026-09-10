@@ -29,7 +29,11 @@ async function mountApp(path = '/') {
     global: {
       plugins: [createSarafanVuetify(), router],
       stubs: {
-        ConsentCenter: true,
+        ConsentCenter: {
+          name: 'ConsentCenter',
+          emits: ['service-unavailable'],
+          template: '<button class="consent-unavailable-stub" hidden @click="$emit(\'service-unavailable\', true)" />'
+        },
         PhoneAuthDialog: {
           name: 'PhoneAuthDialog',
           props: ['modelValue'],
@@ -72,14 +76,18 @@ describe('App routing and privacy gates', () => {
     expect(wrapper.find('.phone-auth-stub').exists()).toBe(false)
   })
 
-  it('loads cookie status before attempting recoverable session restoration', async () => {
+  it('leaves initial cookie loading to the consent controller before restoring a ready session', async () => {
     const order = []
     h.consents.serviceAllowed.value = true
     h.consents.loadCookies.mockImplementation(async () => { order.push('cookies') })
     h.session.restoreSession.mockImplementation(async () => { order.push('session') })
     await mountApp()
     await flushPromises()
-    expect(order).toEqual(['cookies', 'session'])
+    expect(order).toEqual(['session'])
+    expect(h.consents.loadCookies).not.toHaveBeenCalled()
+    h.consents.serviceAllowed.value = false
+    await flushPromises()
+    expect(order).toEqual(['session'])
   })
 
   it('does not mount a protected route until cookie and session gates pass', async () => {
@@ -133,12 +141,44 @@ describe('App routing and privacy gates', () => {
   it('keeps recoverable restore failures non-blocking on public routes', async () => {
     h.consents.serviceAllowed.value = true
     h.session.restoreProblem.value = createInternalProblem('sessionRestoreUnavailable')
-    const { wrapper } = await mountApp()
+    const { router, wrapper } = await mountApp()
     await flushPromises()
     expect(wrapper.text()).toContain('Закажите товар — остальное сделаем мы')
     expect(wrapper.text()).toContain('Не удалось восстановить сеанс')
     await wrapper.findAll('button').find(item => item.text() === 'Повторить').trigger('click')
     expect(h.session.restoreSession).toHaveBeenCalled()
+    await router.push('/legal/privacy-policy')
+    await flushPromises()
+    expect(wrapper.find('.session-notice').exists()).toBe(false)
+  })
+
+  it('lets the consent controller replace ordinary content with its outage page', async () => {
+    const { router, wrapper } = await mountApp()
+    await flushPromises()
+    expect(wrapper.text()).toContain('Закажите товар — остальное сделаем мы')
+    const productLink = wrapper.get('input')
+    await productLink.setValue('https://shop.example/product')
+    await wrapper.get('.consent-unavailable-stub').trigger('click')
+    expect(wrapper.get('.app-route-content').attributes('style')).toContain('display: none')
+    expect(wrapper.text()).toContain('Закажите товар — остальное сделаем мы')
+    expect(productLink.element.value).toBe('https://shop.example/product')
+    wrapper.findComponent({ name:'ConsentCenter' }).vm.$emit('service-unavailable', false)
+    await flushPromises()
+    expect(wrapper.get('.app-route-content').attributes('style') || '').not.toContain('display: none')
+    expect(productLink.element.value).toBe('https://shop.example/product')
+    await router.push('/consents/cookies'); await flushPromises()
+    expect(router.currentRoute.value.name).toBe('cookie-consents')
+    expect(wrapper.find('.consent-unavailable-stub').exists()).toBe(true)
+    for (const [path, name] of [
+      ['/consents', 'consents'],
+      ['/consents/personal-data', 'personal-consents'],
+      ['/legal/cookie-consent', 'legal-document']
+    ]) {
+      await router.push(path); await flushPromises()
+      expect(router.currentRoute.value.name).toBe(name)
+    }
+    await router.push('/'); await flushPromises()
+    expect(wrapper.text()).toContain('Закажите товар — остальное сделаем мы')
   })
 
   it('opens reusable phone authentication and exposes one inert Support entry', async () => {

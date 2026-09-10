@@ -4,7 +4,9 @@
 
 import { createRouter, createWebHistory } from 'vue-router'
 
+import ConsentsView from './views/ConsentsView.vue'
 import HomeView from './views/HomeView.vue'
+import LegalDocumentView from './views/LegalDocumentView.vue'
 import NotFoundView from './views/NotFoundView.vue'
 import OrdersView from './views/OrdersView.vue'
 import PendingView from './views/PendingView.vue'
@@ -24,8 +26,10 @@ export const routes = [
   { path: '/orders/:orderId/checkout', name: 'checkout', component: PendingView, props: { title: 'Оформление заказа', copy: 'Оформление заказа будет подключено отдельной задачей MVP.' }, meta: { access: ACCESS.CUSTOMER, navigationSection: 'orders' } },
   { path: '/orders/:orderId/payment', name: 'payment', component: PendingView, props: { title: 'Оплата', copy: 'Демонстрационная оплата будет подключена отдельной задачей MVP.' }, meta: { access: ACCESS.CUSTOMER, navigationSection: 'orders' } },
   { path: '/profile', name: 'profile', component: ProfileView, meta: { access: ACCESS.CUSTOMER, navigationSection: 'profile' } },
-  { path: '/legal/:documentRef', name: 'legal-document', component: HomeView, meta: { access: ACCESS.LIMITED, navigationSection: 'home', overlay: true } },
-  { path: '/consents', name: 'consents', component: HomeView, meta: { access: ACCESS.LIMITED, navigationSection: 'home', overlay: true } },
+  { path: '/legal/:documentRef', name: 'legal-document', component: LegalDocumentView, meta: { access: ACCESS.LIMITED, navigationSection: 'home' } },
+  { path: '/consents/cookies', name: 'cookie-consents', component: ConsentsView, props: { section: 'cookies' }, meta: { access: ACCESS.LIMITED, navigationSection: 'home' } },
+  { path: '/consents/personal-data', name: 'personal-consents', component: ConsentsView, props: { section: 'personal' }, meta: { access: ACCESS.LIMITED, navigationSection: 'home' } },
+  { path: '/consents', name: 'consents', component: ConsentsView, meta: { access: ACCESS.LIMITED, navigationSection: 'home' } },
   { path: '/:pathMatch(.*)*', name: 'not-found', component: NotFoundView, meta: { access: ACCESS.PUBLIC } }
 ]
 

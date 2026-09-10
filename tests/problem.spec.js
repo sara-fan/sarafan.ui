@@ -8,6 +8,7 @@ import {
   INTERNAL_PROBLEM_TYPES,
   ProblemError,
   createInternalProblem,
+  isServiceUnavailableProblem,
   normalizeProblem,
   presentProblem,
   problemFieldErrors,
@@ -103,5 +104,23 @@ describe('shared problem model', () => {
 
   it('rejects unknown internal catalogue keys', () => {
     expect(() => createInternalProblem('missing')).toThrow(TypeError)
+  })
+
+  it('classifies transport, protocol, and server failures as service unavailability', () => {
+    const server = new ProblemError({
+      type: 'https://sarafan.sw.consulting/problems/core-unavailable',
+      title: 'Сервис недоступен',
+      status: 503,
+      detail: 'Сервис недоступен',
+      instance: 'urn:sarafan:problem:4bf92f3577b34da6a3ce929d0e0e4736',
+      code: 'core_unavailable'
+    })
+    expect(isServiceUnavailableProblem(createInternalProblem('networkUnavailable'))).toBe(true)
+    expect(isServiceUnavailableProblem(createInternalProblem('protocolError'))).toBe(true)
+    expect(isServiceUnavailableProblem(createInternalProblem('serviceUnavailable'))).toBe(true)
+    expect(isServiceUnavailableProblem(server)).toBe(true)
+    expect(isServiceUnavailableProblem({ status:503 })).toBe(false)
+    expect(isServiceUnavailableProblem({ status:409 })).toBe(false)
+    expect(isServiceUnavailableProblem(null)).toBe(false)
   })
 })
