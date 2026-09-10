@@ -184,11 +184,14 @@ async function perform(action, onVersionChanged, isCurrent = alwaysCurrent, retr
     if (!ownsOperation()) return false
     problem.value = normalizeProblem(error)
     if (problem.value.type === 'https://sarafan.sw.consulting/problems/consent-version-changed' && onVersionChanged) {
-      try { await onVersionChanged(ownsOperation) }
+      try {
+        await onVersionChanged(ownsOperation)
+        if (ownsOperation()) lastAttempt = null
+      }
       catch (refreshError) {
         if (ownsOperation()) {
           problem.value = normalizeProblem(refreshError)
-          lastAttempt = null
+          lastAttempt = { action:onVersionChanged, onVersionChanged:undefined, isCurrent }
         }
       }
     }
@@ -432,7 +435,7 @@ watch(() => session.customer.value?.id, async (id, _previous, cleanup) => {
   }
 }, { immediate:true })
 
-watch(cookieRequired, async (required, _previous, cleanup) => {
+watch(cookieRequired, async required => {
   if (!required) {
     cookieDocumentProblem.value = null
     if (props.mode === 'notice') {
@@ -451,9 +454,7 @@ watch(cookieRequired, async (required, _previous, cleanup) => {
   }
   if (props.mode !== 'consents' || !cookiePage.value) return
   const epoch = sessionEpoch
-  let active = true
-  cleanup(() => { active = false })
-  await openCookies(() => active && mounted && epoch === sessionEpoch && cookiePage.value)
+  await openCookies(() => mounted && epoch === sessionEpoch && cookiePage.value)
 })
 
 watch(serviceUnavailable, unavailable => {

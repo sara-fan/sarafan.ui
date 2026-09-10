@@ -708,11 +708,14 @@ it('refreshes the cookie document when a routed receipt boundary is crossed', as
   h.store.serviceAllowed.value = true
   await flushPromises()
   h.store.current.mockClear()
+  h.store.loadCookies.mockImplementationOnce(async () => { h.store.serviceAllowed.value = true })
   h.store.serviceAllowed.value = false
   await flushPromises()
   expect(h.store.loadCookies).toHaveBeenCalledTimes(2)
   expect(h.store.current).toHaveBeenCalledWith(LEGAL_DOCUMENT_KIND.COOKIE_CONSENT)
   expect(wrapper.findComponent(LegalDocumentReader).exists()).toBe(true)
+  expect(state().busy).toBe(false)
+  expect(state().cookieDocumentBusy).toBe(false)
 })
 it('finishes loading the routed cookie document when refreshed status becomes current', async () => {
   h.store.loadCookies.mockImplementation(async () => { h.store.serviceAllowed.value = true })
@@ -885,6 +888,11 @@ it('reloads changed versions and resets affirmation without accepting the replac
   h.store.decideCookies.mockRejectedValueOnce(changed)
   await click('Принять обязательные куки')
   expect(wrapper.findAll('input[type=checkbox]').every(x => !x.element.checked)).toBe(true)
+  expect(h.store.decideCookies).toHaveBeenCalledTimes(1)
+  h.store.cookieProblem.value = denied()
+  h.store.loadCookies.mockImplementation(async () => { h.store.cookieProblem.value = null })
+  await nextTick()
+  await click('Повторить')
   expect(h.store.decideCookies).toHaveBeenCalledTimes(1)
   wrapper.unmount()
   await mountCenter('/consents/personal-data'); await flushPromises()
