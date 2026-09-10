@@ -27,7 +27,7 @@ const authOpen = ref(false)
 const consentUnavailable = ref(false)
 
 const customerRoute = computed(() => route.meta.access === ACCESS.CUSTOMER)
-const consentRoute = computed(() => ['consents', 'cookie-consents', 'personal-consents', 'legal-document'].includes(route.name))
+const consentRoute = computed(() => route.meta.access === ACCESS.LIMITED)
 const restoreMessage = computed(() => restoreProblem.value ? presentProblem(restoreProblem.value) : '')
 
 async function startSession(force = false) {

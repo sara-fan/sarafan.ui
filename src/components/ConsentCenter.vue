@@ -6,7 +6,7 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 
-import { LEGAL_DOCUMENT_KIND, CONSENT_STATUSES, moscowTime } from '../consentFormatting.js'
+import { LEGAL_DOCUMENT_KIND, CONSENT_STATUSES, documentNodes, moscowTime } from '../consentFormatting.js'
 import {
   createInternalProblem,
   isServiceUnavailableProblem,
@@ -96,6 +96,14 @@ const cookieGrantCategories = computed(() => {
 })
 const canGrantCookies = computed(() => cookieGrantCategories.value.length > 0
   && cookieGrantCategories.value.every(category => categories.value.includes(category)))
+const legalDocumentHasH1 = computed(() => {
+  if (!document.value) return false
+  try {
+    const hasH1 = nodes => nodes.some(node => node && typeof node === 'object'
+      && (node.type === 'h1' || (Array.isArray(node.children) && hasH1(node.children))))
+    return hasH1(documentNodes(document.value.html))
+  } catch { return false }
+})
 const prioritizedProblem = values => values.find(isServiceUnavailableProblem) || values.find(Boolean) || null
 const activeProblem = computed(() => {
   if (props.mode === 'legal') return problem.value
@@ -111,12 +119,18 @@ const activeProblem = computed(() => {
   if (personalPage.value) {
     return prioritizedProblem([problem.value, personalProblem.value, opsProblem.value])
   }
-  return prioritizedProblem([problem.value, cookieDocumentProblem.value, cookieProblem.value, opsProblem.value])
+  return prioritizedProblem([
+    problem.value,
+    cookieDocumentProblem.value,
+    cookieProblem.value,
+    personalProblem.value,
+    opsProblem.value
+  ])
 })
 const message = computed(() => activeProblem.value ? presentProblem(activeProblem.value) : '')
 const serviceUnavailable = computed(() => isServiceUnavailableProblem(activeProblem.value))
 const cookieNoticeError = computed(() => {
-  const value = problem.value || cookieDocumentProblem.value || cookieProblem.value || opsProblem.value
+  const value = problem.value || cookieDocumentProblem.value || cookieProblem.value || personalProblem.value || opsProblem.value
   return value ? presentProblem(value) : ''
 })
 const cookieNoticeTitle = computed(() => {
@@ -152,12 +166,12 @@ function invalidateOperations() {
   busy.value = false
 }
 
-async function perform(action, onVersionChanged, isCurrent = alwaysCurrent) {
+async function perform(action, onVersionChanged, isCurrent = alwaysCurrent, retryAction = action) {
   if (!isCurrent()) return false
   const operation = ++operationEpoch
   const ownsOperation = () => operation === operationEpoch && isCurrent()
   let succeeded = false
-  lastAttempt = { action, onVersionChanged, isCurrent }
+  lastAttempt = retryAction ? { action:retryAction, onVersionChanged, isCurrent } : null
   busy.value = true
   problem.value = null
   try {
@@ -260,7 +274,10 @@ async function openCookies(isCurrent = alwaysCurrent) {
   }
   categories.value = []
   resetChoice()
-  await perform(ownsOperation => fetchCookieDocument(true, ownsOperation), undefined, isCurrent)
+  await perform(async ownsOperation => {
+    if (opsProblem.value) await store.loadOps()
+    if (ownsOperation()) await fetchCookieDocument(true, ownsOperation)
+  }, undefined, isCurrent)
 }
 
 async function chooseCookies(decision) {
@@ -291,6 +308,8 @@ async function showPersonal(refreshMine, isCurrent = alwaysCurrent) {
   accepted.value = false
   personalDocument.value = null
   await perform(async ownsOperation => {
+    if (refreshMine && opsProblem.value) await store.loadOps()
+    if (!ownsOperation()) return
     if (refreshMine) await store.loadMine()
     if (!ownsOperation()) return
     const result = (await store.current(LEGAL_DOCUMENT_KIND.PERSONAL_DATA_CONSENT)).document
@@ -324,7 +343,9 @@ async function grant() {
   })
 }
 
-async function requestWithdrawal() { await perform(() => store.requestWithdrawal()) }
+async function requestWithdrawal() {
+  await perform(() => store.requestWithdrawal(), undefined, alwaysCurrent, () => store.loadMine())
+}
 
 async function refreshNotice(isCurrent = alwaysCurrent) {
   await perform(async ownsOperation => {
@@ -360,6 +381,10 @@ async function visible() {
 }
 
 watch(() => session.customer.value?.id, async (id, _previous, cleanup) => {
+  if (props.mode === 'legal') {
+    store.resetCustomer()
+    return
+  }
   const epoch = ++sessionEpoch
   const isCurrent = () => epoch === sessionEpoch
   cleanup(() => {
@@ -764,9 +789,12 @@ onUnmounted(() => {
         <p class="page-kicker">
           ЮРИДИЧЕСКИЕ ДОКУМЕНТЫ
         </p>
-        <div class="consent-page__document-title">
+        <component
+          :is="legalDocumentHasH1 ? 'div' : 'h1'"
+          class="consent-page__document-title"
+        >
           {{ document?.title || 'Юридический документ' }}
-        </div>
+        </component>
       </div>
       <UiButton
         variant="secondary"

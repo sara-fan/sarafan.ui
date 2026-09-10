@@ -219,6 +219,19 @@ it('retries a failed personal-history load from the notice outage page', async (
   expect(h.store.loadMine).toHaveBeenCalledTimes(2)
   expect(wrapper.find('.service-unavailable-page').exists()).toBe(false)
 })
+it('presents and retries a late personal-history failure from the notice controller', async () => {
+  h.session.customer.value = { id:7 }
+  h.store.serviceAllowed.value = true
+  await mountCenter(); await flushPromises()
+  h.store.loadMine.mockClear()
+  h.store.personalProblem.value = denied()
+  h.store.loadMine.mockImplementation(async () => { h.store.personalProblem.value = null })
+  await nextTick()
+  expect(wrapper.find('.service-unavailable-page').exists()).toBe(true)
+  await click('Повторить')
+  expect(h.store.loadMine).toHaveBeenCalledTimes(1)
+  expect(wrapper.find('.service-unavailable-page').exists()).toBe(false)
+})
 it('presents renewal copy, unknown statuses, and category deselection safely', async () => {
   await mountCenter(); await flushPromises()
   h.store.cookies.value = { status:'renewal-required', categories:[], documentId:id }
@@ -328,6 +341,11 @@ it('uses the canonical document heading without adding a competing page h1', asy
   expect(wrapper.findAll('h1')).toHaveLength(1)
   expect(wrapper.get('h1').text()).toBe('Канонический заголовок')
 })
+it('provides a semantic route heading when the canonical document has no h1', async () => {
+  await mountCenter('/legal/privacy-policy'); await flushPromises()
+  expect(wrapper.findAll('h1')).toHaveLength(1)
+  expect(wrapper.get('h1').text()).toBe(document.title)
+})
 it('loads a legal document without associating the authenticated browser', async () => {
   h.session.customer.value = { id:7 }
   h.store.serviceAllowed.value = true
@@ -404,6 +422,17 @@ it('stops a stale legal load after its catalogue request completes', async () =>
   await router.push('/legal/user-agreement'); await flushPromises()
   staleCatalogue.resolve({ kinds, cookieCategories }); await flushPromises()
   expect(wrapper.get('.consent-page__document-title').text()).toBe('Документ после смены маршрута')
+  expect(h.store.current).toHaveBeenCalledTimes(1)
+})
+it('keeps a pending legal load current when the customer session changes', async () => {
+  const pending = deferred()
+  h.store.current.mockImplementationOnce(() => pending.promise)
+  await mountCenter('/legal/privacy-policy'); await nextTick()
+  h.session.customer.value = { id:7 }
+  await nextTick()
+  pending.resolve({ document }); await flushPromises()
+  expect(wrapper.findComponent(LegalDocumentReader).exists()).toBe(true)
+  expect(wrapper.text()).toContain('Отдельный текст согласия.')
   expect(h.store.current).toHaveBeenCalledTimes(1)
 })
 it('ignores consent work completed for a previous customer identity', async () => {
@@ -543,6 +572,16 @@ it('retries the failed explicit consent section', async () => {
   await click('Повторить')
   expect(wrapper.find('.service-unavailable-page').exists()).toBe(false)
 })
+it('reloads a failed cached catalogue before refreshing an explicit consent section', async () => {
+  await mountCenter('/consents/cookies'); await flushPromises()
+  h.store.opsProblem.value = denied()
+  h.store.loadOps.mockImplementation(async () => { h.store.opsProblem.value = null })
+  await nextTick()
+  expect(wrapper.find('.service-unavailable-page').exists()).toBe(true)
+  await click('Повторить')
+  expect(h.store.loadOps).toHaveBeenCalledTimes(1)
+  expect(wrapper.find('.service-unavailable-page').exists()).toBe(false)
+})
 it('refreshes only the visible explicit consent section when returning to the page', async () => {
   h.session.customer.value = { id:7 }
   vi.spyOn(globalThis.document, 'visibilityState', 'get').mockReturnValue('visible')
@@ -678,7 +717,7 @@ it('opens a consent hash that was present before the customer session was restor
   expect(router.currentRoute.value.name).toBe('home')
 })
 
-it('reuses consent decision keys while the withdrawal request has no client key', async () => {
+it('reuses idempotent consent keys but only refreshes status after a withdrawal failure', async () => {
   h.session.customer.value = { id:7 }
   await mountCenter('/consents/cookies'); await flushPromises()
   await wrapper.findAll('input[type=checkbox]')[0].setValue(true)
@@ -695,11 +734,12 @@ it('reuses consent decision keys while the withdrawal request has no client key'
   h.store.grant.mockRejectedValueOnce(denied())
   await click('Дать согласие'); await click('Повторить')
   expect(h.store.grant.mock.calls[1][1]).toBe(h.store.grant.mock.calls[0][1])
+  h.store.loadMine.mockClear()
   h.store.requestWithdrawal.mockRejectedValue(denied())
   await click('Прекратить использовать систему и отозвать согласие на обработку персональных данных')
   await click('Повторить')
-  expect(h.store.requestWithdrawal).toHaveBeenCalledTimes(2)
-  expect(h.store.requestWithdrawal.mock.calls).toEqual([[], []])
+  expect(h.store.requestWithdrawal).toHaveBeenCalledTimes(1)
+  expect(h.store.loadMine).toHaveBeenCalledTimes(1)
 })
 it('starts a new personal consent decision after logout and same-customer login', async () => {
   h.session.customer.value = { id:7 }
