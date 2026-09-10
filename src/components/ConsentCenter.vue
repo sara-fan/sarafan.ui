@@ -50,6 +50,7 @@ const problem = ref(null)
 const cookieDocumentProblem = ref(null)
 const busy = ref(false)
 const cookieDocumentBusy = ref(false)
+const cookieStatusLoads = ref(0)
 let documentEpoch = 0
 let cookieDocumentEpoch = 0
 let choiceKey = globalThis.crypto.randomUUID()
@@ -61,7 +62,7 @@ let operationEpoch = 0
 let sessionEpoch = 0
 let viewEpoch = 0
 let mounted = false
-let cookieStatusLoads = 0
+let cookieRefreshPending = false
 
 const alwaysCurrent = () => true
 const currentPredicate = value => typeof value === 'function' ? value : alwaysCurrent
@@ -152,6 +153,11 @@ const cookieNoticeCopy = computed(() => {
 })
 
 const label = value => CONSENT_STATUSES[value] || value
+function requireDocument(value, detail) {
+  if (!value) throw createInternalProblem('invalidInput', { detail })
+  documentNodes(value.html)
+  return value
+}
 function resetChoice() { choiceKey = globalThis.crypto.randomUUID(); choiceSignature = '' }
 function resetPersonalChoice() { personalKey = globalThis.crypto.randomUUID(); personalSignature = '' }
 function toggleCategory(category, selected) {
@@ -186,7 +192,10 @@ async function perform(action, onVersionChanged, isCurrent = alwaysCurrent, retr
     if (problem.value.type === 'https://sarafan.sw.consulting/problems/consent-version-changed' && onVersionChanged) {
       try {
         await onVersionChanged(ownsOperation)
-        if (ownsOperation()) lastAttempt = null
+        if (ownsOperation()) {
+          problem.value = null
+          lastAttempt = null
+        }
       }
       catch (refreshError) {
         if (ownsOperation()) {
@@ -227,13 +236,14 @@ async function retry() {
 }
 
 async function loadCookieStatus() {
-  cookieStatusLoads++
+  cookieStatusLoads.value++
   try { await store.loadCookies() }
-  finally { cookieStatusLoads-- }
+  finally { cookieStatusLoads.value-- }
 }
 
 async function fetchCookieDocument(refreshStatus = false, isCurrent = alwaysCurrent) {
   if (!isCurrent()) return null
+  cookieRefreshPending = false
   const epoch = ++cookieDocumentEpoch
   const ownsRequest = () => epoch === cookieDocumentEpoch && isCurrent()
   cookieDocumentBusy.value = true
@@ -241,9 +251,11 @@ async function fetchCookieDocument(refreshStatus = false, isCurrent = alwaysCurr
   try {
     if (refreshStatus) await loadCookieStatus()
     if (!ownsRequest()) return null
-    const result = (await store.current(LEGAL_DOCUMENT_KIND.COOKIE_CONSENT)).document
+    const result = requireDocument(
+      (await store.current(LEGAL_DOCUMENT_KIND.COOKIE_CONSENT)).document,
+      'Документ о куки пока не действует. Использование сервиса недоступно.'
+    )
     if (!ownsRequest()) return null
-    if (!result) throw createInternalProblem('invalidInput', { detail:'Документ о куки пока не действует. Использование сервиса недоступно.' })
     cookieDocument.value = result
     return result
   } catch (error) {
@@ -252,7 +264,10 @@ async function fetchCookieDocument(refreshStatus = false, isCurrent = alwaysCurr
     cookieDocumentProblem.value = normalizeProblem(error)
     throw error
   } finally {
-    if (ownsRequest()) cookieDocumentBusy.value = false
+    if (ownsRequest()) {
+      cookieDocumentBusy.value = false
+      cookieRefreshPending = false
+    }
   }
 }
 
@@ -272,8 +287,7 @@ async function openLegal(target = route.params.documentRef, isCurrent = alwaysCu
     const kind = store.kindByAlias(target)
     const result = kind !== undefined ? (await store.current(kind)).document : await store.read(target)
     if (!ownsOperation()) return
-    if (!result) throw createInternalProblem('invalidInput', { detail:'Документ пока не действует.' })
-    document.value = result
+    document.value = requireDocument(result, 'Документ пока не действует.')
   }, undefined, ownsDocument)
 }
 
@@ -313,7 +327,7 @@ async function chooseCookies(decision) {
     categories.value = []
     cookieDocument.value = null
     resetChoice()
-    await fetchCookieDocument(false, ownsOperation)
+    await fetchCookieDocument(true, ownsOperation)
   })
 }
 
@@ -326,9 +340,11 @@ async function showPersonal(isCurrent = alwaysCurrent) {
     if (!ownsOperation()) return
     await store.loadMine()
     if (!ownsOperation()) return
-    const result = (await store.current(LEGAL_DOCUMENT_KIND.PERSONAL_DATA_CONSENT)).document
+    const result = requireDocument(
+      (await store.current(LEGAL_DOCUMENT_KIND.PERSONAL_DATA_CONSENT)).document,
+      'Документ о согласии на обработку персональных данных пока не действует.'
+    )
     if (!ownsOperation()) return
-    if (!result) throw createInternalProblem('invalidInput', { detail:'Документ о согласии на обработку персональных данных пока не действует.' })
     personalDocument.value = result
   }, undefined, isCurrent)
 }
@@ -354,9 +370,11 @@ async function grant() {
     personalDocument.value = null
     await store.loadMine()
     if (!ownsOperation()) return
-    const result = (await store.current(LEGAL_DOCUMENT_KIND.PERSONAL_DATA_CONSENT)).document
+    const result = requireDocument(
+      (await store.current(LEGAL_DOCUMENT_KIND.PERSONAL_DATA_CONSENT)).document,
+      'Документ о согласии на обработку персональных данных пока не действует.'
+    )
     if (!ownsOperation()) return
-    if (!result) throw createInternalProblem('invalidInput', { detail:'Документ о согласии на обработку персональных данных пока не действует.' })
     personalDocument.value = result
   })
 }
@@ -435,16 +453,8 @@ watch(() => session.customer.value?.id, async (id, _previous, cleanup) => {
   }
 }, { immediate:true })
 
-watch(cookieRequired, async required => {
-  if (!required) {
-    cookieDocumentProblem.value = null
-    if (props.mode === 'notice') {
-      cookieDocumentEpoch++
-      cookieDocumentBusy.value = false
-    }
-    return
-  }
-  if (busy.value || cookieStatusLoads > 0) return
+async function refreshRequiredCookies() {
+  cookieRefreshPending = false
   categories.value = []
   cookieDocument.value = null
   resetChoice()
@@ -455,6 +465,28 @@ watch(cookieRequired, async required => {
   if (props.mode !== 'consents' || !cookiePage.value) return
   const epoch = sessionEpoch
   await openCookies(() => mounted && epoch === sessionEpoch && cookiePage.value)
+}
+
+watch(cookieRequired, async required => {
+  if (!required) {
+    cookieRefreshPending = false
+    cookieDocumentProblem.value = null
+    if (props.mode === 'notice') {
+      cookieDocumentEpoch++
+      cookieDocumentBusy.value = false
+    }
+    return
+  }
+  if (busy.value || cookieStatusLoads.value > 0) {
+    cookieRefreshPending = true
+    return
+  }
+  await refreshRequiredCookies()
+})
+
+watch([busy, cookieStatusLoads], async ([operationBusy, statusLoads]) => {
+  if (operationBusy || statusLoads > 0 || !cookieRefreshPending || !cookieRequired.value) return
+  await refreshRequiredCookies()
 })
 
 watch(serviceUnavailable, unavailable => {
@@ -579,6 +611,27 @@ onUnmounted(() => {
         Согласия
       </RouterLink>
     </nav>
+  </section>
+
+  <section
+    v-else-if="mode === 'notice' && activeProblem"
+    class="cookie-notice consent-recovery-notice"
+    role="region"
+    aria-labelledby="consent-recovery-title"
+  >
+    <h2 id="consent-recovery-title">
+      Не удалось обновить согласия
+    </h2>
+    <p>{{ message }}</p>
+    <div class="cookie-notice__actions">
+      <UiButton
+        variant="primary"
+        :disabled="busy"
+        @click="retry"
+      >
+        Повторить
+      </UiButton>
+    </div>
   </section>
 
   <main
