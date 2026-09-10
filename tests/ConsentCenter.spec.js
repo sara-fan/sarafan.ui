@@ -346,6 +346,13 @@ it('provides a semantic route heading when the canonical document has no h1', as
   expect(wrapper.findAll('h1')).toHaveLength(1)
   expect(wrapper.get('h1').text()).toBe(document.title)
 })
+it('keeps a semantic route heading when the canonical document is rejected', async () => {
+  h.store.current.mockResolvedValue({ document:{ ...document, html:'<script>alert(1)</script>' } })
+  await mountCenter('/legal/privacy-policy'); await flushPromises()
+  expect(wrapper.findAll('h1')).toHaveLength(1)
+  expect(wrapper.get('h1').text()).toBe(document.title)
+  expect(wrapper.find('[role=alert]').exists()).toBe(true)
+})
 it('loads a legal document without associating the authenticated browser', async () => {
   h.session.customer.value = { id:7 }
   h.store.serviceAllowed.value = true
@@ -547,7 +554,7 @@ it('does not start loaders whose route or identity scope has already expired', a
   await state().perform(action, undefined, expired)
   await state().fetchCookieDocument(false, expired)
   await state().openCookies(expired)
-  await state().showPersonal(true, expired)
+  await state().showPersonal(expired)
   expect(action).not.toHaveBeenCalled()
   expect(h.store.current).not.toHaveBeenCalled()
   expect(h.store.loadCookies).not.toHaveBeenCalled()
@@ -581,6 +588,45 @@ it('reloads a failed cached catalogue before refreshing an explicit consent sect
   await click('Повторить')
   expect(h.store.loadOps).toHaveBeenCalledTimes(1)
   expect(wrapper.find('.service-unavailable-page').exists()).toBe(false)
+
+  wrapper.unmount()
+  h.session.customer.value = { id:7 }
+  h.store.opsProblem.value = null
+  h.store.loadOps.mockClear()
+  await mountCenter('/consents/personal-data'); await flushPromises()
+  h.store.opsProblem.value = denied()
+  h.store.loadOps.mockImplementation(async () => { h.store.opsProblem.value = null })
+  await nextTick()
+  await click('Повторить')
+  expect(h.store.loadOps).toHaveBeenCalledTimes(1)
+  expect(wrapper.find('.service-unavailable-page').exists()).toBe(false)
+})
+it('stops consent document loading when catalogue recovery outlives the page', async () => {
+  h.session.customer.value = { id:7 }
+  await mountCenter('/consents'); await flushPromises()
+  const cookieOps = deferred()
+  h.store.current.mockClear()
+  h.store.opsProblem.value = denied()
+  h.store.loadOps.mockImplementationOnce(() => cookieOps.promise)
+  state().openCookies()
+  await nextTick()
+  wrapper.unmount()
+  cookieOps.resolve({ kinds, cookieCategories }); await flushPromises()
+  expect(h.store.current).not.toHaveBeenCalled()
+
+  h.store.opsProblem.value = null
+  await mountCenter('/consents/personal-data'); await flushPromises()
+  const personalOps = deferred()
+  h.store.current.mockClear()
+  h.store.loadMine.mockClear()
+  h.store.opsProblem.value = denied()
+  h.store.loadOps.mockImplementationOnce(() => personalOps.promise)
+  state().openPersonal()
+  await nextTick()
+  wrapper.unmount()
+  personalOps.resolve({ kinds, cookieCategories }); await flushPromises()
+  expect(h.store.loadMine).not.toHaveBeenCalled()
+  expect(h.store.current).not.toHaveBeenCalled()
 })
 it('refreshes only the visible explicit consent section when returning to the page', async () => {
   h.session.customer.value = { id:7 }

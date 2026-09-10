@@ -171,7 +171,7 @@ async function perform(action, onVersionChanged, isCurrent = alwaysCurrent, retr
   const operation = ++operationEpoch
   const ownsOperation = () => operation === operationEpoch && isCurrent()
   let succeeded = false
-  lastAttempt = retryAction ? { action:retryAction, onVersionChanged, isCurrent } : null
+  lastAttempt = { action:retryAction, onVersionChanged, isCurrent }
   busy.value = true
   problem.value = null
   try {
@@ -303,14 +303,14 @@ async function chooseCookies(decision) {
   })
 }
 
-async function showPersonal(refreshMine, isCurrent = alwaysCurrent) {
+async function showPersonal(isCurrent = alwaysCurrent) {
   if (!isCurrent()) return
   accepted.value = false
   personalDocument.value = null
   await perform(async ownsOperation => {
-    if (refreshMine && opsProblem.value) await store.loadOps()
+    if (opsProblem.value) await store.loadOps()
     if (!ownsOperation()) return
-    if (refreshMine) await store.loadMine()
+    await store.loadMine()
     if (!ownsOperation()) return
     const result = (await store.current(LEGAL_DOCUMENT_KIND.PERSONAL_DATA_CONSENT)).document
     if (ownsOperation()) personalDocument.value = result
@@ -319,7 +319,7 @@ async function showPersonal(refreshMine, isCurrent = alwaysCurrent) {
 
 async function openPersonal(isCurrent = alwaysCurrent) {
   isCurrent = currentPredicate(isCurrent)
-  await showPersonal(true, isCurrent)
+  await showPersonal(isCurrent)
 }
 
 async function grant() {
@@ -400,7 +400,7 @@ watch(() => session.customer.value?.id, async (id, _previous, cleanup) => {
   personalDocument.value = null
   if (!id) {
     if (props.mode === 'notice') await refreshNotice(isCurrent)
-    else if (cookiePage.value) await openCookies(isCurrent)
+    else await openCookies(isCurrent)
     return
   }
   try {
@@ -411,13 +411,13 @@ watch(() => session.customer.value?.id, async (id, _previous, cleanup) => {
       await openCookies(isCurrent)
       if (!isCurrent()) return
     }
-    if (personalPage.value) await showPersonal(true, isCurrent)
+    if (personalPage.value) await showPersonal(isCurrent)
   } catch (error) {
     if (isCurrent()) problem.value = normalizeProblem(error)
   }
 }, { immediate:true })
 
-watch(cookieRequired, (required, previous) => {
+watch(cookieRequired, required => {
   if (props.mode !== 'notice') return
   if (!required) {
     cookieDocumentEpoch++
@@ -425,12 +425,10 @@ watch(cookieRequired, (required, previous) => {
     cookieDocumentBusy.value = false
     return
   }
-  if (previous === false) {
-    categories.value = []
-    cookieDocument.value = null
-    resetChoice()
-    prepareCookieNotice()
-  }
+  categories.value = []
+  cookieDocument.value = null
+  resetChoice()
+  prepareCookieNotice()
 })
 
 watch(serviceUnavailable, unavailable => {
