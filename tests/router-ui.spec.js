@@ -60,12 +60,18 @@ describe('router and page shells', () => {
     expect(routes.find(route => route.name === 'personal-consents').props).toEqual({ section:'personal' })
   })
 
-  it('renders the consent and legal route wrappers without dialog overlays', () => {
+  it('renders the consent and legal route wrappers without dialog overlays', async () => {
     const consent = shallowMount(ConsentsView, {
       props:{ section:'personal' },
       global:{ stubs:{ ConsentCenter:true } }
     })
-    expect(consent.getComponent({ name:'ConsentCenter' }).props()).toMatchObject({ mode:'consents', section:'personal' })
+    const initialCenter = consent.getComponent({ name:'ConsentCenter' })
+    expect(initialCenter.props()).toMatchObject({ mode:'consents', section:'personal' })
+    const initialUid = initialCenter.vm.$.uid
+    await consent.setProps({ section:'cookies' })
+    const replacementCenter = consent.getComponent({ name:'ConsentCenter' })
+    expect(replacementCenter.props()).toMatchObject({ mode:'consents', section:'cookies' })
+    expect(replacementCenter.vm.$.uid).not.toBe(initialUid)
 
     const legal = shallowMount(LegalDocumentView, { global:{ stubs:{ ConsentCenter:true } } })
     expect(legal.getComponent({ name:'ConsentCenter' }).props('mode')).toBe('legal')

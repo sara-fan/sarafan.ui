@@ -28,6 +28,12 @@ const kinds = [
 ]
 const cookieCategories = [{ value:0, name:'Обязательные', required:true }]
 const denied = () => createInternalProblem('serviceUnavailable')
+function deferred() {
+  let resolve
+  let reject
+  const promise = new Promise((accept, decline) => { resolve = accept; reject = decline })
+  return { promise, resolve, reject }
+}
 let wrapper
 let router
 const state = () => wrapper.vm.$.setupState
@@ -128,6 +134,21 @@ it('retries both catalogue and cookie status after an initial communication fail
   expect(h.store.loadCookies).toHaveBeenCalledTimes(1)
   expect(wrapper.find('.service-unavailable-page').exists()).toBe(false)
   expect(wrapper.find('.cookie-notice').exists()).toBe(true)
+})
+it('recovers every failed panel on the combined consent page with one retry', async () => {
+  h.session.customer.value = { id:7 }
+  h.store.current
+    .mockRejectedValueOnce(denied())
+    .mockRejectedValueOnce(denied())
+    .mockResolvedValue({ document })
+  await mountCenter('/consents'); await flushPromises()
+  expect(wrapper.find('.service-unavailable-page').exists()).toBe(true)
+  expect(h.store.current).toHaveBeenCalledTimes(2)
+  await click('Повторить')
+  expect(wrapper.find('.service-unavailable-page').exists()).toBe(false)
+  expect(wrapper.find('.consent-page__panel--cookies').findComponent(LegalDocumentReader).exists()).toBe(true)
+  expect(wrapper.find('.consent-page__panel--personal').findComponent(LegalDocumentReader).exists()).toBe(true)
+  expect(h.store.current).toHaveBeenCalledTimes(5)
 })
 it('refuses directly from the initial notice and then shows a grant-only recovery state', async () => {
   await mountCenter(); await flushPromises()
@@ -270,6 +291,80 @@ it('ignores a stale document response after route changes and refreshes the rout
   globalThis.document.dispatchEvent(new globalThis.Event('visibilitychange')); await flushPromises()
   expect(h.store.loadCookies).not.toHaveBeenCalled()
   expect(h.store.read).toHaveBeenCalledTimes(2)
+})
+it('does not let a stale legal failure replace the newly selected document', async () => {
+  const stale = deferred()
+  const selected = { ...document, title:'Новый документ' }
+  h.store.current
+    .mockImplementationOnce(() => stale.promise)
+    .mockResolvedValueOnce({ document:selected })
+  await mountCenter('/legal/privacy-policy'); await nextTick()
+  await router.push('/legal/user-agreement'); await flushPromises()
+  expect(wrapper.get('h1').text()).toBe('Новый документ')
+  stale.reject(denied()); await flushPromises()
+  expect(wrapper.find('.service-unavailable-page').exists()).toBe(false)
+  expect(wrapper.get('h1').text()).toBe('Новый документ')
+})
+it('keeps the replacement legal load current after the previous watcher is cleaned up', async () => {
+  const stale = deferred()
+  const selected = deferred()
+  const replacement = { ...document, title:'Выбранный документ' }
+  h.store.current
+    .mockImplementationOnce(() => stale.promise)
+    .mockImplementationOnce(() => selected.promise)
+  await mountCenter('/legal/privacy-policy'); await nextTick()
+  await router.push('/legal/user-agreement'); await nextTick()
+  stale.resolve({ document:{ ...document, title:'Устаревший документ' } }); await flushPromises()
+  selected.resolve({ document:replacement }); await flushPromises()
+  expect(wrapper.get('h1').text()).toBe('Выбранный документ')
+  expect(wrapper.find('.service-unavailable-page').exists()).toBe(false)
+})
+it('ignores consent work completed for a previous customer identity', async () => {
+  const staleAssociation = deferred()
+  h.session.customer.value = { id:7 }
+  h.store.serviceAllowed.value = true
+  h.store.associate
+    .mockImplementationOnce(() => staleAssociation.promise)
+    .mockResolvedValueOnce()
+  await mountCenter('/consents'); await nextTick()
+  h.session.customer.value = { id:8 }
+  await flushPromises()
+  staleAssociation.reject(denied()); await flushPromises()
+  expect(wrapper.find('.service-unavailable-page').exists()).toBe(false)
+  expect(wrapper.get('h1').text()).toBe('Согласия')
+  expect(h.store.current).toHaveBeenCalledWith(LEGAL_DOCUMENT_KIND.COOKIE_CONSENT)
+  expect(h.store.current).toHaveBeenCalledWith(LEGAL_DOCUMENT_KIND.PERSONAL_DATA_CONSENT)
+})
+it('ignores a stale personal-data load after the customer changes', async () => {
+  const staleHistory = deferred()
+  const selected = { ...document, title:'Согласие нового покупателя', html:'<p>Документ нового покупателя.</p>' }
+  h.session.customer.value = { id:7 }
+  h.store.loadMine
+    .mockImplementationOnce(() => staleHistory.promise)
+    .mockResolvedValueOnce()
+  h.store.current.mockResolvedValue({ document:selected })
+  await mountCenter('/consents/personal-data'); await nextTick()
+  h.session.customer.value = { id:8 }
+  await flushPromises()
+  staleHistory.resolve(); await flushPromises()
+  expect(wrapper.find('.service-unavailable-page').exists()).toBe(false)
+  expect(wrapper.find('.consent-page__panel--personal').text()).toContain('Документ нового покупателя.')
+  expect(h.store.current).toHaveBeenCalledTimes(1)
+})
+it('ignores a stale cookie failure after the customer changes', async () => {
+  const staleCookie = deferred()
+  const selected = { ...document, html:'<p>Куки нового покупателя.</p>' }
+  h.session.customer.value = { id:7 }
+  h.store.current
+    .mockImplementationOnce(() => staleCookie.promise)
+    .mockResolvedValueOnce({ document:selected })
+  await mountCenter('/consents/cookies'); await nextTick()
+  h.session.customer.value = { id:8 }
+  await flushPromises()
+  staleCookie.reject(denied()); await flushPromises()
+  expect(wrapper.find('.service-unavailable-page').exists()).toBe(false)
+  expect(wrapper.find('.consent-page__panel--cookies').text()).toContain('Куки нового покупателя.')
+  expect(state().cookieDocumentBusy).toBe(false)
 })
 it('renders a safe alert for rejected canonical HTML', () => {
   wrapper = mount(LegalDocumentReader, { props:{ document:{ ...document, html:'<script>alert(1)</script>' } } })

@@ -57,6 +57,11 @@ let choiceSignature = ''
 let personalKey = globalThis.crypto.randomUUID()
 let personalSignature = ''
 let lastAttempt = null
+let operationEpoch = 0
+let sessionEpoch = 0
+
+const alwaysCurrent = () => true
+const currentPredicate = value => typeof value === 'function' ? value : alwaysCurrent
 
 const authenticated = computed(() => Boolean(session.customer.value))
 const personalPage = computed(() => props.mode === 'consents' && authenticated.value
@@ -131,23 +136,36 @@ function toggleCategory(category, selected) {
   resetChoice()
 }
 
-async function perform(action, onVersionChanged) {
+function invalidateOperations() {
+  operationEpoch++
+  lastAttempt = null
+  busy.value = false
+}
+
+async function perform(action, onVersionChanged, isCurrent = alwaysCurrent) {
+  if (!isCurrent()) return false
+  const operation = ++operationEpoch
+  const ownsOperation = () => operation === operationEpoch && isCurrent()
   let succeeded = false
-  lastAttempt = { action, onVersionChanged }
+  lastAttempt = { action, onVersionChanged, isCurrent }
   busy.value = true
   problem.value = null
   try {
-    await action()
+    await action(ownsOperation)
+    if (!ownsOperation()) return false
     lastAttempt = null
     succeeded = true
   } catch (error) {
+    if (!ownsOperation()) return false
     problem.value = normalizeProblem(error)
     if (problem.value.type === 'https://sarafan.sw.consulting/problems/consent-version-changed' && onVersionChanged) {
-      try { await onVersionChanged() }
-      catch (refreshError) { problem.value = normalizeProblem(refreshError) }
+      try { await onVersionChanged(ownsOperation) }
+      catch (refreshError) {
+        if (ownsOperation()) problem.value = normalizeProblem(refreshError)
+      }
     }
   } finally {
-    busy.value = false
+    if (ownsOperation()) busy.value = false
   }
   return succeeded
 }
@@ -155,22 +173,21 @@ async function perform(action, onVersionChanged) {
 async function retry() {
   const attempt = lastAttempt
   if (attempt) {
-    const succeeded = await perform(attempt.action, attempt.onVersionChanged)
-    if (!succeeded || props.mode !== 'notice' || !serviceUnavailable.value) return
+    const succeeded = await perform(attempt.action, attempt.onVersionChanged, attempt.isCurrent)
+    if (!succeeded || !serviceUnavailable.value) return
+  }
+  if (props.mode !== 'legal' && problem.value && !cookieDocumentProblem.value
+    && !cookieProblem.value && !personalProblem.value && store.serviceAllowed.value && session.customer.value) {
+    const associated = await perform(() => store.associate())
+    if (!associated) return
   }
   if (props.mode === 'notice') {
-    await perform(async () => {
+    await perform(async ownsOperation => {
       await store.loadCookies()
-      if (cookieRequired.value) await fetchCookieDocument()
+      if (ownsOperation() && cookieRequired.value) await fetchCookieDocument(false, ownsOperation)
     })
   } else if (props.mode === 'legal') await openLegal()
   else if (combinedPage.value) {
-    if (problem.value && !cookieDocumentProblem.value && !cookieProblem.value && !personalProblem.value) {
-      const associated = await perform(async () => {
-        if (store.serviceAllowed.value && session.customer.value) await store.associate()
-      })
-      if (!associated) return
-    }
     await openCookies()
     await openPersonal()
   } else if (cookiePage.value && (cookieDocumentProblem.value || cookieProblem.value)) await openCookies()
@@ -178,24 +195,27 @@ async function retry() {
   else await openCookies()
 }
 
-async function fetchCookieDocument(refreshStatus = false) {
+async function fetchCookieDocument(refreshStatus = false, isCurrent = alwaysCurrent) {
+  if (!isCurrent()) return null
   const epoch = ++cookieDocumentEpoch
+  const ownsRequest = () => epoch === cookieDocumentEpoch && isCurrent()
   cookieDocumentBusy.value = true
   cookieDocumentProblem.value = null
   try {
     if (refreshStatus) await store.loadCookies()
+    if (!ownsRequest()) return null
     const result = (await store.current(LEGAL_DOCUMENT_KIND.COOKIE_CONSENT)).document
+    if (!ownsRequest()) return null
     if (!result) throw createInternalProblem('invalidInput', { detail:'Документ о куки пока не действует. Использование сервиса недоступно.' })
-    if (epoch === cookieDocumentEpoch) cookieDocument.value = result
+    cookieDocument.value = result
     return result
   } catch (error) {
-    if (epoch === cookieDocumentEpoch) {
-      cookieDocument.value = null
-      cookieDocumentProblem.value = normalizeProblem(error)
-    }
+    if (!ownsRequest()) return null
+    cookieDocument.value = null
+    cookieDocumentProblem.value = normalizeProblem(error)
     throw error
   } finally {
-    if (epoch === cookieDocumentEpoch) cookieDocumentBusy.value = false
+    if (ownsRequest()) cookieDocumentBusy.value = false
   }
 }
 
@@ -204,87 +224,103 @@ async function prepareCookieNotice(refreshStatus = false) {
   catch { /* The notice presents a safe, recoverable error. */ }
 }
 
-async function openLegal(target = route.params.documentRef) {
+async function openLegal(target = route.params.documentRef, isCurrent = alwaysCurrent) {
   if (typeof target !== 'string') return
   const epoch = ++documentEpoch
+  const ownsDocument = () => epoch === documentEpoch && isCurrent()
   document.value = null
-  await perform(async () => {
+  await perform(async ownsOperation => {
     await store.ensureOps()
+    if (!ownsOperation()) return
     const kind = store.kindByAlias(target)
     const result = kind !== undefined ? (await store.current(kind)).document : await store.read(target)
+    if (!ownsOperation()) return
     if (!result) throw createInternalProblem('invalidInput', { detail:'Документ пока не действует.' })
-    if (epoch === documentEpoch) document.value = result
-  })
+    document.value = result
+  }, undefined, ownsDocument)
 }
 
 function printLegal() { legalReader.value?.printDocument() }
 
-async function openCookies() {
+async function openCookies(isCurrent = alwaysCurrent) {
+  isCurrent = currentPredicate(isCurrent)
+  if (!isCurrent()) return
   if (props.mode === 'notice') {
     await router.push({ name: 'consents' })
     return
   }
   categories.value = []
   resetChoice()
-  await perform(() => fetchCookieDocument(true))
+  await perform(ownsOperation => fetchCookieDocument(true, ownsOperation), undefined, isCurrent)
 }
 
 async function chooseCookies(decision) {
-  await perform(async () => {
+  await perform(async ownsOperation => {
     let text = cookieDocument.value
     if (decision === 'withdraw' && cookies.value?.documentId) text = await store.read(cookies.value.documentId)
+    if (!ownsOperation()) return
     if (!text) return
     const selected = decision === 'grant' ? categories.value : []
     const signature = JSON.stringify([text.id, text.contentHash, decision, [...selected].sort()])
     if (choiceSignature !== signature) resetChoice()
     choiceSignature = signature
     await store.decideCookies(text, decision, selected, choiceKey)
+    if (!ownsOperation()) return
     resetChoice()
     categories.value = []
-  }, async () => {
+  }, async ownsOperation => {
+    if (!ownsOperation()) return
     categories.value = []
     cookieDocument.value = null
     resetChoice()
-    await fetchCookieDocument()
+    await fetchCookieDocument(false, ownsOperation)
   })
 }
 
-async function showPersonal(refreshMine) {
+async function showPersonal(refreshMine, isCurrent = alwaysCurrent) {
+  if (!isCurrent()) return
   accepted.value = false
   personalDocument.value = null
-  await perform(async () => {
+  await perform(async ownsOperation => {
     if (refreshMine) await store.loadMine()
-    personalDocument.value = (await store.current(LEGAL_DOCUMENT_KIND.PERSONAL_DATA_CONSENT)).document
-  })
+    if (!ownsOperation()) return
+    const result = (await store.current(LEGAL_DOCUMENT_KIND.PERSONAL_DATA_CONSENT)).document
+    if (ownsOperation()) personalDocument.value = result
+  }, undefined, isCurrent)
 }
 
-async function openPersonal() {
-  await showPersonal(true)
+async function openPersonal(isCurrent = alwaysCurrent) {
+  isCurrent = currentPredicate(isCurrent)
+  await showPersonal(true, isCurrent)
 }
 
 async function grant() {
   if (!accepted.value || !personalDocument.value || !session.customer.value) return
-  await perform(async () => {
+  await perform(async ownsOperation => {
     const signature = JSON.stringify([session.customer.value.id, personalDocument.value.id, personalDocument.value.contentHash])
     if (personalSignature !== signature) personalKey = globalThis.crypto.randomUUID()
     personalSignature = signature
     await store.grant(personalDocument.value, personalKey)
+    if (!ownsOperation()) return
     personalSignature = ''
     accepted.value = false
-  }, async () => {
+  }, async ownsOperation => {
+    if (!ownsOperation()) return
     accepted.value = false
     personalDocument.value = null
     await store.loadMine()
-    personalDocument.value = (await store.current(LEGAL_DOCUMENT_KIND.PERSONAL_DATA_CONSENT)).document
+    if (!ownsOperation()) return
+    const result = (await store.current(LEGAL_DOCUMENT_KIND.PERSONAL_DATA_CONSENT)).document
+    if (ownsOperation()) personalDocument.value = result
   })
 }
 
 async function requestWithdrawal() { await perform(() => store.requestWithdrawal()) }
 
 async function refreshOps() {
-  await perform(async () => {
+  await perform(async ownsOperation => {
     await store.loadOps()
-    if (cookieRequired.value) await fetchCookieDocument()
+    if (ownsOperation() && cookieRequired.value) await fetchCookieDocument(false, ownsOperation)
   })
 }
 
@@ -299,27 +335,43 @@ async function visible() {
     if (personalPage.value) await openPersonal()
     return
   }
-  await perform(async () => {
+  await perform(async ownsOperation => {
     await Promise.all([store.loadCookies(), store.loadMine()])
-    if (cookieRequired.value) await fetchCookieDocument()
+    if (ownsOperation() && cookieRequired.value) await fetchCookieDocument(false, ownsOperation)
   })
 }
 
-watch(() => session.customer.value?.id, async id => {
+watch(() => session.customer.value?.id, async (id, _previous, cleanup) => {
+  const epoch = ++sessionEpoch
+  const isCurrent = () => epoch === sessionEpoch
+  cleanup(() => {
+    if (epoch === sessionEpoch) sessionEpoch++
+    cookieDocumentEpoch++
+    cookieDocumentBusy.value = false
+    invalidateOperations()
+  })
+  invalidateOperations()
   store.resetCustomer()
   problem.value = null
   personalDocument.value = null
   if (!id) {
-    if (cookiePage.value) await openCookies()
+    if (cookiePage.value) await openCookies(isCurrent)
     return
   }
   try {
     if (store.serviceAllowed.value) await store.associate()
-    if (props.mode === 'notice') await store.loadMine()
-    if (cookiePage.value) await openCookies()
-    if (personalPage.value) await showPersonal(true)
+    if (!isCurrent()) return
+    if (props.mode === 'notice') {
+      await store.loadMine()
+      if (!isCurrent()) return
+    }
+    if (cookiePage.value) {
+      await openCookies(isCurrent)
+      if (!isCurrent()) return
+    }
+    if (personalPage.value) await showPersonal(true, isCurrent)
   } catch (error) {
-    problem.value = normalizeProblem(error)
+    if (isCurrent()) problem.value = normalizeProblem(error)
   }
 }, { immediate:true })
 
@@ -339,9 +391,11 @@ watch(serviceUnavailable, unavailable => {
 watch(() => route.params.documentRef, async (target, _previous, cleanup) => {
   if (props.mode !== 'legal') return
   let active = true
-  cleanup(() => { active = false })
-  await openLegal(target)
-  if (!active) documentEpoch++
+  cleanup(() => {
+    active = false
+    documentEpoch++
+  })
+  await openLegal(target, () => active)
 })
 
 onMounted(async () => {
@@ -354,6 +408,8 @@ onMounted(async () => {
 onUnmounted(() => {
   documentEpoch++
   cookieDocumentEpoch++
+  sessionEpoch++
+  invalidateOperations()
   globalThis.removeEventListener('focus', visible)
   globalThis.document.removeEventListener('visibilitychange', visible)
 })

@@ -16,6 +16,7 @@ defineProps({
 
 <template>
   <ConsentCenter
+    :key="section"
     mode="consents"
     :section="section"
   />
