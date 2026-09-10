@@ -19,6 +19,7 @@ button, a { -webkit-tap-highlight-color: transparent; }
 a { color: var(--sarafan-secondary); }
 .sarafan-app { min-height: 100vh; background: var(--sarafan-soft) !important; color: var(--sarafan-ink) !important; }
 .app-content { display: flex; flex: 1 0 auto; flex-direction: column; }
+.app-route-content { display: contents; }
 
 .app-header {
   position: relative;

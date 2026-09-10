@@ -87,7 +87,10 @@ onMounted(async () => {
         v-if="!consentRoute"
         @service-unavailable="consentUnavailable = $event"
       />
-      <template v-if="!consentUnavailable">
+      <div
+        v-show="!consentUnavailable"
+        class="app-route-content"
+      >
         <div
           v-if="restoreProblem && !customerRoute"
           class="session-notice page-container"
@@ -154,7 +157,7 @@ onMounted(async () => {
           <RouterView v-else-if="customer" />
         </template>
         <RouterView v-else />
-      </template>
+      </div>
     </div>
 
     <SiteFooter />

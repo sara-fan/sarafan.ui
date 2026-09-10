@@ -173,6 +173,38 @@ it('recovers every failed panel on the combined consent page with one retry', as
   expect(wrapper.find('.consent-page__panel--personal').findComponent(LegalDocumentReader).exists()).toBe(true)
   expect(h.store.current).toHaveBeenCalledTimes(5)
 })
+it('continues combined recovery when the latest ordinary retry still fails', async () => {
+  h.session.customer.value = { id:7 }
+  const ordinary = createInternalProblem('invalidInput', { detail:'История ещё не готова.' })
+  h.store.current.mockRejectedValueOnce(denied()).mockResolvedValue({ document })
+  h.store.loadMine
+    .mockRejectedValueOnce(ordinary)
+    .mockRejectedValueOnce(ordinary)
+    .mockResolvedValue()
+  await mountCenter('/consents'); await flushPromises()
+  expect(wrapper.find('.service-unavailable-page').exists()).toBe(true)
+  await click('Повторить')
+  expect(wrapper.find('.service-unavailable-page').exists()).toBe(false)
+  expect(wrapper.find('.consent-page__panel--cookies').findComponent(LegalDocumentReader).exists()).toBe(true)
+  expect(wrapper.find('.consent-page__panel--personal').findComponent(LegalDocumentReader).exists()).toBe(true)
+  expect(h.store.loadMine).toHaveBeenCalledTimes(3)
+})
+it('stops combined retry recovery before the second panel after unmount', async () => {
+  h.session.customer.value = { id:7 }
+  const retryCookie = deferred()
+  h.store.current
+    .mockRejectedValueOnce(denied())
+    .mockResolvedValueOnce({ document })
+    .mockImplementationOnce(() => retryCookie.promise)
+    .mockResolvedValue({ document })
+  await mountCenter('/consents'); await flushPromises()
+  expect(wrapper.find('.service-unavailable-page').exists()).toBe(true)
+  button('Повторить').trigger('click')
+  await vi.waitFor(() => expect(h.store.current).toHaveBeenCalledTimes(3))
+  wrapper.unmount()
+  retryCookie.resolve({ document }); await flushPromises()
+  expect(h.store.current).toHaveBeenCalledTimes(3)
+})
 it('prioritizes a service outage over an ordinary error from the other consent panel', async () => {
   h.session.customer.value = { id:7 }
   h.store.cookieProblem.value = denied()
@@ -231,6 +263,18 @@ it('presents and retries a late personal-history failure from the notice control
   await click('Повторить')
   expect(h.store.loadMine).toHaveBeenCalledTimes(1)
   expect(wrapper.find('.service-unavailable-page').exists()).toBe(false)
+})
+it('routes the inline notice retry through personal-history recovery', async () => {
+  h.session.customer.value = { id:7 }
+  await mountCenter(); await flushPromises()
+  h.store.loadMine.mockClear()
+  h.store.personalProblem.value = createInternalProblem('invalidInput', { detail:'История временно недоступна.' })
+  h.store.loadMine.mockImplementation(async () => { h.store.personalProblem.value = null })
+  await nextTick()
+  expect(wrapper.find('.cookie-notice').text()).toContain('История временно недоступна.')
+  await click('Повторить загрузку')
+  expect(h.store.loadMine).toHaveBeenCalledTimes(1)
+  expect(wrapper.text()).not.toContain('История временно недоступна.')
 })
 it('presents renewal copy, unknown statuses, and category deselection safely', async () => {
   await mountCenter(); await flushPromises()
@@ -310,6 +354,7 @@ it('shows personal-data and withdrawal failures without losing consent choices o
   await click('Повторить')
   h.store.current.mockResolvedValue({ document:null }); await click('Обновить')
   expect(wrapper.find('.consent-page__panel--personal').findComponent(LegalDocumentReader).exists()).toBe(false)
+  expect(wrapper.text()).toContain('Документ о согласии на обработку персональных данных пока не действует.')
 })
 it('makes immutable and current legal links available without login as routed pages', async () => {
   await mountCenter('/legal/privacy-policy'); await flushPromises()
@@ -652,12 +697,29 @@ it('stops a combined foreground refresh before the second panel after unmount', 
   h.store.current.mockImplementationOnce(() => pendingCookie.promise)
   vi.spyOn(globalThis.document, 'visibilityState', 'get').mockReturnValue('visible')
   globalThis.dispatchEvent(new globalThis.Event('focus'))
-  await nextTick()
-  expect(h.store.current).toHaveBeenCalledTimes(1)
+  await vi.waitFor(() => expect(h.store.current).toHaveBeenCalledTimes(1))
   wrapper.unmount()
   pendingCookie.resolve({ document })
   await flushPromises()
   expect(h.store.current).toHaveBeenCalledTimes(1)
+})
+it('refreshes the cookie document when a routed receipt boundary is crossed', async () => {
+  await mountCenter('/consents/cookies'); await flushPromises()
+  h.store.serviceAllowed.value = true
+  await flushPromises()
+  h.store.current.mockClear()
+  h.store.serviceAllowed.value = false
+  await flushPromises()
+  expect(h.store.loadCookies).toHaveBeenCalledTimes(2)
+  expect(h.store.current).toHaveBeenCalledWith(LEGAL_DOCUMENT_KIND.COOKIE_CONSENT)
+  expect(wrapper.findComponent(LegalDocumentReader).exists()).toBe(true)
+})
+it('finishes loading the routed cookie document when refreshed status becomes current', async () => {
+  h.store.loadCookies.mockImplementation(async () => { h.store.serviceAllowed.value = true })
+  await mountCenter('/consents/cookies'); await flushPromises()
+  expect(h.store.current).toHaveBeenCalledWith(LEGAL_DOCUMENT_KIND.COOKIE_CONSENT)
+  expect(wrapper.findComponent(LegalDocumentReader).exists()).toBe(true)
+  expect(state().cookieDocumentBusy).toBe(false)
 })
 it('does not request a cookie document while the service is already allowed', async () => {
   h.store.serviceAllowed.value = true
