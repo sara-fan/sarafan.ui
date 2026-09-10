@@ -185,6 +185,7 @@ function scheduleBoundary(delay, assign, action) {
 }
 function resetChoice() { choiceKey = globalThis.crypto.randomUUID(); choiceSignature = '' }
 function resetPersonalChoice() { personalKey = globalThis.crypto.randomUUID(); personalSignature = '' }
+function documentSignature(value) { return value ? `${value.id}:${value.contentHash}` : '' }
 function toggleCategory(category, selected) {
   categories.value = selected
     ? [...new Set([...categories.value, category])]
@@ -345,18 +346,27 @@ async function openLegal(target = route.params.documentRef, isCurrent = alwaysCu
 
 function printLegal() { legalReader.value?.printDocument() }
 
-async function openCookies(isCurrent = alwaysCurrent) {
+async function openCookies(isCurrent = alwaysCurrent, preserveChoice = false) {
   isCurrent = currentPredicate(isCurrent)
   if (!isCurrent()) return
   if (props.mode === 'notice') {
     await router.push({ name: 'consents' })
     return
   }
-  categories.value = []
-  resetChoice()
+  const previousDocumentSignature = documentSignature(cookieDocument.value)
+  if (!preserveChoice) {
+    categories.value = []
+    resetChoice()
+  }
   await perform(async ownsOperation => {
     if (opsProblem.value) await store.loadOps()
-    if (ownsOperation()) await fetchCookieDocument(true, ownsOperation)
+    if (!ownsOperation()) return
+    const result = await fetchCookieDocument(true, ownsOperation)
+    if (ownsOperation() && preserveChoice
+      && documentSignature(result) !== previousDocumentSignature) {
+      categories.value = []
+      resetChoice()
+    }
   }, undefined, isCurrent)
 }
 
@@ -383,10 +393,13 @@ async function chooseCookies(decision) {
   })
 }
 
-async function showPersonal(isCurrent = alwaysCurrent) {
+async function showPersonal(isCurrent = alwaysCurrent, preserveChoice = false) {
   if (!isCurrent()) return
-  accepted.value = false
-  personalDocument.value = null
+  const previousDocumentSignature = documentSignature(personalDocument.value)
+  if (!preserveChoice) {
+    accepted.value = false
+    personalDocument.value = null
+  }
   await perform(async ownsOperation => {
     if (opsProblem.value) await store.loadOps()
     if (!ownsOperation()) return
@@ -397,6 +410,10 @@ async function showPersonal(isCurrent = alwaysCurrent) {
       'Документ о согласии на обработку персональных данных пока не действует.'
     )
     if (!ownsOperation()) return
+    if (preserveChoice && documentSignature(result) !== previousDocumentSignature) {
+      accepted.value = false
+      resetPersonalChoice()
+    }
     personalDocument.value = result
   }, undefined, isCurrent)
 }
@@ -414,9 +431,9 @@ async function refreshPersonalDocument(isCurrent = alwaysCurrent) {
   }, undefined, isCurrent)
 }
 
-async function openPersonal(isCurrent = alwaysCurrent) {
+async function openPersonal(isCurrent = alwaysCurrent, preserveChoice = false) {
   isCurrent = currentPredicate(isCurrent)
-  await showPersonal(isCurrent)
+  await showPersonal(isCurrent, preserveChoice)
 }
 
 async function grant() {
@@ -473,17 +490,18 @@ async function refreshCookieDocumentBoundary(isCurrent = alwaysCurrent) {
 
 async function refreshVisible() {
   const epoch = ++viewEpoch
-  const isCurrent = () => mounted && epoch === viewEpoch
+  const currentSession = sessionEpoch
+  const isCurrent = () => mounted && epoch === viewEpoch && currentSession === sessionEpoch
   if (props.mode === 'legal') {
     await openLegal(undefined, isCurrent)
     return
   }
   if (props.mode === 'consents') {
     if (cookiePage.value) {
-      await openCookies(isCurrent)
+      await openCookies(isCurrent, true)
       if (!isCurrent()) return
     }
-    if (personalPage.value) await openPersonal(isCurrent)
+    if (personalPage.value) await openPersonal(isCurrent, true)
     return
   }
   await perform(async ownsOperation => {

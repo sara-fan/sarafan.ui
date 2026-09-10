@@ -3,6 +3,7 @@
 // All rights reserved.
 // This file is a part of the Sarafan application
 
+import UiAlert from './ui/UiAlert.vue'
 import UiButton from './ui/UiButton.vue'
 
 defineProps({ busy: { type: Boolean, default: false } })
@@ -15,7 +16,9 @@ defineEmits(['retry'])
       САРАФАН
     </p>
     <h1>Сервис недоступен</h1>
-    <p>Сервис недоступен. Пожалуйста, повторите позже.</p>
+    <UiAlert>
+      <p>Сервис недоступен. Пожалуйста, повторите позже.</p>
+    </UiAlert>
     <UiButton
       variant="primary"
       :loading="busy"

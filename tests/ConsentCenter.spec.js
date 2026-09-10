@@ -81,6 +81,7 @@ it('requires explicit mandatory куки consent with the canonical document and
   h.store.decideCookies.mockRejectedValueOnce(denied())
   await click('Принять обязательные куки')
   expect(wrapper.find('.service-unavailable-page').text()).toContain('Сервис недоступен. Пожалуйста, повторите позже.')
+  expect(wrapper.find('.service-unavailable-page .ui-alert').attributes('role')).toBe('alert')
   expect(wrapper.emitted('service-unavailable')).toContainEqual([true])
   expect(state().categories).toEqual([0])
   const key = h.store.decideCookies.mock.calls[0][3]
@@ -831,6 +832,25 @@ it('refreshes only the visible explicit consent section when returning to the pa
   expect(h.store.current).toHaveBeenCalledTimes(1)
   expect(h.store.current).toHaveBeenCalledWith(LEGAL_DOCUMENT_KIND.PERSONAL_DATA_CONSENT)
 })
+it('preserves unsent consent choices on foreground refresh until the document changes', async () => {
+  h.session.customer.value = { id:7 }
+  vi.spyOn(globalThis.document, 'visibilityState', 'get').mockReturnValue('visible')
+  await mountCenter('/consents'); await flushPromises()
+  const cookieChoice = wrapper.find('.consent-page__panel--cookies input[type=checkbox]')
+  const personalChoice = wrapper.find('.consent-page__panel--personal input[type=checkbox]')
+  await cookieChoice.setValue(true)
+  await personalChoice.setValue(true)
+
+  globalThis.dispatchEvent(new globalThis.Event('focus')); await flushPromises()
+  expect(cookieChoice.element.checked).toBe(true)
+  expect(personalChoice.element.checked).toBe(true)
+
+  const replacement = { ...document, id:'22222222-2222-2222-2222-222222222222', contentHash:'b'.repeat(64) }
+  h.store.current.mockResolvedValue({ document:replacement })
+  globalThis.dispatchEvent(new globalThis.Event('focus')); await flushPromises()
+  expect(cookieChoice.element.checked).toBe(false)
+  expect(personalChoice.element.checked).toBe(false)
+})
 it('queues a foreground refresh without superseding an active consent operation', async () => {
   const pendingGrant = deferred()
   h.session.customer.value = { id:7 }
@@ -847,6 +867,26 @@ it('queues a foreground refresh without superseding an active consent operation'
   pendingGrant.resolve(); await flushPromises()
   expect(h.store.current).toHaveBeenCalledTimes(1)
   expect(state().busy).toBe(false)
+})
+it('cancels a foreground refresh when the customer identity changes', async () => {
+  const staleCookie = deferred()
+  h.session.customer.value = { id:7 }
+  vi.spyOn(globalThis.document, 'visibilityState', 'get').mockReturnValue('visible')
+  await mountCenter('/consents'); await flushPromises()
+  h.store.current.mockClear()
+  h.store.current
+    .mockImplementationOnce(() => staleCookie.promise)
+    .mockResolvedValue({ document })
+
+  globalThis.dispatchEvent(new globalThis.Event('focus'))
+  await vi.waitFor(() => expect(h.store.current).toHaveBeenCalledTimes(1))
+  h.session.customer.value = { id:8 }
+  await flushPromises()
+  expect(h.store.current.mock.calls.filter(([kind]) => kind === LEGAL_DOCUMENT_KIND.PERSONAL_DATA_CONSENT)).toHaveLength(1)
+
+  staleCookie.resolve({ document }); await flushPromises()
+  expect(h.store.current.mock.calls.filter(([kind]) => kind === LEGAL_DOCUMENT_KIND.PERSONAL_DATA_CONSENT)).toHaveLength(1)
+  expect(state().personalDocument).toEqual(document)
 })
 it('stops a combined foreground refresh before the second panel after unmount', async () => {
   h.session.customer.value = { id:7 }
