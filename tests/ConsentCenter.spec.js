@@ -275,6 +275,7 @@ it('routes the inline notice retry through personal-history recovery', async () 
   h.store.loadMine.mockImplementation(async () => { h.store.personalProblem.value = null })
   await nextTick()
   expect(wrapper.find('.consent-recovery-notice').text()).toContain('История временно недоступна.')
+  expect(wrapper.find('.consent-recovery-notice .ui-alert').attributes('role')).toBe('alert')
   await click('Повторить')
   expect(h.store.loadMine).toHaveBeenCalledTimes(1)
   expect(wrapper.text()).not.toContain('История временно недоступна.')
@@ -378,6 +379,10 @@ it('makes immutable and current legal links available without login as routed pa
   h.store.current.mockResolvedValue({ document:null })
   await router.push('/legal/privacy-policy'); await flushPromises()
   expect(wrapper.text()).toContain('Документ пока не действует')
+  expect(button('Повторить')).toBeTruthy()
+  h.store.current.mockResolvedValue({ document })
+  await click('Повторить')
+  expect(wrapper.findComponent(LegalDocumentReader).exists()).toBe(true)
   h.store.current.mockRejectedValueOnce(denied()); await router.push('/legal/user-agreement'); await flushPromises()
   expect(wrapper.text()).toContain('Сервис недоступен. Пожалуйста, повторите позже.')
   expect(wrapper.find('.service-unavailable-page').exists()).toBe(true)
@@ -935,6 +940,33 @@ it('refreshes a routed cookie document at the current-document boundary', async 
   expect(h.store.current).toHaveBeenCalledTimes(2)
   expect(state().cookieDocument).toEqual(replacement)
   expect(wrapper.find('.consent-page__panel--cookies').text()).toContain('Новый документ о куки')
+  vi.useRealTimers()
+})
+it('drops a queued cookie boundary refresh when the customer identity changes', async () => {
+  vi.useFakeTimers()
+  const pendingGrant = deferred()
+  h.session.customer.value = { id:7 }
+  h.store.current.mockImplementation(kind => Promise.resolve(kind === LEGAL_DOCUMENT_KIND.COOKIE_CONSENT
+    ? {
+        document,
+        serverNow:'2026-09-10T08:00:00.000Z',
+        nextChangeAt:'2026-09-10T08:00:00.100Z'
+      }
+    : { document }))
+  h.store.grant.mockImplementationOnce(() => pendingGrant.promise)
+  await mountCenter('/consents'); await flushPromises()
+  await wrapper.find('.consent-page__panel--personal input[type=checkbox]').setValue(true)
+  button('Дать согласие').trigger('click')
+  await nextTick()
+  h.store.current.mockClear()
+  await vi.advanceTimersByTimeAsync(100)
+  h.store.current.mockResolvedValue({ document })
+
+  h.session.customer.value = { id:8 }
+  await flushPromises()
+  pendingGrant.resolve(); await flushPromises()
+  expect(h.store.current.mock.calls.filter(([kind]) => kind === LEGAL_DOCUMENT_KIND.COOKIE_CONSENT)).toHaveLength(1)
+  expect(h.store.current.mock.calls.filter(([kind]) => kind === LEGAL_DOCUMENT_KIND.PERSONAL_DATA_CONSENT)).toHaveLength(1)
   vi.useRealTimers()
 })
 it('refreshes the required-cookie notice at the current-document boundary', async () => {

@@ -284,9 +284,11 @@ async function fetchCookieDocument(refreshStatus = false, isCurrent = alwaysCurr
     if (!ownsRequest()) return null
     const delay = nextChangeDelay(envelope)
     if (delay !== null) {
+      const boundarySession = sessionEpoch
+      const boundaryCurrent = () => cookieViewCurrent() && boundarySession === sessionEpoch
       scheduleBoundary(delay, value => { cookieBoundaryTimer = value }, () => {
-        if (epoch !== cookieDocumentEpoch || !cookieViewCurrent()) return
-        cookieBoundaryRefreshPending = cookieViewCurrent
+        if (epoch !== cookieDocumentEpoch || !boundaryCurrent()) return
+        cookieBoundaryRefreshPending = boundaryCurrent
         void drainQueuedRefreshes()
       })
     }
@@ -767,7 +769,12 @@ onUnmounted(() => {
     <h2 id="consent-recovery-title">
       Не удалось обновить согласия
     </h2>
-    <p>{{ message }}</p>
+    <UiAlert
+      :title="activeProblem.title"
+      class="consent-page__alert"
+    >
+      {{ message }}
+    </UiAlert>
     <div class="cookie-notice__actions">
       <UiButton
         variant="primary"
@@ -1032,6 +1039,18 @@ onUnmounted(() => {
     >
       {{ message }}
     </UiAlert>
+    <div
+      v-if="message"
+      class="consent-page__actions"
+    >
+      <UiButton
+        variant="primary"
+        :loading="busy"
+        @click="retry"
+      >
+        Повторить
+      </UiButton>
+    </div>
     <div
       v-if="document"
       class="consent-page__panel legal-document-page__panel"
