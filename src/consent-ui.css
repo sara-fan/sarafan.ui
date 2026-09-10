@@ -8,7 +8,7 @@
 .consent-section { padding: 18px; border: 1px solid var(--sarafan-line); border-radius: var(--sarafan-radius-16); background: var(--sarafan-paper); box-shadow: 0 8px 22px rgba(11, 38, 87, 0.05); }
 .consent-section + .consent-section { margin-top: 16px; }
 .consent-section--soft { border-color: var(--sarafan-line); background: linear-gradient(120deg, var(--sarafan-accent-soft), #f7fcff); box-shadow: none; }
-.consent-section h3 { margin: 0 0 12px; color: var(--sarafan-ink); font-size: 17px; line-height: 1.35; }
+.consent-section :is(h2, h3) { margin: 0 0 12px; color: var(--sarafan-ink); font-size: 17px; line-height: 1.35; }
 .consent-section p { margin: 8px 0; }
 .consent-summary { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px 16px; margin: 0; }
 .consent-summary dt { color: var(--sarafan-muted); }

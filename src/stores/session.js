@@ -10,7 +10,8 @@ import {
   CORE_PROBLEM_TYPES,
   INTERNAL_PROBLEM_TYPES,
   ProblemError,
-  createInternalProblem
+  createInternalProblem,
+  isServiceUnavailableProblem
 } from '../errors/problem.js'
 import { EVENTS } from '../observability/catalogue.js'
 import { uiLogger } from '../observability/logger.js'
@@ -23,12 +24,6 @@ const restoreProblem = ref(null)
 const notice = ref('')
 let refreshPromise = null
 const SERVICE_UNAVAILABLE_MESSAGE = 'Сервис недоступен. Пожалуйста, повторите позже.'
-
-function isServiceUnavailable(problem) {
-  return problem?.type === INTERNAL_PROBLEM_TYPES.protocolError
-    || problem?.type === INTERNAL_PROBLEM_TYPES.serviceUnavailable
-    || (Number.isInteger(problem?.status) && problem.status >= 500)
-}
 
 function serviceUnavailableProblem(problem) {
   return problem?.type === INTERNAL_PROBLEM_TYPES.serviceUnavailable
@@ -70,7 +65,7 @@ async function refreshSession(operationTrace) {
       { operationTrace }
     )
       .catch((error) => {
-        if (isServiceUnavailable(error)) {
+        if (isServiceUnavailableProblem(error)) {
           const problem = serviceUnavailableProblem(error)
           clearSession(SERVICE_UNAVAILABLE_MESSAGE)
           throw problem
@@ -115,7 +110,7 @@ async function requestCode(phone, purpose, consents = {}) {
       jsonOptions('POST', { phone, purpose, ...consents })
     )
   } catch (error) {
-    throw isServiceUnavailable(error) ? serviceUnavailableProblem(error) : error
+    throw isServiceUnavailableProblem(error) ? serviceUnavailableProblem(error) : error
   }
 }
 
@@ -140,7 +135,7 @@ async function verifyCode(payload) {
       jsonOptions('POST', payload)
     )
   } catch (error) {
-    if (isServiceUnavailable(error)) {
+    if (isServiceUnavailableProblem(error)) {
       const problem = serviceUnavailableProblem(error)
       clearSession(SERVICE_UNAVAILABLE_MESSAGE)
       throw problem
@@ -162,7 +157,7 @@ async function authorizedRequest(path, options = {}, policy = {}) {
   try {
     return await client.request(path, options, { ...policy, authorize:true })
   } catch (error) {
-    if (isServiceUnavailable(error)) {
+    if (isServiceUnavailableProblem(error)) {
       const problem = serviceUnavailableProblem(error)
       clearSession(SERVICE_UNAVAILABLE_MESSAGE)
       throw problem

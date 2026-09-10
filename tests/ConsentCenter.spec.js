@@ -135,6 +135,19 @@ it('retries both catalogue and cookie status after an initial communication fail
   expect(wrapper.find('.service-unavailable-page').exists()).toBe(false)
   expect(wrapper.find('.cookie-notice').exists()).toBe(true)
 })
+it('clears a stale cookie document failure when retry restores service access', async () => {
+  h.store.current.mockRejectedValueOnce(denied())
+  h.store.loadCookies
+    .mockResolvedValueOnce()
+    .mockImplementationOnce(async () => { h.store.serviceAllowed.value = true })
+  await mountCenter(); await flushPromises()
+  expect(wrapper.find('.service-unavailable-page').exists()).toBe(true)
+  expect(state().cookieDocumentProblem).toMatchObject({ type:expect.stringContaining('service-unavailable') })
+  await click('Повторить')
+  expect(wrapper.find('.service-unavailable-page').exists()).toBe(false)
+  expect(state().cookieDocumentProblem).toBeNull()
+  expect(h.store.current).toHaveBeenCalledTimes(1)
+})
 it('keeps the outage page when retrying customer association still fails', async () => {
   h.session.customer.value = { id:7 }
   h.store.serviceAllowed.value = true
@@ -314,6 +327,15 @@ it('uses the canonical document heading without adding a competing page h1', asy
   expect(wrapper.get('.consent-page__document-title').text()).toBe('Название документа')
   expect(wrapper.findAll('h1')).toHaveLength(1)
   expect(wrapper.get('h1').text()).toBe('Канонический заголовок')
+})
+it('loads a legal document without associating the authenticated browser', async () => {
+  h.session.customer.value = { id:7 }
+  h.store.serviceAllowed.value = true
+  h.store.associate.mockRejectedValue(denied())
+  await mountCenter('/legal/privacy-policy'); await flushPromises()
+  expect(h.store.associate).not.toHaveBeenCalled()
+  expect(wrapper.find('.service-unavailable-page').exists()).toBe(false)
+  expect(wrapper.findComponent(LegalDocumentReader).exists()).toBe(true)
 })
 it('removes foreground listeners when a pending mount load is unmounted', async () => {
   const pending = deferred()
@@ -537,6 +559,21 @@ it('refreshes only the visible explicit consent section when returning to the pa
   expect(h.store.current).toHaveBeenCalledTimes(1)
   expect(h.store.current).toHaveBeenCalledWith(LEGAL_DOCUMENT_KIND.PERSONAL_DATA_CONSENT)
 })
+it('stops a combined foreground refresh before the second panel after unmount', async () => {
+  h.session.customer.value = { id:7 }
+  await mountCenter('/consents'); await flushPromises()
+  const pendingCookie = deferred()
+  h.store.current.mockClear()
+  h.store.current.mockImplementationOnce(() => pendingCookie.promise)
+  vi.spyOn(globalThis.document, 'visibilityState', 'get').mockReturnValue('visible')
+  globalThis.dispatchEvent(new globalThis.Event('focus'))
+  await nextTick()
+  expect(h.store.current).toHaveBeenCalledTimes(1)
+  wrapper.unmount()
+  pendingCookie.resolve({ document })
+  await flushPromises()
+  expect(h.store.current).toHaveBeenCalledTimes(1)
+})
 it('does not request a cookie document while the service is already allowed', async () => {
   h.store.serviceAllowed.value = true
   await mountCenter(); await flushPromises()
@@ -605,6 +642,24 @@ it('shows both consent sections to an authenticated customer and returns home th
   expect(button('Дать согласие')).toBeTruthy()
   await click('На главную')
   expect(router.currentRoute.value.name).toBe('home')
+})
+
+it('uses h2 section headings on single consent pages and h3 beneath combined panel headings', async () => {
+  await mountCenter('/consents/cookies'); await flushPromises()
+  expect(wrapper.find('.consent-page__panel--cookies .consent-section h2').text()).toBe('Состояние в этом браузере')
+  expect(wrapper.findAll('.consent-page__panel--cookies .consent-section h3')).toHaveLength(0)
+
+  wrapper.unmount()
+  h.session.customer.value = { id:7 }
+  await mountCenter('/consents/personal-data'); await flushPromises()
+  expect(wrapper.find('.consent-page__panel--personal .consent-section h2').text()).toBe('Состояние согласия')
+  expect(wrapper.findAll('.consent-page__panel--personal .consent-section h3')).toHaveLength(0)
+
+  wrapper.unmount()
+  await mountCenter('/consents'); await flushPromises()
+  expect(wrapper.findAll('.consent-page__panel-title')).toHaveLength(2)
+  expect(wrapper.find('.consent-page__panel--cookies .consent-section h3').text()).toBe('Состояние в этом браузере')
+  expect(wrapper.find('.consent-page__panel--personal .consent-section h3').text()).toBe('Состояние согласия')
 })
 
 it('opens a consent hash that was present before the customer session was restored', async () => {

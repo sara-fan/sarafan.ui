@@ -59,6 +59,8 @@ let personalSignature = ''
 let lastAttempt = null
 let operationEpoch = 0
 let sessionEpoch = 0
+let viewEpoch = 0
+let mounted = false
 
 const alwaysCurrent = () => true
 const currentPredicate = value => typeof value === 'function' ? value : alwaysCurrent
@@ -337,19 +339,24 @@ async function refreshNotice(isCurrent = alwaysCurrent) {
 
 async function visible() {
   if (globalThis.document.visibilityState !== 'visible') return
+  const epoch = ++viewEpoch
+  const isCurrent = () => mounted && epoch === viewEpoch
   if (props.mode === 'legal') {
-    await openLegal()
+    await openLegal(undefined, isCurrent)
     return
   }
   if (props.mode === 'consents') {
-    if (cookiePage.value) await openCookies()
-    if (personalPage.value) await openPersonal()
+    if (cookiePage.value) {
+      await openCookies(isCurrent)
+      if (!isCurrent()) return
+    }
+    if (personalPage.value) await openPersonal(isCurrent)
     return
   }
   await perform(async ownsOperation => {
     await Promise.all([store.loadCookies(), store.loadMine()])
     if (ownsOperation() && cookieRequired.value) await fetchCookieDocument(false, ownsOperation)
-  })
+  }, undefined, isCurrent)
 }
 
 watch(() => session.customer.value?.id, async (id, _previous, cleanup) => {
@@ -372,7 +379,7 @@ watch(() => session.customer.value?.id, async (id, _previous, cleanup) => {
     return
   }
   try {
-    if (store.serviceAllowed.value) await store.associate()
+    if (props.mode !== 'legal' && store.serviceAllowed.value) await store.associate()
     if (!isCurrent()) return
     if (props.mode === 'notice') await refreshNotice(isCurrent)
     if (cookiePage.value) {
@@ -386,7 +393,14 @@ watch(() => session.customer.value?.id, async (id, _previous, cleanup) => {
 }, { immediate:true })
 
 watch(cookieRequired, (required, previous) => {
-  if (props.mode === 'notice' && required && previous === false) {
+  if (props.mode !== 'notice') return
+  if (!required) {
+    cookieDocumentEpoch++
+    cookieDocumentProblem.value = null
+    cookieDocumentBusy.value = false
+    return
+  }
+  if (previous === false) {
     categories.value = []
     cookieDocument.value = null
     resetChoice()
@@ -409,12 +423,15 @@ watch(() => route.params.documentRef, async (target, _previous, cleanup) => {
 })
 
 onMounted(() => {
+  mounted = true
   globalThis.addEventListener('focus', visible)
   globalThis.document.addEventListener('visibilitychange', visible)
-  if (props.mode === 'legal') openLegal()
+  if (props.mode === 'legal') openLegal(undefined, () => mounted)
 })
 
 onUnmounted(() => {
+  mounted = false
+  viewEpoch++
   documentEpoch++
   cookieDocumentEpoch++
   sessionEpoch++
@@ -552,7 +569,9 @@ onUnmounted(() => {
         Согласие на использование куки
       </h2>
       <section class="consent-section consent-section--soft">
-        <h3>Состояние в этом браузере</h3>
+        <component :is="combinedPage ? 'h3' : 'h2'">
+          Состояние в этом браузере
+        </component>
         <dl class="consent-summary">
           <dt>Статус</dt>
           <dd><span class="consent-status">{{ label(cookies?.status || 'unavailable') }}</span></dd>
@@ -564,14 +583,18 @@ onUnmounted(() => {
         v-if="cookieDocument"
         class="consent-section"
       >
-        <h3>Актуальный документ</h3>
+        <component :is="combinedPage ? 'h3' : 'h2'">
+          Актуальный документ
+        </component>
         <LegalDocumentReader :document="cookieDocument" />
       </section>
       <section
         v-if="cookieNeedsGrant && cookieDocument"
         class="consent-section"
       >
-        <h3>Новое подтверждение</h3>
+        <component :is="combinedPage ? 'h3' : 'h2'">
+          Новое подтверждение
+        </component>
         <p>Выберите все обязательные категории. Ранее сделанный выбор не считается подтверждением этой версии.</p>
         <UiSelectionControl
           v-for="category in cookieGrantCategories"
@@ -628,7 +651,9 @@ onUnmounted(() => {
         Согласие на обработку персональных данных
       </h2>
       <section class="consent-section consent-section--soft">
-        <h3>Состояние согласия</h3>
+        <component :is="combinedPage ? 'h3' : 'h2'">
+          Состояние согласия
+        </component>
         <dl class="consent-summary">
           <dt>Статус</dt>
           <dd><span class="consent-status">{{ label(status?.status || 'unavailable') }}</span></dd>
@@ -644,14 +669,18 @@ onUnmounted(() => {
         v-if="personalDocument"
         class="consent-section"
       >
-        <h3>Актуальный документ</h3>
+        <component :is="combinedPage ? 'h3' : 'h2'">
+          Актуальный документ
+        </component>
         <LegalDocumentReader :document="personalDocument" />
       </section>
       <section
         v-if="status?.status !== 'current' && personalDocument"
         class="consent-section"
       >
-        <h3>Подтверждение согласия</h3>
+        <component :is="combinedPage ? 'h3' : 'h2'">
+          Подтверждение согласия
+        </component>
         <UiSelectionControl
           :model-value="accepted"
           :disabled="busy"
@@ -661,7 +690,9 @@ onUnmounted(() => {
         </UiSelectionControl>
       </section>
       <section class="consent-section">
-        <h3>Прекращение использования системы</h3>
+        <component :is="combinedPage ? 'h3' : 'h2'">
+          Прекращение использования системы
+        </component>
         <p>Запрос будет записан для ручной обработки сотрудниками. Его отправка сама по себе не отключает учётную запись, не удаляет данные и не изменяет состояние согласия.</p>
         <UiButton
           variant="danger"
@@ -681,7 +712,9 @@ onUnmounted(() => {
         </p>
       </section>
       <section class="consent-section">
-        <h3>История</h3>
+        <component :is="combinedPage ? 'h3' : 'h2'">
+          История
+        </component>
         <p>Записи куки связаны с аккаунтом в момент наблюдения. Они не разрешают куки на других устройствах.</p>
         <ol
           v-if="mine?.history?.length"
