@@ -465,10 +465,10 @@ async function refreshCookieDocumentBoundary(isCurrent = alwaysCurrent) {
   cookieDocument.value = null
   resetChoice()
   if (props.mode === 'notice') {
-    if (cookieRequired.value) await prepareCookieNotice(true, isCurrent)
+    await prepareCookieNotice(true, isCurrent)
     return
   }
-  if (props.mode === 'consents' && cookiePage.value) await openCookies(isCurrent)
+  await openCookies(isCurrent)
 }
 
 async function refreshVisible() {
@@ -499,7 +499,7 @@ async function drainQueuedRefreshes() {
     while (mounted && !busy.value && !cookieDocumentBusy.value && cookieStatusLoads.value === 0) {
       if (cookieRefreshPending) {
         cookieRefreshPending = false
-        if (cookieRequired.value) await refreshRequiredCookies()
+        await refreshRequiredCookies()
       } else if (personalRefreshPending) {
         const isCurrent = personalRefreshPending
         personalRefreshPending = null

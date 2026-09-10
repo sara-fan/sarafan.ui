@@ -118,6 +118,7 @@ it('keeps service unavailable and permits retry when the куки document is un
   wrapper.unmount()
   await mountCenter('/consents/cookies'); await flushPromises()
   expect(wrapper.text()).toContain('Использование сервиса недоступно')
+  expect(state().cookieGrantCategories).toEqual([])
   expect(button('Отказаться').attributes('disabled')).toBeDefined()
   await state().chooseCookies('refuse')
   expect(h.store.decideCookies).not.toHaveBeenCalled()
@@ -403,6 +404,12 @@ it('keeps a semantic route heading when the canonical document is rejected', asy
   await click('Повторить')
   expect(wrapper.find('.service-unavailable-page').exists()).toBe(false)
   expect(wrapper.findComponent(LegalDocumentReader).exists()).toBe(true)
+})
+it('falls back safely if defensive legal-heading parsing fails', async () => {
+  await mountCenter('/legal/privacy-policy'); await flushPromises()
+  state().document = { ...document, html:'<script>alert(1)</script>' }
+  await nextTick()
+  expect(state().legalDocumentHasH1).toBe(false)
 })
 it('rejects invalid legal effective dates before rendering and permits retry', async () => {
   h.store.current.mockResolvedValue({ document:{ ...document, effectiveAt:'not-a-date' } })
@@ -721,12 +728,24 @@ it('does not start loaders whose route or identity scope has already expired', a
   const action = vi.fn()
   await state().perform(action, undefined, expired)
   await state().fetchCookieDocument(false, expired)
+  await state().refreshCookieDocumentBoundary(expired)
   await state().openCookies(expired)
   await state().showPersonal(expired)
   expect(action).not.toHaveBeenCalled()
   expect(h.store.current).not.toHaveBeenCalled()
   expect(h.store.loadCookies).not.toHaveBeenCalled()
   expect(h.store.loadMine).not.toHaveBeenCalled()
+})
+it('does not load a cookie document on the authenticated personal-only page', async () => {
+  h.session.customer.value = { id:7 }
+  h.store.serviceAllowed.value = true
+  await mountCenter('/consents/personal-data'); await flushPromises()
+  h.store.loadCookies.mockClear()
+  h.store.current.mockClear()
+  h.store.serviceAllowed.value = false
+  await flushPromises()
+  expect(h.store.loadCookies).not.toHaveBeenCalled()
+  expect(h.store.current).not.toHaveBeenCalled()
 })
 it('retries the failed explicit consent section', async () => {
   h.session.customer.value = { id:7 }
