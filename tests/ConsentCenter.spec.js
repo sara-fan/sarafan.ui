@@ -135,6 +135,16 @@ it('retries both catalogue and cookie status after an initial communication fail
   expect(wrapper.find('.service-unavailable-page').exists()).toBe(false)
   expect(wrapper.find('.cookie-notice').exists()).toBe(true)
 })
+it('keeps the outage page when retrying customer association still fails', async () => {
+  h.session.customer.value = { id:7 }
+  h.store.serviceAllowed.value = true
+  h.store.associate.mockRejectedValue(denied())
+  await mountCenter('/consents'); await flushPromises()
+  expect(wrapper.find('.service-unavailable-page').exists()).toBe(true)
+  await click('Повторить')
+  expect(h.store.associate).toHaveBeenCalledTimes(2)
+  expect(wrapper.find('.service-unavailable-page').exists()).toBe(true)
+})
 it('recovers every failed panel on the combined consent page with one retry', async () => {
   h.session.customer.value = { id:7 }
   h.store.current
@@ -184,6 +194,9 @@ it('presents renewal copy, unknown statuses, and category deselection safely', a
   await nextTick()
   expect(wrapper.text()).toContain('Требуется новое согласие на использование куки')
   expect(wrapper.text()).toContain('Документ изменился')
+  h.store.cookies.value = { status:'withdrawn', categories:[], documentId:id }
+  await nextTick()
+  expect(wrapper.text()).toContain('Согласие на использование куки отозвано')
   h.store.cookies.value = { status:'unexpected', categories:[], documentId:id }
   await nextTick()
   await click('Согласия')
@@ -319,6 +332,19 @@ it('keeps the replacement legal load current after the previous watcher is clean
   expect(wrapper.get('h1').text()).toBe('Выбранный документ')
   expect(wrapper.find('.service-unavailable-page').exists()).toBe(false)
 })
+it('stops a stale legal load after its catalogue request completes', async () => {
+  const staleCatalogue = deferred()
+  const selected = { ...document, title:'Документ после смены маршрута' }
+  h.store.ensureOps
+    .mockImplementationOnce(() => staleCatalogue.promise)
+    .mockResolvedValueOnce({ kinds, cookieCategories })
+  h.store.current.mockResolvedValue({ document:selected })
+  await mountCenter('/legal/privacy-policy'); await nextTick()
+  await router.push('/legal/user-agreement'); await flushPromises()
+  staleCatalogue.resolve({ kinds, cookieCategories }); await flushPromises()
+  expect(wrapper.get('h1').text()).toBe('Документ после смены маршрута')
+  expect(h.store.current).toHaveBeenCalledTimes(1)
+})
 it('ignores consent work completed for a previous customer identity', async () => {
   const staleAssociation = deferred()
   h.session.customer.value = { id:7 }
@@ -334,6 +360,20 @@ it('ignores consent work completed for a previous customer identity', async () =
   expect(wrapper.get('h1').text()).toBe('Согласия')
   expect(h.store.current).toHaveBeenCalledWith(LEGAL_DOCUMENT_KIND.COOKIE_CONSENT)
   expect(h.store.current).toHaveBeenCalledWith(LEGAL_DOCUMENT_KIND.PERSONAL_DATA_CONSENT)
+})
+it('stops a successful association callback after the customer changes', async () => {
+  const staleAssociation = deferred()
+  h.session.customer.value = { id:7 }
+  h.store.serviceAllowed.value = true
+  h.store.associate
+    .mockImplementationOnce(() => staleAssociation.promise)
+    .mockResolvedValueOnce()
+  await mountCenter('/consents'); await nextTick()
+  h.session.customer.value = { id:8 }
+  await flushPromises()
+  staleAssociation.resolve(); await flushPromises()
+  expect(wrapper.find('.service-unavailable-page').exists()).toBe(false)
+  expect(h.store.current).toHaveBeenCalledTimes(2)
 })
 it('ignores a stale personal-data load after the customer changes', async () => {
   const staleHistory = deferred()
@@ -365,6 +405,112 @@ it('ignores a stale cookie failure after the customer changes', async () => {
   expect(wrapper.find('.service-unavailable-page').exists()).toBe(false)
   expect(wrapper.find('.consent-page__panel--cookies').text()).toContain('Куки нового покупателя.')
   expect(state().cookieDocumentBusy).toBe(false)
+})
+it('ignores a stale successful cookie document after the customer changes', async () => {
+  const staleCookie = deferred()
+  const selected = { ...document, html:'<p>Актуальные куки.</p>' }
+  h.session.customer.value = { id:7 }
+  h.store.current
+    .mockImplementationOnce(() => staleCookie.promise)
+    .mockResolvedValueOnce({ document:selected })
+  await mountCenter('/consents/cookies'); await nextTick()
+  h.session.customer.value = { id:8 }
+  await flushPromises()
+  staleCookie.resolve({ document:{ ...document, html:'<p>Устаревшие куки.</p>' } }); await flushPromises()
+  expect(wrapper.find('.consent-page__panel--cookies').text()).toContain('Актуальные куки.')
+  expect(wrapper.text()).not.toContain('Устаревшие куки.')
+})
+it('stops a stale cookie load before requesting its document', async () => {
+  const staleStatus = deferred()
+  h.session.customer.value = { id:7 }
+  h.store.loadCookies
+    .mockImplementationOnce(() => staleStatus.promise)
+    .mockResolvedValueOnce()
+  await mountCenter('/consents/cookies'); await nextTick()
+  h.session.customer.value = { id:8 }
+  await flushPromises()
+  staleStatus.resolve(); await flushPromises()
+  expect(wrapper.find('.service-unavailable-page').exists()).toBe(false)
+  expect(h.store.current).toHaveBeenCalledTimes(1)
+})
+it('ignores a stale personal document response after the customer changes', async () => {
+  const stalePersonal = deferred()
+  const selected = { ...document, html:'<p>Актуальное персональное согласие.</p>' }
+  h.session.customer.value = { id:7 }
+  h.store.current
+    .mockImplementationOnce(() => stalePersonal.promise)
+    .mockResolvedValueOnce({ document:selected })
+  await mountCenter('/consents/personal-data'); await nextTick()
+  h.session.customer.value = { id:8 }
+  await flushPromises()
+  stalePersonal.resolve({ document:{ ...document, html:'<p>Устаревшее персональное согласие.</p>' } }); await flushPromises()
+  expect(wrapper.find('.consent-page__panel--personal').text()).toContain('Актуальное персональное согласие.')
+  expect(wrapper.text()).not.toContain('Устаревшее персональное согласие.')
+})
+it('does not start loaders whose route or identity scope has already expired', async () => {
+  await mountCenter('/consents/cookies'); await flushPromises()
+  h.store.current.mockClear()
+  h.store.loadCookies.mockClear()
+  h.store.loadMine.mockClear()
+  const expired = () => false
+  const action = vi.fn()
+  await state().perform(action, undefined, expired)
+  await state().fetchCookieDocument(false, expired)
+  await state().openCookies(expired)
+  await state().showPersonal(true, expired)
+  expect(action).not.toHaveBeenCalled()
+  expect(h.store.current).not.toHaveBeenCalled()
+  expect(h.store.loadCookies).not.toHaveBeenCalled()
+  expect(h.store.loadMine).not.toHaveBeenCalled()
+})
+it('retries the failed explicit consent section', async () => {
+  h.session.customer.value = { id:7 }
+  await mountCenter('/consents/cookies'); await flushPromises()
+  h.store.cookieProblem.value = denied()
+  h.store.loadCookies.mockImplementation(async () => { h.store.cookieProblem.value = null })
+  await nextTick()
+  await click('Повторить')
+  expect(wrapper.find('.service-unavailable-page').exists()).toBe(false)
+
+  wrapper.unmount()
+  h.store.personalProblem.value = null
+  h.store.loadMine.mockReset().mockResolvedValue()
+  await mountCenter('/consents/personal-data'); await flushPromises()
+  h.store.personalProblem.value = denied()
+  h.store.loadMine.mockImplementation(async () => { h.store.personalProblem.value = null })
+  await nextTick()
+  await click('Повторить')
+  expect(wrapper.find('.service-unavailable-page').exists()).toBe(false)
+})
+it('refreshes only the visible explicit consent section when returning to the page', async () => {
+  h.session.customer.value = { id:7 }
+  vi.spyOn(globalThis.document, 'visibilityState', 'get').mockReturnValue('visible')
+  await mountCenter('/consents/cookies'); await flushPromises()
+  h.store.current.mockClear()
+  globalThis.dispatchEvent(new globalThis.Event('focus')); await flushPromises()
+  expect(h.store.current).toHaveBeenCalledTimes(1)
+  expect(h.store.current).toHaveBeenCalledWith(LEGAL_DOCUMENT_KIND.COOKIE_CONSENT)
+
+  wrapper.unmount()
+  await mountCenter('/consents/personal-data'); await flushPromises()
+  h.store.current.mockClear()
+  globalThis.dispatchEvent(new globalThis.Event('focus')); await flushPromises()
+  expect(h.store.current).toHaveBeenCalledTimes(1)
+  expect(h.store.current).toHaveBeenCalledWith(LEGAL_DOCUMENT_KIND.PERSONAL_DATA_CONSENT)
+})
+it('does not request a cookie document while the service is already allowed', async () => {
+  h.store.serviceAllowed.value = true
+  await mountCenter(); await flushPromises()
+  expect(h.store.current).not.toHaveBeenCalled()
+  vi.spyOn(globalThis.document, 'visibilityState', 'get').mockReturnValue('visible')
+  globalThis.dispatchEvent(new globalThis.Event('focus')); await flushPromises()
+  expect(h.store.current).not.toHaveBeenCalled()
+  await router.push('/legal/privacy-policy'); await flushPromises()
+  h.store.serviceAllowed.value = false
+  await flushPromises()
+  h.store.ops.value = null
+  await nextTick()
+  expect(wrapper.findAll('.cookie-notice__links a')).toHaveLength(0)
 })
 it('renders a safe alert for rejected canonical HTML', () => {
   wrapper = mount(LegalDocumentReader, { props:{ document:{ ...document, html:'<script>alert(1)</script>' } } })
