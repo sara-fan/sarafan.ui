@@ -878,6 +878,25 @@ it('refreshes a routed cookie document at the current-document boundary', async 
   expect(wrapper.find('.consent-page__panel--cookies').text()).toContain('Новый документ о куки')
   vi.useRealTimers()
 })
+it('refreshes the required-cookie notice at the current-document boundary', async () => {
+  vi.useFakeTimers()
+  const current = { ...document, html:'<p>Текущий документ уведомления.</p>' }
+  const replacement = { ...document, html:'<p>Новый документ уведомления.</p>' }
+  h.store.current
+    .mockResolvedValueOnce({
+      document:current,
+      serverNow:'2026-09-10T08:00:00.000Z',
+      nextChangeAt:'2026-09-10T08:00:00.300Z'
+    })
+    .mockResolvedValue({ document:replacement, serverNow:'2026-09-10T08:00:00.300Z', nextChangeAt:null })
+  await mountCenter(); await flushPromises()
+  expect(state().cookieDocument).toEqual(current)
+  await vi.advanceTimersByTimeAsync(300)
+  await flushPromises()
+  expect(h.store.current).toHaveBeenCalledTimes(2)
+  expect(state().cookieDocument).toEqual(replacement)
+  vi.useRealTimers()
+})
 it('finishes loading the routed cookie document when refreshed status becomes current', async () => {
   h.store.loadCookies.mockImplementation(async () => { h.store.serviceAllowed.value = true })
   await mountCenter('/consents/cookies'); await flushPromises()

@@ -515,10 +515,6 @@ async function drainQueuedRefreshes() {
     }
   } finally {
     refreshQueueRunning = false
-    if (mounted && !busy.value && !cookieDocumentBusy.value && cookieStatusLoads.value === 0
-      && (cookieRefreshPending || personalRefreshPending || cookieBoundaryRefreshPending || foregroundRefreshPending)) {
-      void drainQueuedRefreshes()
-    }
   }
 }
 
