@@ -97,6 +97,10 @@ function jsonOptions(method, body) {
   }
 }
 
+function isAbortError(error) {
+  return error?.name === 'AbortError'
+}
+
 const client = createApiClient({
   getAccessToken: () => accessToken.value,
   refreshSession: operationTrace => refreshSession(operationTrace)
@@ -197,17 +201,20 @@ async function consentRequest(path, options = {}, authorize = false, responseTyp
   return client.request(path, options, { authorize, responseType })
 }
 
-async function verifyCode(payload, isCurrent = () => true) {
+async function verifyCode(payload, isCurrent = () => true, signal) {
   notice.value = ''
   try {
+    if (!isCurrent() || signal?.aborted) return null
     await ensureOps()
+    if (!isCurrent() || signal?.aborted) return null
     const session = await client.request(
       `${API_BASE_PATH}/auth/code/verify`,
-      jsonOptions('POST', payload)
+      { ...jsonOptions('POST', payload), ...(signal ? { signal } : {}) }
     )
-    if (!isCurrent()) return null
+    if (!isCurrent() || signal?.aborted) return null
     return applySession(session)
   } catch (error) {
+    if ((!isCurrent() || signal?.aborted) && isAbortError(error)) return null
     if (isServiceUnavailableProblem(error)) {
       const problem = serviceUnavailableProblem(error)
       if (isCurrent()) clearSession(SERVICE_UNAVAILABLE_MESSAGE)

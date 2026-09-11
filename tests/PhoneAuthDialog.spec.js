@@ -244,6 +244,7 @@ describe('PhoneAuthDialog', () => {
     const pendingVerification = deferred()
     const firstCustomer = { ...customer, id:8, phone:'+79991234568' }
     const currentCustomer = { ...customer, id:9, phone:'+79991234569' }
+    let staleVerificationSignal = null
     const fetch = vi.fn((url, options) => {
       const standard = standardResponse(url)
       if (standard) return Promise.resolve(standard)
@@ -253,9 +254,18 @@ describe('PhoneAuthDialog', () => {
       if (url === '/api/v1/auth/code/request') return Promise.resolve(response(202, { onboardingToken:null }))
       if (url === '/api/v1/auth/code/verify') {
         const body = JSON.parse(options.body)
-        return body.phone === firstCustomer.phone
-          ? pendingVerification.promise
-          : Promise.resolve(response(200, {
+        if (body.phone === firstCustomer.phone) {
+          staleVerificationSignal = options.signal
+          return new Promise((resolve, reject) => {
+            options.signal.addEventListener(
+              'abort',
+              () => reject(new globalThis.DOMException('Aborted', 'AbortError')),
+              { once:true }
+            )
+            pendingVerification.promise.then(resolve, reject)
+          })
+        }
+        return Promise.resolve(response(200, {
               accessToken:'current-token', expiresAt:'2026-09-11T12:15:00Z', customer:currentCustomer
             }))
       }
@@ -273,6 +283,7 @@ describe('PhoneAuthDialog', () => {
 
     await wrapper.setProps({ modelValue:false })
     await wrapper.setProps({ modelValue:true })
+    expect(staleVerificationSignal?.aborted).toBe(true)
     await wrapper.get('input[name="phone"]').setValue(currentCustomer.phone)
     await wrapper.get('.auth-form').trigger('submit')
     await flushPromises()

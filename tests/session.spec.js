@@ -136,17 +136,26 @@ describe('session store', () => {
     expect(session.notice.value).toBe('Сервис недоступен. Пожалуйста, повторите позже.')
   })
 
-  it('does not clear the current session for a stale verification failure', async () => {
+  it('does not clear the current session for an aborted stale verification', async () => {
     const activeCustomer = { id:3, phone:'+79990000003', state:0, profile:{ phone:'+79990000003' } }
-    let verifications = 0
-    const fetch = withOps(url => {
+    const controller = new globalThis.AbortController()
+    let current = true
+    const fetch = withOps((url, options) => {
       if (url === '/api/v1/auth/code/verify') {
-        verifications++
-        return Promise.resolve(verifications === 1
-          ? response(200, {
-              accessToken:'active-token', expiresAt:'2026-08-30T00:15:00Z', customer:activeCustomer
-            })
-          : problemResponse(503, 'service-unavailable'))
+        if (JSON.parse(options.body).code === '1111') {
+          return Promise.resolve(response(200, {
+            accessToken:'active-token', expiresAt:'2026-08-30T00:15:00Z', customer:activeCustomer
+          }))
+        }
+        return new Promise((_resolve, reject) => {
+          const abortError = new Error('Aborted')
+          abortError.name = 'AbortError'
+          options.signal.addEventListener(
+            'abort',
+            () => reject(abortError),
+            { once:true }
+          )
+        })
       }
       throw new Error(`Unexpected request: ${url}`)
     })
@@ -154,12 +163,32 @@ describe('session store', () => {
 
     const session = useSession()
     await session.verifyCode({ phone:activeCustomer.phone, code:'1111' })
-    await expect(session.verifyCode({ phone:activeCustomer.phone, code:'2222' }, () => false)).rejects.toMatchObject({
-      type:INTERNAL_PROBLEM_TYPES.serviceUnavailable
-    })
+    const staleVerification = session.verifyCode(
+      { phone:activeCustomer.phone, code:'2222' },
+      () => current,
+      controller.signal
+    )
+    current = false
+    controller.abort()
+    await expect(staleVerification).resolves.toBeNull()
 
     expect(session.customer.value).toEqual(activeCustomer)
     expect(session.notice.value).toBe('')
+  })
+
+  it('skips a stale verification before issuing the verify request', async () => {
+    const fetch = withOps(url => {
+      if (url === '/api/v1/auth/code/verify') {
+        throw new Error('verify should not be called for a stale operation')
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    })
+    vi.stubGlobal('fetch', fetch)
+
+    const result = await useSession().verifyCode({ phone:'+79990000003', code:'1111' }, () => false)
+
+    expect(result).toBeNull()
+    expect(fetch.mock.calls.filter(([url]) => url === '/api/v1/auth/code/verify')).toHaveLength(0)
   })
 
   it('clears an existing session when refresh returns an invalid customer state', async () => {

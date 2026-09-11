@@ -41,6 +41,7 @@ const codeField = ref(null)
 let consentRetryFingerprint = ''
 let consentRetryKey = ''
 let operationGeneration = 0
+let verifyAbortController = null
 
 const agreementKind = computed(() => consentStore.kindByAlias('user-agreement'))
 const personalDataKind = computed(() => consentStore.kindByAlias('personal-data-consent'))
@@ -82,8 +83,14 @@ function resetAfterPhone() {
   consentRetryKey = ''
 }
 
+function cancelVerification() {
+  verifyAbortController?.abort()
+  verifyAbortController = null
+}
+
 watch(() => props.modelValue, open => {
   operationGeneration++
+  cancelVerification()
   busy.value = false
   if (open) {
     phone.value = ''
@@ -266,6 +273,9 @@ async function submitCode() {
     return
   }
   const operation = ++operationGeneration
+  cancelVerification()
+  const controller = new globalThis.AbortController()
+  verifyAbortController = controller
   busy.value = true
   problem.value = null
   try {
@@ -275,7 +285,8 @@ async function submitCode() {
         code: normalizedCode,
         ...(onboardingToken.value ? { onboardingToken:onboardingToken.value } : {})
       },
-      () => currentOperation(operation)
+      () => currentOperation(operation),
+      controller.signal
     )
     if (!verifiedCustomer) return
     emit('update:modelValue', false)
@@ -292,6 +303,7 @@ async function submitCode() {
       }
     }
   } finally {
+    if (verifyAbortController === controller) verifyAbortController = null
     if (currentOperation(operation)) busy.value = false
   }
 }
