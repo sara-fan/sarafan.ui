@@ -28,13 +28,13 @@ describe('session store', () => {
     const originalCustomer = {
       id: 1,
       phone: '+79990000001',
-      state: 'preliminary',
+      state: 0,
       hasPhoto: false,
       profile: { phone: '+79990000001' }
     }
     const updatedCustomer = {
       ...originalCustomer,
-      state: 'complete',
+      state: 1,
       profile: { ...originalCustomer.profile, firstName: 'Анна' }
     }
     const fetch = vi.fn((url) => {
@@ -51,7 +51,7 @@ describe('session store', () => {
     vi.stubGlobal('fetch', fetch)
 
     const session = useSession()
-    await session.verifyCode({ phone: originalCustomer.phone, purpose: 'login', code: '1111' })
+    await session.verifyCode({ phone: originalCustomer.phone, code: '1111' })
     await session.updateProfile({ firstName: 'Анна' })
 
     const updateCall = fetch.mock.calls.find(([url]) => url === '/api/v1/customers/me')
@@ -63,7 +63,7 @@ describe('session store', () => {
     const customer = {
       id: 2,
       phone: '+79990000002',
-      state: 'complete',
+      state: 1,
       hasPhoto: false,
       profile: { phone: '+79990000002', firstName: 'Иван' }
     }
@@ -97,7 +97,7 @@ describe('session store', () => {
     vi.stubGlobal('fetch', fetch)
 
     const session = useSession()
-    await session.verifyCode({ phone: customer.phone, purpose: 'login', code: '1111' })
+    await session.verifyCode({ phone: customer.phone, code: '1111' })
     await session.updateProfile({ firstName: 'Иван' })
 
     const profileCalls = fetch.mock.calls.filter(([url]) => url === '/api/v1/customers/me')
@@ -145,25 +145,19 @@ describe('session store', () => {
       .mockResolvedValueOnce(problemResponse(400, 'validation-failed', {
         title: 'Некорректный запрос',
         detail: 'Исправьте указанные поля и повторите запрос',
-        errors: {
-          phone: ['Введите номер телефона'],
-          purpose: ['Укажите допустимую цель запроса']
-        }
+        errors: { phone: ['Введите номер телефона'] }
       }))
       .mockResolvedValueOnce(malformed)
     vi.stubGlobal('fetch', fetch)
 
     const session = useSession()
-    await expect(session.requestCode('', 'bad')).rejects.toMatchObject({
+    await expect(session.requestCode('')).rejects.toMatchObject({
       message: 'Исправьте указанные поля и повторите запрос',
       status: 400,
       code: 'validation_failed',
-      errors: {
-        phone: ['Введите номер телефона'],
-        purpose: ['Укажите допустимую цель запроса']
-      }
+      errors: { phone: ['Введите номер телефона'] }
     })
-    await expect(session.requestCode('+79990000004', 'login')).rejects.toMatchObject({
+    await expect(session.requestCode('+79990000004')).rejects.toMatchObject({
       type: INTERNAL_PROBLEM_TYPES.serviceUnavailable,
       code: 'ui_service_unavailable',
       detail: 'Сервис недоступен. Пожалуйста, повторите позже.'
@@ -174,7 +168,7 @@ describe('session store', () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')))
 
     const session = useSession()
-    await expect(session.requestCode('+79990000004', 'login')).rejects.toMatchObject({
+    await expect(session.requestCode('+79990000004')).rejects.toMatchObject({
       type: INTERNAL_PROBLEM_TYPES.serviceUnavailable,
       code: 'ui_service_unavailable',
       detail: 'Сервис недоступен. Пожалуйста, повторите позже.'
@@ -193,7 +187,7 @@ describe('session store', () => {
     vi.stubGlobal('fetch', fetch)
 
     const session = useSession()
-    await session.verifyCode({ phone: customer.phone, purpose: 'login', code: '1111' })
+    await session.verifyCode({ phone: customer.phone, code: '1111' })
     await expect(session.updateProfile({ firstName:'Анна' })).rejects.toMatchObject({
       code: 'ui_service_unavailable',
       detail: 'Сервис недоступен. Пожалуйста, повторите позже.'
@@ -206,7 +200,7 @@ describe('session store', () => {
     const customer = {
       id: 4,
       phone: '+79990000004',
-      state: 'preliminary',
+      state: 0,
       hasPhoto: false,
       profile: { phone: '+79990000004' }
     }
@@ -244,7 +238,7 @@ describe('session store', () => {
     vi.stubGlobal('fetch', fetch)
 
     const session = useSession()
-    await session.verifyCode({ phone: customer.phone, purpose: 'login', code: '1111' })
+    await session.verifyCode({ phone: customer.phone, code: '1111' })
     const file = new globalThis.File(['png'], 'photo.png', { type: 'image/png' })
     await session.uploadPhoto(file)
     expect(session.customer.value.hasPhoto).toBe(true)
@@ -281,7 +275,7 @@ describe('session store', () => {
     vi.stubGlobal('fetch', fetch)
 
     const session = useSession()
-    await session.verifyCode({ phone: customer.phone, purpose: 'login', code: '1111' })
+    await session.verifyCode({ phone: customer.phone, code: '1111' })
     await expect(session.getPhoto()).rejects.toMatchObject({
       message: 'Фотография должна быть в формате JPEG, PNG или WebP',
       status: 415,

@@ -3,18 +3,16 @@
 // All rights reserved.
 // This file is a part of the Sarafan application
 
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 
 import { BRAND_ICON_URL } from '../branding.js'
 import {
-  CORE_PROBLEM_TYPES,
   createInternalProblem,
   normalizeProblem,
   presentProblem,
   problemFieldErrors
 } from '../errors/problem.js'
-import { LEGAL_DOCUMENT_KIND } from '../consentFormatting.js'
 import { useConsents } from '../stores/consents.js'
 import { useSession } from '../stores/session.js'
 import UiAlert from './ui/UiAlert.vue'
@@ -23,120 +21,168 @@ import UiDialog from './ui/UiDialog.vue'
 import UiField from './ui/UiField.vue'
 import UiSelectionControl from './ui/UiSelectionControl.vue'
 
-defineProps({ modelValue: { type: Boolean, default: true } })
+const props = defineProps({ modelValue: { type: Boolean, default: true } })
 const emit = defineEmits(['update:modelValue'])
-const { notice, requestCode, verifyCode } = useSession()
+const session = useSession()
 const consentStore = useConsents()
-const termsDocument = ref(null)
-const pdDocument = ref(null)
-const onboardingToken = ref('')
-const mode = ref('login')
 const step = ref('phone')
 const phone = ref('')
 const code = ref('')
+const resolution = ref(null)
+const termsDocument = ref(null)
+const pdDocument = ref(null)
+const onboardingToken = ref('')
 const termsAccepted = ref(false)
 const personalDataAccepted = ref(false)
 const busy = ref(false)
 const problem = ref(null)
+const codeField = ref(null)
 let consentRetryFingerprint = ''
 let consentRetryKey = ''
 
-const isRegistration = computed(() => mode.value === 'register')
-const dialogTitle = computed(() => step.value === 'code'
-  ? 'Введите код'
-  : isRegistration.value ? 'Создайте аккаунт' : 'Рады видеть снова')
-const error = computed(() => problem.value
-  ? presentProblem(problem.value, {
-      detailsByType: isRegistration.value
-        ? {}
-        : { [CORE_PROBLEM_TYPES.customerNotFound]: 'Пользователь с таким телефоном не найден. Выберите регистрацию.' }
-    })
-  : notice.value)
+const agreementKind = computed(() => consentStore.kindByAlias('user-agreement'))
+const personalDataKind = computed(() => consentStore.kindByAlias('personal-data-consent'))
+const requiresAgreement = computed(() => Number.isInteger(agreementKind.value)
+  && resolution.value?.requiredDocumentKinds.includes(agreementKind.value))
+const requiresPersonalData = computed(() => Number.isInteger(personalDataKind.value)
+  && resolution.value?.requiredDocumentKinds.includes(personalDataKind.value))
+const isRegistration = computed(() => resolution.value?.nextStep === session.flowValue('registration'))
+const dialogTitle = computed(() => ({
+  phone: 'Вход или регистрация',
+  requirements: isRegistration.value ? 'Создайте аккаунт' : 'Продолжите вход',
+  code: 'Введите код'
+})[step.value])
+const error = computed(() => problem.value ? presentProblem(problem.value) : session.notice.value)
 const phoneErrors = computed(() => problemFieldErrors(problem.value, 'phone'))
 const codeErrors = computed(() => problemFieldErrors(problem.value, 'code'))
 const termsErrors = computed(() => problemFieldErrors(problem.value, 'termsAccepted'))
-const personalDataErrors = computed(() => problemFieldErrors(problem.value, 'personalDataAccepted'))
+const personalDataErrors = computed(() => problemFieldErrors(problem.value, 'personalDataConsent'))
 const termsDescribedBy = computed(() => [
-  termsDocument.value ? 'registration-terms-document' : null,
-  termsErrors.value.length ? 'registration-terms-error' : null
+  termsDocument.value ? 'authentication-terms-document' : null,
+  termsErrors.value.length ? 'authentication-terms-error' : null
 ].filter(Boolean).join(' ') || undefined)
 const personalDataDescribedBy = computed(() => [
-  pdDocument.value ? 'registration-personal-document' : null,
-  personalDataErrors.value.length ? 'registration-personal-error' : null
+  pdDocument.value ? 'authentication-personal-document' : null,
+  personalDataErrors.value.length ? 'authentication-personal-error' : null
 ].filter(Boolean).join(' ') || undefined)
 
-function resetFlow() {
+function resetAfterPhone() {
   step.value = 'phone'
   code.value = ''
+  resolution.value = null
+  termsDocument.value = null
+  pdDocument.value = null
+  onboardingToken.value = ''
+  termsAccepted.value = false
+  personalDataAccepted.value = false
   problem.value = null
+  consentRetryFingerprint = ''
+  consentRetryKey = ''
+}
+
+watch(() => props.modelValue, open => {
+  if (open) {
+    phone.value = ''
+    resetAfterPhone()
+  }
+})
+
+async function loadRequiredDocuments() {
+  await consentStore.ensureOps()
+  const required = resolution.value?.requiredDocumentKinds || []
+  if (required.some(kind => !consentStore.kindName(kind))) throw createInternalProblem('protocolError')
+  if (resolution.value.nextStep === session.flowValue('agreement')
+      && (required.length !== 1 || required[0] !== agreementKind.value)
+    || resolution.value.nextStep === session.flowValue('registration')
+      && (!required.includes(personalDataKind.value)
+        || required.some(kind => kind !== agreementKind.value && kind !== personalDataKind.value))) {
+    throw createInternalProblem('protocolError')
+  }
+  const requests = required.map(kind => consentStore.current(kind))
+  const results = await Promise.all(requests)
+  const byKind = new Map(results.map(result => [result.document?.kind, result.document]))
+  termsDocument.value = requiresAgreement.value ? byKind.get(agreementKind.value) || null : null
+  pdDocument.value = requiresPersonalData.value ? byKind.get(personalDataKind.value) || null : null
+  if ((requiresAgreement.value && !termsDocument.value) || (requiresPersonalData.value && !pdDocument.value)) {
+    throw createInternalProblem('invalidInput', { detail: 'Нет действующих документов для продолжения.' })
+  }
+}
+
+function validateResolution(value) {
+  const codeStep = session.flowValue('code')
+  const agreementStep = session.flowValue('agreement')
+  const registrationStep = session.flowValue('registration')
+  if (value.nextStep === codeStep && value.requiredDocumentKinds.length === 0) return
+  if (value.nextStep === agreementStep && value.requiredDocumentKinds.length === 1) return
+  if (value.nextStep === registrationStep && value.requiredDocumentKinds.length >= 1) return
+  throw createInternalProblem('protocolError')
+}
+
+async function continueResolution(value) {
+  validateResolution(value)
+  resolution.value = value
+  if (value.nextStep === session.flowValue('code')) {
+    const receipt = await session.requestCode(phone.value)
+    if (receipt?.onboardingToken) throw createInternalProblem('protocolError')
+    step.value = 'code'
+    return
+  }
+  await loadRequiredDocuments()
+  step.value = 'requirements'
+}
+
+async function resolveCurrentPhone() {
+  problem.value = null
+  resolution.value = null
+  termsDocument.value = null
+  pdDocument.value = null
   termsAccepted.value = false
   personalDataAccepted.value = false
   onboardingToken.value = ''
   consentRetryFingerprint = ''
   consentRetryKey = ''
+  await continueResolution(await session.resolvePhone(phone.value))
 }
 
-watch(mode, async () => {
-  resetFlow()
-  if (mode.value === 'register') await loadDocuments()
-})
-
-async function loadDocuments() {
-  problem.value = null
-  termsDocument.value = null
-  pdDocument.value = null
-  busy.value = true
-  try {
-    const [terms, personalData] = await Promise.all([
-      consentStore.current(LEGAL_DOCUMENT_KIND.USER_AGREEMENT),
-      consentStore.current(LEGAL_DOCUMENT_KIND.PERSONAL_DATA_CONSENT)
-    ])
-    termsDocument.value = terms.document
-    pdDocument.value = personalData.document
-    if (!terms.document || !personalData.document) {
-      throw createInternalProblem('invalidInput', { detail: 'Нет действующих документов для регистрации.' })
+function consentPayload() {
+  const payload = {}
+  if (requiresAgreement.value) {
+    payload.termsAccepted = true
+    payload.termsDocumentId = termsDocument.value.id
+  }
+  if (requiresPersonalData.value) {
+    const fingerprint = JSON.stringify([phone.value, pdDocument.value.id, pdDocument.value.contentHash])
+    if (fingerprint !== consentRetryFingerprint) {
+      consentRetryFingerprint = fingerprint
+      consentRetryKey = globalThis.crypto.randomUUID()
     }
-  } catch (value) {
-    problem.value = normalizeProblem(value)
-  } finally {
-    busy.value = false
-  }
-}
-
-function consentPayload(normalizedPhone) {
-  const fingerprint = JSON.stringify([
-    normalizedPhone,
-    termsDocument.value?.id,
-    pdDocument.value?.id,
-    pdDocument.value?.contentHash
-  ])
-  if (fingerprint !== consentRetryFingerprint) {
-    consentRetryFingerprint = fingerprint
-    consentRetryKey = globalThis.crypto.randomUUID()
-  }
-  return {
-    termsAccepted: termsAccepted.value,
-    termsDocumentId: termsDocument.value?.id,
-    personalDataConsent: {
-      documentId: pdDocument.value?.id,
-      contentHash: pdDocument.value?.contentHash,
+    payload.personalDataConsent = {
+      documentId: pdDocument.value.id,
+      contentHash: pdDocument.value.contentHash,
       decision: 'grant',
       categories: [],
       idempotencyKey: consentRetryKey
     }
   }
+  return payload
 }
 
-async function refreshDocumentsAfterConsentProblem() {
-  resetFlow()
-  await loadDocuments()
-}
-
-function isConsentProblem(value) {
+function needsRestart(value) {
   return [
-    'https://sarafan.sw.consulting/problems/consent-version-changed',
-    'https://sarafan.sw.consulting/problems/onboarding-consent-expired'
-  ].includes(value.type)
+    'consent_version_changed',
+    'onboarding_consent_expired',
+    'authentication_requirements_changed'
+  ].includes(value?.code)
+}
+
+async function restartFlow(value) {
+  problem.value = normalizeProblem(value)
+  code.value = ''
+  try {
+    await resolveCurrentPhone()
+  } catch (restartProblem) {
+    problem.value = normalizeProblem(restartProblem)
+  }
 }
 
 async function submitPhone() {
@@ -148,25 +194,44 @@ async function submitPhone() {
     })
     return
   }
-  if (isRegistration.value && (!termsDocument.value || !pdDocument.value || !termsAccepted.value || !personalDataAccepted.value)) {
-    problem.value = createInternalProblem('invalidInput', {
-      detail: 'Прочитайте документы и отдельно подтвердите условия и согласие до отправки телефона.'
-    })
-    return
-  }
   phone.value = normalizedPhone
   busy.value = true
   problem.value = null
   try {
-    const receipt = await requestCode(normalizedPhone, mode.value, isRegistration.value ? consentPayload(normalizedPhone) : {})
-    if (isRegistration.value && (typeof receipt?.onboardingToken !== 'string' || receipt.onboardingToken.length < 32)) {
-      throw createInternalProblem('protocolError')
-    }
-    onboardingToken.value = receipt?.onboardingToken || ''
-    step.value = 'code'
+    await resolveCurrentPhone()
   } catch (value) {
     problem.value = normalizeProblem(value)
-    if (isConsentProblem(problem.value)) await refreshDocumentsAfterConsentProblem()
+  } finally {
+    busy.value = false
+  }
+}
+
+async function submitRequirements() {
+  const errors = {}
+  if (requiresAgreement.value && !termsAccepted.value) errors.termsAccepted = ['Примите условия использования сервиса']
+  if (requiresPersonalData.value && !personalDataAccepted.value) {
+    errors.personalDataConsent = ['Дайте согласие на обработку персональных данных']
+  }
+  if (Object.keys(errors).length) {
+    problem.value = createInternalProblem('invalidInput', {
+      detail: 'Подтвердите необходимые документы.',
+      errors
+    })
+    return
+  }
+
+  busy.value = true
+  problem.value = null
+  try {
+    const receipt = await session.requestCode(phone.value, consentPayload())
+    if (typeof receipt?.onboardingToken !== 'string' || receipt.onboardingToken.length < 32) {
+      throw createInternalProblem('protocolError')
+    }
+    onboardingToken.value = receipt.onboardingToken
+    step.value = 'code'
+  } catch (value) {
+    if (needsRestart(value)) await restartFlow(value)
+    else problem.value = normalizeProblem(value)
   } finally {
     busy.value = false
   }
@@ -181,30 +246,26 @@ async function submitCode() {
     })
     return
   }
-  if (isRegistration.value && (!termsAccepted.value || !personalDataAccepted.value)) {
-    problem.value = createInternalProblem('invalidInput', {
-      detail: 'Для регистрации необходимо принять оба согласия',
-      errors: {
-        termsAccepted: ['Примите условия использования сервиса'],
-        personalDataAccepted: ['Дайте согласие на обработку персональных данных']
-      }
-    })
-    return
-  }
   busy.value = true
   problem.value = null
   try {
-    await verifyCode({
+    await session.verifyCode({
       phone: phone.value,
-      purpose: mode.value,
       code: normalizedCode,
-      termsAccepted: termsAccepted.value,
-      onboardingToken: onboardingToken.value
+      ...(onboardingToken.value ? { onboardingToken:onboardingToken.value } : {})
     })
     emit('update:modelValue', false)
   } catch (value) {
-    problem.value = normalizeProblem(value)
-    if (isConsentProblem(problem.value)) await refreshDocumentsAfterConsentProblem()
+    if (needsRestart(value)) {
+      await restartFlow(value)
+    } else {
+      problem.value = normalizeProblem(value)
+      if (problem.value.code === 'invalid_code') {
+        code.value = ''
+        await nextTick()
+        codeField.value?.$el?.querySelector('input')?.focus()
+      }
+    }
   } finally {
     busy.value = false
   }
@@ -227,112 +288,13 @@ async function submitCode() {
         aria-hidden="true"
       >
     </template>
-    <div
-      class="auth-tabs"
-      role="tablist"
-      aria-label="Способ входа"
-    >
-      <button
-        type="button"
-        role="tab"
-        :disabled="busy"
-        :aria-selected="mode === 'login'"
-        :class="{ 'auth-tab--active': mode === 'login' }"
-        @click="mode = 'login'"
-      >
-        Войти
-      </button>
-      <button
-        type="button"
-        role="tab"
-        :disabled="busy"
-        :aria-selected="mode === 'register'"
-        :class="{ 'auth-tab--active': mode === 'register' }"
-        @click="mode = 'register'"
-      >
-        Регистрация
-      </button>
-    </div>
 
     <form
       v-if="step === 'phone'"
       class="auth-form"
       @submit.prevent="submitPhone"
     >
-      <p>Укажите телефон — мы отправим одноразовый код для безопасного входа.</p>
-      <div
-        v-if="isRegistration"
-        class="consent-registration"
-      >
-        <div class="consent-registration__item">
-          <UiSelectionControl
-            id="registration-terms"
-            :model-value="termsAccepted"
-            :disabled="busy"
-            :error="termsErrors.length > 0"
-            :aria-describedby="termsDescribedBy"
-            @update:model-value="termsAccepted = $event"
-          >
-            Я принимаю условия использования сервиса
-            <small v-if="termsDocument">Пользовательское соглашение · версия {{ termsDocument.displayVersion }}</small>
-          </UiSelectionControl>
-          <RouterLink
-            v-if="termsDocument"
-            id="registration-terms-document"
-            class="consent-document-link"
-            :to="{ name: 'legal-document', params: { documentRef: termsDocument.id } }"
-            @click="emit('update:modelValue', false)"
-          >
-            Открыть пользовательское соглашение
-          </RouterLink>
-          <p
-            v-if="termsErrors.length"
-            id="registration-terms-error"
-            class="consent-field-error"
-            role="alert"
-          >
-            {{ termsErrors.join(' ') }}
-          </p>
-        </div>
-        <div class="consent-registration__item">
-          <UiSelectionControl
-            id="registration-personal-data"
-            :model-value="personalDataAccepted"
-            :disabled="busy"
-            :error="personalDataErrors.length > 0"
-            :aria-describedby="personalDataDescribedBy"
-            @update:model-value="personalDataAccepted = $event"
-          >
-            Я даю отдельное согласие на обработку персональных данных
-            <small v-if="pdDocument">Согласие на обработку персональных данных · версия {{ pdDocument.displayVersion }}</small>
-          </UiSelectionControl>
-          <RouterLink
-            v-if="pdDocument"
-            id="registration-personal-document"
-            class="consent-document-link"
-            :to="{ name: 'legal-document', params: { documentRef: pdDocument.id } }"
-            @click="emit('update:modelValue', false)"
-          >
-            Открыть согласие на обработку персональных данных
-          </RouterLink>
-          <p
-            v-if="personalDataErrors.length"
-            id="registration-personal-error"
-            class="consent-field-error"
-            role="alert"
-          >
-            {{ personalDataErrors.join(' ') }}
-          </p>
-        </div>
-        <UiButton
-          class="consent-registration__retry"
-          variant="quiet"
-          :disabled="busy"
-          @click="loadDocuments"
-        >
-          Обновить документы
-        </UiButton>
-      </div>
+      <p>Укажите телефон. Если аккаунт ещё не создан или отключён, мы предложим регистрацию.</p>
       <UiField
         v-model="phone"
         name="phone"
@@ -343,6 +305,101 @@ async function submitCode() {
         :disabled="busy"
         :errors="phoneErrors"
       />
+      <UiAlert
+        v-if="error"
+        class="form-error"
+        :title="problem?.title"
+      >
+        {{ error }}
+      </UiAlert>
+      <UiButton
+        type="submit"
+        variant="primary"
+        block
+        :loading="busy"
+      >
+        Продолжить
+      </UiButton>
+    </form>
+
+    <form
+      v-else-if="step === 'requirements'"
+      class="auth-form"
+      @submit.prevent="submitRequirements"
+    >
+      <p v-if="isRegistration">
+        Для номера {{ phone }} нужна регистрация. Подтвердите необходимые документы.
+      </p>
+      <p v-else>
+        Чтобы продолжить вход для {{ phone }}, примите актуальное пользовательское соглашение.
+      </p>
+      <div class="consent-registration">
+        <div
+          v-if="requiresAgreement"
+          class="consent-registration__item"
+        >
+          <UiSelectionControl
+            id="authentication-terms"
+            :model-value="termsAccepted"
+            :disabled="busy"
+            :error="termsErrors.length > 0"
+            :aria-describedby="termsDescribedBy"
+            @update:model-value="termsAccepted = $event"
+          >
+            Я принимаю условия использования сервиса
+            <small>Пользовательское соглашение · версия {{ termsDocument?.displayVersion }}</small>
+          </UiSelectionControl>
+          <RouterLink
+            id="authentication-terms-document"
+            class="consent-document-link"
+            :to="{ name: 'legal-document', params: { documentRef: termsDocument.id } }"
+            @click="emit('update:modelValue', false)"
+          >
+            Открыть пользовательское соглашение
+          </RouterLink>
+          <p
+            v-if="termsErrors.length"
+            id="authentication-terms-error"
+            class="consent-field-error"
+            role="alert"
+          >
+            {{ termsErrors.join(' ') }}
+          </p>
+        </div>
+
+        <div
+          v-if="requiresPersonalData"
+          class="consent-registration__item"
+        >
+          <UiSelectionControl
+            id="authentication-personal-data"
+            :model-value="personalDataAccepted"
+            :disabled="busy"
+            :error="personalDataErrors.length > 0"
+            :aria-describedby="personalDataDescribedBy"
+            @update:model-value="personalDataAccepted = $event"
+          >
+            Я даю отдельное согласие на обработку персональных данных
+            <small>Согласие на обработку персональных данных · версия {{ pdDocument?.displayVersion }}</small>
+          </UiSelectionControl>
+          <RouterLink
+            id="authentication-personal-document"
+            class="consent-document-link"
+            :to="{ name: 'legal-document', params: { documentRef: pdDocument.id } }"
+            @click="emit('update:modelValue', false)"
+          >
+            Открыть согласие на обработку персональных данных
+          </RouterLink>
+          <p
+            v-if="personalDataErrors.length"
+            id="authentication-personal-error"
+            class="consent-field-error"
+            role="alert"
+          >
+            {{ personalDataErrors.join(' ') }}
+          </p>
+        </div>
+      </div>
       <UiAlert
         v-if="error"
         class="form-error"
@@ -367,6 +424,7 @@ async function submitCode() {
     >
       <p>Код отправлен на {{ phone }}.</p>
       <UiField
+        ref="codeField"
         v-model="code"
         name="code"
         label="Код подтверждения"
@@ -390,15 +448,6 @@ async function submitCode() {
         :loading="busy"
       >
         {{ isRegistration ? 'Зарегистрироваться' : 'Войти' }}
-      </UiButton>
-      <UiButton
-        class="auth-back"
-        variant="quiet"
-        block
-        :disabled="busy"
-        @click="step = 'phone'"
-      >
-        Изменить номер телефона
       </UiButton>
     </form>
   </UiDialog>

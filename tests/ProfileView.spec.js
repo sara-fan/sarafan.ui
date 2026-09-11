@@ -70,13 +70,13 @@ describe('ProfileView', () => {
     const customer = {
       id: 12,
       phone: '+79991234567',
-      state: 'preliminary',
+      state: 0,
       hasPhoto: true,
       profile: { lastName: 'Старая', firstName: null }
     }
     const updated = {
       ...customer,
-      state: 'complete',
+      state: 1,
       profile: { ...customer.profile, lastName: 'Новая', firstName: 'Мария' }
     }
     const photo = new globalThis.Blob(['photo'], { type: 'image/png' })
@@ -89,7 +89,7 @@ describe('ProfileView', () => {
       throw new Error(`Unexpected request: ${url}`)
     })
     vi.stubGlobal('fetch', fetch)
-    await useSession().verifyCode({ phone: customer.phone, purpose: 'login', code: '1111' })
+    await useSession().verifyCode({ phone: customer.phone, code: '1111' })
 
     const wrapper = mountView()
     await vi.waitFor(() => expect(wrapper.find('.profile-avatar img').exists()).toBe(true))
@@ -156,7 +156,7 @@ describe('ProfileView', () => {
     const customer = { id: 13, phone: '+79991234567', hasPhoto: false, profile: { firstName: 'Мария' } }
     const fetch = vi.fn(() => Promise.resolve(sessionResponse(customer)))
     vi.stubGlobal('fetch', fetch)
-    await useSession().verifyCode({ phone: customer.phone, purpose: 'login', code: '4567' })
+    await useSession().verifyCode({ phone: customer.phone, code: '4567' })
     const wrapper = mountView()
     await startEditing(wrapper)
     consent.requirePersonalData.mockRejectedValue(createInternalProblem('invalidInput', { detail: 'Требуется актуальное согласие' }))
@@ -176,7 +176,7 @@ describe('ProfileView', () => {
       if (url === '/api/v1/customers/me/photo') return pendingPhoto.promise
       throw new Error(`Unexpected request: ${url}`)
     }))
-    await useSession().verifyCode({ phone: customer.phone, purpose: 'login', code: '1111' })
+    await useSession().verifyCode({ phone: customer.phone, code: '1111' })
     const wrapper = mountView()
     wrapper.unmount()
     mountedWrapper = null
@@ -196,7 +196,7 @@ describe('ProfileView', () => {
       throw new Error(`Unexpected request: ${url}`)
     })
     vi.stubGlobal('fetch', fetch)
-    await useSession().verifyCode({ phone: customer.phone, purpose: 'login', code: '1111' })
+    await useSession().verifyCode({ phone: customer.phone, code: '1111' })
     const wrapper = mountView()
     await flushPromises()
     await startEditing(wrapper)

@@ -23,6 +23,9 @@ const restoring = ref(true)
 const restoreProblem = ref(null)
 const notice = ref('')
 let refreshPromise = null
+let opsPromise = null
+const authenticationOps = ref(null)
+const customerOps = ref(null)
 const SERVICE_UNAVAILABLE_MESSAGE = 'Сервис недоступен. Пожалуйста, повторите позже.'
 
 function serviceUnavailableProblem(problem) {
@@ -32,10 +35,48 @@ function serviceUnavailableProblem(problem) {
 }
 
 function applySession(session) {
+  if (!session?.customer || (customerOps.value
+    && (!Number.isInteger(session.customer.state)
+      || !customerOps.value.states.some(item => item.value === session.customer.state)))) {
+    throw createInternalProblem('protocolError')
+  }
   accessToken.value = session.accessToken
   customer.value = session.customer
   notice.value = ''
   return session.customer
+}
+
+function validateEnumOps(value, property) {
+  const items = value?.[property]
+  if (!Array.isArray(items) || items.length === 0) throw createInternalProblem('protocolError')
+  const values = new Set()
+  const aliases = new Set()
+  for (const item of items) {
+    if (!item || !Number.isInteger(item.value) || item.value < 0 || typeof item.name !== 'string' || !item.name.trim()
+      || typeof item.routeAlias !== 'string' || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(item.routeAlias)
+      || values.has(item.value) || aliases.has(item.routeAlias)) throw createInternalProblem('protocolError')
+    values.add(item.value)
+    aliases.add(item.routeAlias)
+  }
+  return { [property]:items.map(item => ({ value:item.value, name:item.name, routeAlias:item.routeAlias })) }
+}
+
+async function ensureOps() {
+  if (authenticationOps.value && customerOps.value) return
+  if (!opsPromise) {
+    opsPromise = Promise.all([
+      client.request(`${API_BASE_PATH}/auth/ops`),
+      client.request(`${API_BASE_PATH}/customers/ops`)
+    ]).then(([auth, customers]) => {
+      authenticationOps.value = validateEnumOps(auth, 'steps')
+      customerOps.value = validateEnumOps(customers, 'states')
+    }).finally(() => { opsPromise = null })
+  }
+  await opsPromise
+}
+
+function flowValue(alias) {
+  return authenticationOps.value?.steps.find(item => item.routeAlias === alias)?.value
 }
 
 function clearSession(message = '') {
@@ -102,12 +143,31 @@ async function restoreSession() {
   }
 }
 
-async function requestCode(phone, purpose, consents = {}) {
+async function resolvePhone(phone) {
+  notice.value = ''
+  try {
+    await ensureOps()
+    const result = await client.request(
+      `${API_BASE_PATH}/auth/phone/resolve`,
+      jsonOptions('POST', { phone })
+    )
+    if (!result || !Number.isInteger(result.nextStep)
+      || !authenticationOps.value.steps.some(item => item.value === result.nextStep)
+      || !Array.isArray(result.requiredDocumentKinds)
+      || result.requiredDocumentKinds.some(kind => !Number.isInteger(kind))
+      || new Set(result.requiredDocumentKinds).size !== result.requiredDocumentKinds.length) throw createInternalProblem('protocolError')
+    return result
+  } catch (error) {
+    throw isServiceUnavailableProblem(error) ? serviceUnavailableProblem(error) : error
+  }
+}
+
+async function requestCode(phone, consents = {}) {
   notice.value = ''
   try {
     return await client.request(
       `${API_BASE_PATH}/auth/code/request`,
-      jsonOptions('POST', { phone, purpose, ...consents })
+      jsonOptions('POST', { phone, ...consents })
     )
   } catch (error) {
     throw isServiceUnavailableProblem(error) ? serviceUnavailableProblem(error) : error
@@ -209,6 +269,9 @@ export function useSession() {
     restoreSession,
     getStatus,
     consentRequest,
+    ensureOps,
+    flowValue,
+    resolvePhone,
     requestCode,
     verifyCode,
     logout,
@@ -225,4 +288,7 @@ export function resetSessionForTests() {
   restoreProblem.value = null
   notice.value = ''
   refreshPromise = null
+  opsPromise = null
+  authenticationOps.value = null
+  customerOps.value = null
 }
