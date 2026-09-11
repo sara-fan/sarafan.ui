@@ -14,6 +14,30 @@ import { EVENTS } from '../src/observability/catalogue.js'
 import { resetSessionForTests, useSession } from '../src/stores/session.js'
 import { TEST_TRACE_ID, problemResponse, response } from './fixtures/http.js'
 
+const authenticationOps = { steps:[
+  { value:0, name:'Код подтверждения', routeAlias:'code' },
+  { value:1, name:'Пользовательское соглашение', routeAlias:'agreement' },
+  { value:2, name:'Регистрация', routeAlias:'registration' }
+] }
+const customerOps = { states:[
+  { value:0, name:'Предварительный', routeAlias:'preliminary' },
+  { value:1, name:'Заполненный', routeAlias:'complete' },
+  { value:2, name:'Отключённый', routeAlias:'disabled' }
+] }
+
+function opsResponse(url) {
+  if (url === '/api/v1/auth/ops') return response(200, authenticationOps)
+  if (url === '/api/v1/customers/ops') return response(200, customerOps)
+  return null
+}
+
+function withOps(handler) {
+  return vi.fn((url, options) => {
+    const standard = opsResponse(url)
+    return standard ? Promise.resolve(standard) : handler(url, options)
+  })
+}
+
 describe('session store', () => {
   beforeEach(() => {
     resetSessionForTests()
@@ -22,6 +46,64 @@ describe('session store', () => {
 
   afterEach(() => {
     vi.unstubAllGlobals()
+  })
+
+  it.each([
+    ['missing authentication Ops', null, customerOps],
+    ['empty authentication steps', { steps:[] }, customerOps],
+    ['duplicate authentication values', { steps:[...authenticationOps.steps, { value:0, name:'Другой', routeAlias:'other' }] }, customerOps],
+    ['duplicate authentication aliases', { steps:[...authenticationOps.steps, { value:3, name:'Другой', routeAlias:'code' }] }, customerOps],
+    ['missing authentication step', { steps:authenticationOps.steps.filter(item => item.routeAlias !== 'agreement') }, customerOps],
+    ['malformed authentication item', { steps:[...authenticationOps.steps, { value:3, name:'', routeAlias:'other' }] }, customerOps],
+    ['missing customer state', authenticationOps, { states:customerOps.states.filter(item => item.routeAlias !== 'disabled') }],
+    ['malformed customer state', authenticationOps, { states:[...customerOps.states, { value:'3', name:'Другой', routeAlias:'other' }] }]
+  ])('rejects %s without retaining partial Ops', async (_label, auth, customers) => {
+    vi.stubGlobal('fetch', vi.fn(url => {
+      if (url === '/api/v1/auth/ops') return Promise.resolve(response(200, auth))
+      if (url === '/api/v1/customers/ops') return Promise.resolve(response(200, customers))
+      throw new Error(`Unexpected request: ${url}`)
+    }))
+
+    const session = useSession()
+    await expect(session.ensureOps()).rejects.toMatchObject({ code:'ui_protocol_error' })
+    expect(session.flowValue('code')).toBeUndefined()
+  })
+
+  it.each([undefined, 99, '0'])('rejects a restored session with invalid customer state %j', async state => {
+    const restoredCustomer = { id:3, phone:'+79990000003', state, profile:{ phone:'+79990000003' } }
+    const fetch = withOps(url => {
+      if (url === '/api/v1/auth/refresh') return Promise.resolve(response(200, {
+        accessToken:'restored-token', expiresAt:'2026-08-30T00:15:00Z', customer:restoredCustomer
+      }))
+      throw new Error(`Unexpected request: ${url}`)
+    })
+    vi.stubGlobal('fetch', fetch)
+
+    const session = useSession()
+    await session.restoreSession()
+
+    expect(session.customer.value).toBeNull()
+    expect(session.restoreProblem.value).toMatchObject({ type:INTERNAL_PROBLEM_TYPES.sessionRestoreUnavailable })
+  })
+
+  it.each([
+    null,
+    {},
+    { nextStep:99, requiredDocumentKinds:[] },
+    { nextStep:'0', requiredDocumentKinds:[] },
+    { nextStep:0, requiredDocumentKinds:null },
+    { nextStep:0, requiredDocumentKinds:[1.5] },
+    { nextStep:0, requiredDocumentKinds:[1, 1] }
+  ])('fails closed on malformed phone resolution %j', async resolution => {
+    const fetch = withOps(url => {
+      if (url === '/api/v1/auth/phone/resolve') return Promise.resolve(response(200, resolution))
+      throw new Error(`Unexpected request: ${url}`)
+    })
+    vi.stubGlobal('fetch', fetch)
+
+    await expect(useSession().resolvePhone('+79990000003')).rejects.toMatchObject({
+      type:INTERNAL_PROBLEM_TYPES.serviceUnavailable
+    })
   })
 
   it('uses the bearer token for profile updates', async () => {
@@ -37,7 +119,7 @@ describe('session store', () => {
       state: 1,
       profile: { ...originalCustomer.profile, firstName: 'Анна' }
     }
-    const fetch = vi.fn((url) => {
+    const fetch = withOps((url) => {
       if (url === '/api/v1/auth/code/verify') {
         return Promise.resolve(response(200, {
           accessToken: 'jwt-value',
@@ -68,7 +150,7 @@ describe('session store', () => {
       profile: { phone: '+79990000002', firstName: 'Иван' }
     }
     let profileAttempts = 0
-    const fetch = vi.fn((url) => {
+    const fetch = withOps((url) => {
       if (url === '/api/v1/auth/code/verify') {
         return Promise.resolve(response(200, {
           accessToken: 'old-token',
@@ -114,26 +196,32 @@ describe('session store', () => {
   })
 
   it('restores one shared refresh request and clears an unavailable session', async () => {
-    const customer = { id: 3, phone: '+79990000003', profile: { phone: '+79990000003' } }
-    const fetch = vi.fn()
-      .mockResolvedValueOnce(response(200, {
+    const customer = { id: 3, phone: '+79990000003', state:0, profile: { phone: '+79990000003' } }
+    const refreshResponses = [
+      response(200, {
         accessToken: 'restored-token',
         expiresAt: '2026-08-30T00:15:00Z',
         customer
-      }))
-      .mockResolvedValueOnce(problemResponse(401, 'invalid-refresh-token', {
+      }),
+      problemResponse(401, 'invalid-refresh-token', {
         title: 'Недействительный сеанс',
         detail: 'Войдите в систему повторно'
-      }))
+      })
+    ]
+    const fetch = withOps(url => {
+      if (url === '/api/v1/auth/refresh') return Promise.resolve(refreshResponses.shift())
+      throw new Error(`Unexpected request: ${url}`)
+    })
     vi.stubGlobal('fetch', fetch)
 
     const session = useSession()
     await Promise.all([session.restoreSession(), session.restoreSession()])
-    expect(fetch).toHaveBeenCalledTimes(1)
+    expect(fetch.mock.calls.filter(([url]) => url === '/api/v1/auth/refresh')).toHaveLength(1)
     expect(session.customer.value).toEqual(customer)
     expect(session.restoring.value).toBe(false)
 
     await session.restoreSession()
+    expect(fetch.mock.calls.filter(([url]) => url === '/api/v1/auth/refresh')).toHaveLength(2)
     expect(session.customer.value).toBeNull()
     expect(session.restoreProblem.value).toBeNull()
     expect(session.restoring.value).toBe(false)
@@ -175,15 +263,32 @@ describe('session store', () => {
     })
   })
 
+  it.each([
+    null,
+    {},
+    { onboardingToken:false },
+    { onboardingToken:'' },
+    { onboardingToken:'short' },
+    { onboardingToken:'x'.repeat(129) }
+  ])('fails closed on malformed code-request receipt %j', async receipt => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response(202, receipt)))
+
+    await expect(useSession().requestCode('+79990000004')).rejects.toMatchObject({
+      type:INTERNAL_PROBLEM_TYPES.serviceUnavailable
+    })
+  })
+
   it('forces logoff after an authenticated request receives a gateway error', async () => {
-    const customer = { id: 4, phone: '+79990000004', profile: { phone: '+79990000004' } }
-    const fetch = vi.fn()
-      .mockResolvedValueOnce(response(200, {
+    const customer = { id: 4, phone: '+79990000004', state:0, profile: { phone: '+79990000004' } }
+    const fetch = withOps((url) => {
+      if (url === '/api/v1/auth/code/verify') return Promise.resolve(response(200, {
         accessToken: 'active-token',
         expiresAt: '2026-08-30T00:15:00Z',
         customer
       }))
-      .mockResolvedValueOnce(response(502, null, 'text/html'))
+      if (url === '/api/v1/customers/me') return Promise.resolve(response(502, null, 'text/html'))
+      throw new Error(`Unexpected request: ${url}`)
+    })
     vi.stubGlobal('fetch', fetch)
 
     const session = useSession()
@@ -206,7 +311,7 @@ describe('session store', () => {
     }
     const photo = new globalThis.Blob(['image'], { type: 'image/png' })
     let photoReads = 0
-    const fetch = vi.fn((url) => {
+    const fetch = withOps((url) => {
       if (url === '/api/v1/auth/code/verify') {
         return Promise.resolve(response(200, {
           accessToken: 'photo-token',
@@ -254,8 +359,8 @@ describe('session store', () => {
   })
 
   it('clears local state when logout fails and surfaces photo errors', async () => {
-    const customer = { id: 5, phone: '+79990000005', profile: { phone: '+79990000005' } }
-    const fetch = vi.fn((url) => {
+    const customer = { id: 5, phone: '+79990000005', state:0, profile: { phone: '+79990000005' } }
+    const fetch = withOps((url) => {
       if (url === '/api/v1/auth/code/verify') {
         return Promise.resolve(response(200, {
           accessToken: 'token',

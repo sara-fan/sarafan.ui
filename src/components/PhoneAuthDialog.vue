@@ -8,6 +8,7 @@ import { RouterLink } from 'vue-router'
 
 import { BRAND_ICON_URL } from '../branding.js'
 import {
+  CORE_PROBLEM_TYPES,
   createInternalProblem,
   normalizeProblem,
   presentProblem,
@@ -39,6 +40,7 @@ const problem = ref(null)
 const codeField = ref(null)
 let consentRetryFingerprint = ''
 let consentRetryKey = ''
+let operationGeneration = 0
 
 const agreementKind = computed(() => consentStore.kindByAlias('user-agreement'))
 const personalDataKind = computed(() => consentStore.kindByAlias('personal-data-consent'))
@@ -81,31 +83,42 @@ function resetAfterPhone() {
 }
 
 watch(() => props.modelValue, open => {
+  operationGeneration++
+  busy.value = false
   if (open) {
     phone.value = ''
     resetAfterPhone()
   }
 })
 
-async function loadRequiredDocuments() {
+const currentOperation = operation => props.modelValue && operation === operationGeneration
+
+async function loadRequiredDocuments(value, operation) {
   await consentStore.ensureOps()
-  const required = resolution.value?.requiredDocumentKinds || []
+  if (!currentOperation(operation)) return false
+  const required = value.requiredDocumentKinds
+  const agreement = agreementKind.value
+  const personalData = personalDataKind.value
   if (required.some(kind => !consentStore.kindName(kind))) throw createInternalProblem('protocolError')
-  if (resolution.value.nextStep === session.flowValue('agreement')
-      && (required.length !== 1 || required[0] !== agreementKind.value)
-    || resolution.value.nextStep === session.flowValue('registration')
-      && (!required.includes(personalDataKind.value)
-        || required.some(kind => kind !== agreementKind.value && kind !== personalDataKind.value))) {
+  if (value.nextStep === session.flowValue('agreement')
+      && (required.length !== 1 || required[0] !== agreement)
+    || value.nextStep === session.flowValue('registration')
+      && (!required.includes(personalData)
+        || required.some(kind => kind !== agreement && kind !== personalData))) {
     throw createInternalProblem('protocolError')
   }
   const requests = required.map(kind => consentStore.current(kind))
   const results = await Promise.all(requests)
+  if (!currentOperation(operation)) return false
   const byKind = new Map(results.map(result => [result.document?.kind, result.document]))
-  termsDocument.value = requiresAgreement.value ? byKind.get(agreementKind.value) || null : null
-  pdDocument.value = requiresPersonalData.value ? byKind.get(personalDataKind.value) || null : null
-  if ((requiresAgreement.value && !termsDocument.value) || (requiresPersonalData.value && !pdDocument.value)) {
+  const needsAgreement = required.includes(agreement)
+  const needsPersonalData = required.includes(personalData)
+  termsDocument.value = needsAgreement ? byKind.get(agreement) || null : null
+  pdDocument.value = needsPersonalData ? byKind.get(personalData) || null : null
+  if ((needsAgreement && !termsDocument.value) || (needsPersonalData && !pdDocument.value)) {
     throw createInternalProblem('invalidInput', { detail: 'Нет действующих документов для продолжения.' })
   }
+  return true
 }
 
 function validateResolution(value) {
@@ -118,20 +131,22 @@ function validateResolution(value) {
   throw createInternalProblem('protocolError')
 }
 
-async function continueResolution(value) {
+async function continueResolution(value, resolvedPhone, operation) {
+  if (!currentOperation(operation)) return
   validateResolution(value)
   resolution.value = value
   if (value.nextStep === session.flowValue('code')) {
-    const receipt = await session.requestCode(phone.value)
-    if (receipt?.onboardingToken) throw createInternalProblem('protocolError')
+    const receipt = await session.requestCode(resolvedPhone)
+    if (!currentOperation(operation)) return
+    if (receipt.onboardingToken !== null) throw createInternalProblem('protocolError')
     step.value = 'code'
     return
   }
-  await loadRequiredDocuments()
-  step.value = 'requirements'
+  if (await loadRequiredDocuments(value, operation) && currentOperation(operation)) step.value = 'requirements'
 }
 
-async function resolveCurrentPhone() {
+async function resolveCurrentPhone(operation) {
+  const resolvedPhone = phone.value
   problem.value = null
   resolution.value = null
   termsDocument.value = null
@@ -141,7 +156,8 @@ async function resolveCurrentPhone() {
   onboardingToken.value = ''
   consentRetryFingerprint = ''
   consentRetryKey = ''
-  await continueResolution(await session.resolvePhone(phone.value))
+  const value = await session.resolvePhone(resolvedPhone)
+  if (currentOperation(operation)) await continueResolution(value, resolvedPhone, operation)
 }
 
 function consentPayload() {
@@ -169,19 +185,21 @@ function consentPayload() {
 
 function needsRestart(value) {
   return [
-    'consent_version_changed',
-    'onboarding_consent_expired',
-    'authentication_requirements_changed'
-  ].includes(value?.code)
+    CORE_PROBLEM_TYPES.consentVersionChanged,
+    CORE_PROBLEM_TYPES.onboardingConsentExpired,
+    CORE_PROBLEM_TYPES.authenticationRequirementsChanged
+  ].includes(value?.type)
 }
 
-async function restartFlow(value) {
+async function restartFlow(value, operation) {
+  if (!currentOperation(operation)) return
+  resetAfterPhone()
+  busy.value = true
   problem.value = normalizeProblem(value)
-  code.value = ''
   try {
-    await resolveCurrentPhone()
+    await resolveCurrentPhone(operation)
   } catch (restartProblem) {
-    problem.value = normalizeProblem(restartProblem)
+    if (currentOperation(operation)) problem.value = normalizeProblem(restartProblem)
   }
 }
 
@@ -195,14 +213,15 @@ async function submitPhone() {
     return
   }
   phone.value = normalizedPhone
+  const operation = ++operationGeneration
   busy.value = true
   problem.value = null
   try {
-    await resolveCurrentPhone()
+    await resolveCurrentPhone(operation)
   } catch (value) {
-    problem.value = normalizeProblem(value)
+    if (currentOperation(operation)) problem.value = normalizeProblem(value)
   } finally {
-    busy.value = false
+    if (currentOperation(operation)) busy.value = false
   }
 }
 
@@ -220,20 +239,23 @@ async function submitRequirements() {
     return
   }
 
+  const operation = ++operationGeneration
   busy.value = true
   problem.value = null
   try {
     const receipt = await session.requestCode(phone.value, consentPayload())
+    if (!currentOperation(operation)) return
     if (typeof receipt?.onboardingToken !== 'string' || receipt.onboardingToken.length < 32) {
       throw createInternalProblem('protocolError')
     }
     onboardingToken.value = receipt.onboardingToken
     step.value = 'code'
   } catch (value) {
-    if (needsRestart(value)) await restartFlow(value)
+    if (!currentOperation(operation)) return
+    if (needsRestart(value)) await restartFlow(value, operation)
     else problem.value = normalizeProblem(value)
   } finally {
-    busy.value = false
+    if (currentOperation(operation)) busy.value = false
   }
 }
 
@@ -246,6 +268,7 @@ async function submitCode() {
     })
     return
   }
+  const operation = ++operationGeneration
   busy.value = true
   problem.value = null
   try {
@@ -254,20 +277,22 @@ async function submitCode() {
       code: normalizedCode,
       ...(onboardingToken.value ? { onboardingToken:onboardingToken.value } : {})
     })
+    if (!currentOperation(operation)) return
     emit('update:modelValue', false)
   } catch (value) {
+    if (!currentOperation(operation)) return
     if (needsRestart(value)) {
-      await restartFlow(value)
+      await restartFlow(value, operation)
     } else {
       problem.value = normalizeProblem(value)
-      if (problem.value.code === 'invalid_code') {
+      if (problem.value.type === CORE_PROBLEM_TYPES.invalidCode) {
         code.value = ''
         await nextTick()
-        codeField.value?.$el?.querySelector('input')?.focus()
+        if (currentOperation(operation)) codeField.value?.$el?.querySelector('input')?.focus()
       }
     }
   } finally {
-    busy.value = false
+    if (currentOperation(operation)) busy.value = false
   }
 }
 </script>

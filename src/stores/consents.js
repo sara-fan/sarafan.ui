@@ -8,6 +8,10 @@ import { createInternalProblem } from '../errors/problem.js'
 import { LEGAL_DOCUMENT_KIND, isDocumentId } from '../consentFormatting.js'
 
 const json = (method, body) => ({ method, headers:{ 'Content-Type':'application/json' }, body:JSON.stringify(body) })
+const SHA256_PATTERN = /^[0-9a-f]{64}$/u
+const LOCAL_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/u
+const validDateTime = value => typeof value === 'string' && Number.isFinite(Date.parse(value))
+const validText = (value, maximum) => typeof value === 'string' && value.trim() && value.length <= maximum
 export function createConsentStore(session) {
   const cookies = ref(null)
   const mine = ref(null)
@@ -64,6 +68,16 @@ export function createConsentStore(session) {
   function routeAlias(kind) { return ops.value?.kinds.find(item => item.value === kind)?.routeAlias }
   function cookieCategoryName(category) { return ops.value?.cookieCategories.find(item => item.value === category)?.name }
   function requiredCookieCategories() { return (ops.value?.cookieCategories || []).filter(item => item.required).map(item => item.value) }
+  function validateDocument(value, kind) {
+    if (!value || !isDocumentId(value.id) || value.kind !== kind
+      || !validText(value.locale, 8) || !validText(value.title, 200) || !validText(value.displayVersion, 64)
+      || typeof value.html !== 'string' || !SHA256_PATTERN.test(value.sourceHash) || !SHA256_PATTERN.test(value.contentHash)
+      || !validText(value.rendererVersion, 64) || !validDateTime(value.effectiveAt) || !validDateTime(value.createdAt)
+      || !LOCAL_DATE_PATTERN.test(value.effectiveLocalDate) || value.effectiveTimeZone !== 'Europe/Moscow'
+      || value.createdBy !== null || value.canDelete !== null || !Array.isArray(value.cookieCategories)) {
+      throw createInternalProblem('protocolError')
+    }
+  }
   function validWithdrawalRequest(value, identity) {
     return value === null || (value && value.customerId === identity
       && Number.isFinite(Date.parse(value.requestedAt)) && typeof value.processed === 'boolean')
@@ -72,7 +86,10 @@ export function createConsentStore(session) {
     await ensureOps()
     if (!Number.isInteger(kind) || !ops.value.kinds.some(item => item.value === kind)) throw createInternalProblem('invalidInput')
     const result = await session.consentRequest(`/api/v1/legal/current/${kind}`)
-    if (!result || !Number.isFinite(Date.parse(result.serverNow)) || (result.document && (!isDocumentId(result.document.id) || result.document.kind !== kind))) throw createInternalProblem('protocolError')
+    if (!result || !validDateTime(result.serverNow)
+      || result.nextChangeAt !== null && (!validDateTime(result.nextChangeAt)
+        || Date.parse(result.nextChangeAt) <= Date.parse(result.serverNow))) throw createInternalProblem('protocolError')
+    if (result.document) validateDocument(result.document, kind)
     if (result.document && (!Array.isArray(result.document.cookieCategories)
       || result.document.cookieCategories.some(category => !Number.isInteger(category) || !cookieCategoryName(category))
       || (kind === LEGAL_DOCUMENT_KIND.COOKIE_CONSENT

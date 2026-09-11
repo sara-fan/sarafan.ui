@@ -27,6 +27,8 @@ let opsPromise = null
 const authenticationOps = ref(null)
 const customerOps = ref(null)
 const SERVICE_UNAVAILABLE_MESSAGE = 'Сервис недоступен. Пожалуйста, повторите позже.'
+const REQUIRED_AUTHENTICATION_ALIASES = ['code', 'agreement', 'registration']
+const REQUIRED_CUSTOMER_ALIASES = ['preliminary', 'complete', 'disabled']
 
 function serviceUnavailableProblem(problem) {
   return problem?.type === INTERNAL_PROBLEM_TYPES.serviceUnavailable
@@ -35,9 +37,8 @@ function serviceUnavailableProblem(problem) {
 }
 
 function applySession(session) {
-  if (!session?.customer || (customerOps.value
-    && (!Number.isInteger(session.customer.state)
-      || !customerOps.value.states.some(item => item.value === session.customer.state)))) {
+  if (!session?.customer || !customerOps.value || !Number.isInteger(session.customer.state)
+    || !customerOps.value.states.some(item => item.value === session.customer.state)) {
     throw createInternalProblem('protocolError')
   }
   accessToken.value = session.accessToken
@@ -46,7 +47,7 @@ function applySession(session) {
   return session.customer
 }
 
-function validateEnumOps(value, property) {
+function validateEnumOps(value, property, requiredAliases) {
   const items = value?.[property]
   if (!Array.isArray(items) || items.length === 0) throw createInternalProblem('protocolError')
   const values = new Set()
@@ -58,6 +59,7 @@ function validateEnumOps(value, property) {
     values.add(item.value)
     aliases.add(item.routeAlias)
   }
+  if (requiredAliases.some(alias => !aliases.has(alias))) throw createInternalProblem('protocolError')
   return { [property]:items.map(item => ({ value:item.value, name:item.name, routeAlias:item.routeAlias })) }
 }
 
@@ -68,8 +70,10 @@ async function ensureOps() {
       client.request(`${API_BASE_PATH}/auth/ops`),
       client.request(`${API_BASE_PATH}/customers/ops`)
     ]).then(([auth, customers]) => {
-      authenticationOps.value = validateEnumOps(auth, 'steps')
-      customerOps.value = validateEnumOps(customers, 'states')
+      const validatedAuthentication = validateEnumOps(auth, 'steps', REQUIRED_AUTHENTICATION_ALIASES)
+      const validatedCustomers = validateEnumOps(customers, 'states', REQUIRED_CUSTOMER_ALIASES)
+      authenticationOps.value = validatedAuthentication
+      customerOps.value = validatedCustomers
     }).finally(() => { opsPromise = null })
   }
   await opsPromise
@@ -100,11 +104,12 @@ const client = createApiClient({
 
 async function refreshSession(operationTrace) {
   if (!refreshPromise) {
-    refreshPromise = client.request(
-      `${API_BASE_PATH}/auth/refresh`,
-      { method: 'POST' },
-      { operationTrace }
-    )
+    refreshPromise = ensureOps()
+      .then(() => client.request(
+        `${API_BASE_PATH}/auth/refresh`,
+        { method: 'POST' },
+        { operationTrace }
+      ))
       .catch((error) => {
         if (isServiceUnavailableProblem(error)) {
           const problem = serviceUnavailableProblem(error)
@@ -165,10 +170,16 @@ async function resolvePhone(phone) {
 async function requestCode(phone, consents = {}) {
   notice.value = ''
   try {
-    return await client.request(
+    const receipt = await client.request(
       `${API_BASE_PATH}/auth/code/request`,
       jsonOptions('POST', { phone, ...consents })
     )
+    const token = receipt?.onboardingToken
+    if (!receipt || !Object.hasOwn(receipt, 'onboardingToken')
+      || token !== null && (typeof token !== 'string' || token.length < 32 || token.length > 128)) {
+      throw createInternalProblem('protocolError')
+    }
+    return { onboardingToken:token }
   } catch (error) {
     throw isServiceUnavailableProblem(error) ? serviceUnavailableProblem(error) : error
   }
@@ -190,6 +201,7 @@ async function verifyCode(payload) {
   notice.value = ''
   let session
   try {
+    await ensureOps()
     session = await client.request(
       `${API_BASE_PATH}/auth/code/verify`,
       jsonOptions('POST', payload)

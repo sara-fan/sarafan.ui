@@ -21,6 +21,22 @@ vi.mock('../src/stores/consents.js', () => ({ useConsents: () => consent }))
 
 const originalUrl = globalThis.URL
 let mountedWrapper
+const authenticationOps = { steps:[
+  { value:0, name:'Код подтверждения', routeAlias:'code' },
+  { value:1, name:'Пользовательское соглашение', routeAlias:'agreement' },
+  { value:2, name:'Регистрация', routeAlias:'registration' }
+] }
+const customerOps = { states:[
+  { value:0, name:'Предварительный', routeAlias:'preliminary' },
+  { value:1, name:'Заполненный', routeAlias:'complete' },
+  { value:2, name:'Отключённый', routeAlias:'disabled' }
+] }
+
+function opsResponse(url) {
+  if (url === '/api/v1/auth/ops') return response(200, authenticationOps)
+  if (url === '/api/v1/customers/ops') return response(200, customerOps)
+  return null
+}
 
 function sessionResponse(customer) {
   return response(200, { accessToken: 'profile-token', expiresAt: '2026-08-30T00:15:00Z', customer })
@@ -81,6 +97,8 @@ describe('ProfileView', () => {
     }
     const photo = new globalThis.Blob(['photo'], { type: 'image/png' })
     const fetch = vi.fn((url, options = {}) => {
+      const standard = opsResponse(url)
+      if (standard) return Promise.resolve(standard)
       if (url === '/api/v1/auth/code/verify') return Promise.resolve(sessionResponse(customer))
       if (url === '/api/v1/customers/me' && options.method === 'PUT') return Promise.resolve(response(200, updated))
       if (url === '/api/v1/customers/me/photo' && options.method === 'PUT') return Promise.resolve(response(204))
@@ -153,8 +171,8 @@ describe('ProfileView', () => {
   })
 
   it('retains editable data when current personal-data consent is required', async () => {
-    const customer = { id: 13, phone: '+79991234567', hasPhoto: false, profile: { firstName: 'Мария' } }
-    const fetch = vi.fn(() => Promise.resolve(sessionResponse(customer)))
+    const customer = { id: 13, phone: '+79991234567', state:0, hasPhoto: false, profile: { firstName: 'Мария' } }
+    const fetch = vi.fn(url => Promise.resolve(opsResponse(url) || sessionResponse(customer)))
     vi.stubGlobal('fetch', fetch)
     await useSession().verifyCode({ phone: customer.phone, code: '4567' })
     const wrapper = mountView()
@@ -165,13 +183,15 @@ describe('ProfileView', () => {
     expect(wrapper.findAll('form .ui-field__control')[1].element.value).toBe('Мария')
     await setFile(wrapper.get('input[type="file"]').element, new globalThis.File(['png'], 'photo.png', { type: 'image/png' }))
     expect(consent.requirePersonalData).toHaveBeenCalledTimes(2)
-    expect(fetch).toHaveBeenCalledTimes(1)
+    expect(fetch.mock.calls.filter(([url]) => url === '/api/v1/auth/code/verify')).toHaveLength(1)
   })
 
   it('ignores a photo response that arrives after unmount', async () => {
-    const customer = { id: 14, phone: '+79990000014', hasPhoto: true, profile: {} }
+    const customer = { id: 14, phone: '+79990000014', state:0, hasPhoto: true, profile: {} }
     const pendingPhoto = deferred()
     vi.stubGlobal('fetch', vi.fn(url => {
+      const standard = opsResponse(url)
+      if (standard) return Promise.resolve(standard)
       if (url === '/api/v1/auth/code/verify') return Promise.resolve(sessionResponse(customer))
       if (url === '/api/v1/customers/me/photo') return pendingPhoto.promise
       throw new Error(`Unexpected request: ${url}`)
@@ -186,8 +206,10 @@ describe('ProfileView', () => {
   })
 
   it('keeps editing usable when profile and photo operations fail or input is invalid', async () => {
-    const customer = { id: 15, phone: '+79990000015', hasPhoto: true, profile: {} }
+    const customer = { id: 15, phone: '+79990000015', state:0, hasPhoto: true, profile: {} }
     const fetch = vi.fn((url, options = {}) => {
+      const standard = opsResponse(url)
+      if (standard) return Promise.resolve(standard)
       if (url === '/api/v1/auth/code/verify') return Promise.resolve(sessionResponse(customer))
       if (url === '/api/v1/customers/me') return Promise.resolve(problemResponse(400, 'validation-failed', { detail: 'Профиль не сохранён', errors: { firstName: ['Проверьте имя'] } }))
       if (url === '/api/v1/customers/me/photo' && options.method === 'PUT') return Promise.resolve(problemResponse(400, 'invalid-photo-content', { detail: 'Фото не загружено' }))

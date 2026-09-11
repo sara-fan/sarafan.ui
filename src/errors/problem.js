@@ -8,10 +8,14 @@ import { uiLogger } from '../observability/logger.js'
 export { PROBLEM_TYPE_ROOT, ProblemError } from '@sara-fan/ui-shared/problems'
 
 export const CORE_PROBLEM_TYPES = Object.freeze({
+  authenticationRequirementsChanged: `${PROBLEM_TYPE_ROOT}authentication-requirements-changed`,
+  consentVersionChanged: `${PROBLEM_TYPE_ROOT}consent-version-changed`,
   customerNotFound: `${PROBLEM_TYPE_ROOT}customer-not-found`,
   invalidAccessToken: `${PROBLEM_TYPE_ROOT}invalid-access-token`,
+  invalidCode: `${PROBLEM_TYPE_ROOT}invalid-code`,
   invalidRefreshToken: `${PROBLEM_TYPE_ROOT}invalid-refresh-token`,
   loginFailed: `${PROBLEM_TYPE_ROOT}login-failed`,
+  onboardingConsentExpired: `${PROBLEM_TYPE_ROOT}onboarding-consent-expired`,
   validationFailed: `${PROBLEM_TYPE_ROOT}validation-failed`
 })
 
