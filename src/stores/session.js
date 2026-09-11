@@ -110,6 +110,7 @@ async function refreshSession(operationTrace) {
         { method: 'POST' },
         { operationTrace }
       ))
+      .then(applySession)
       .catch((error) => {
         if (isServiceUnavailableProblem(error)) {
           const problem = serviceUnavailableProblem(error)
@@ -119,7 +120,6 @@ async function refreshSession(operationTrace) {
         clearSession()
         throw error
       })
-      .then(applySession)
       .finally(() => {
         refreshPromise = null
       })
@@ -197,24 +197,24 @@ async function consentRequest(path, options = {}, authorize = false, responseTyp
   return client.request(path, options, { authorize, responseType })
 }
 
-async function verifyCode(payload) {
+async function verifyCode(payload, isCurrent = () => true) {
   notice.value = ''
-  let session
   try {
     await ensureOps()
-    session = await client.request(
+    const session = await client.request(
       `${API_BASE_PATH}/auth/code/verify`,
       jsonOptions('POST', payload)
     )
+    if (!isCurrent()) return null
+    return applySession(session)
   } catch (error) {
     if (isServiceUnavailableProblem(error)) {
       const problem = serviceUnavailableProblem(error)
-      clearSession(SERVICE_UNAVAILABLE_MESSAGE)
+      if (isCurrent()) clearSession(SERVICE_UNAVAILABLE_MESSAGE)
       throw problem
     }
     throw error
   }
-  return applySession(session)
 }
 
 async function logout() {

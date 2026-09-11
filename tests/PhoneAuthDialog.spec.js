@@ -187,6 +187,33 @@ describe('PhoneAuthDialog', () => {
     expect(wrapper.find('input[type="checkbox"]').exists()).toBe(false)
   })
 
+  it('stops a stale requirements load after the legal Ops request completes', async () => {
+    const pendingOps = deferred()
+    const fetch = vi.fn(url => {
+      if (url === '/api/v1/legal/ops') return pendingOps.promise
+      const standard = standardResponse(url)
+      if (standard) return Promise.resolve(standard)
+      if (url === '/api/v1/auth/phone/resolve') {
+        return Promise.resolve(response(200, { nextStep:2, requiredDocumentKinds:[2, 1] }))
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    })
+    vi.stubGlobal('fetch', fetch)
+    const wrapper = mountView()
+
+    await wrapper.get('input[name="phone"]').setValue('+79991234567')
+    await wrapper.get('.auth-form').trigger('submit')
+    await flushPromises()
+    await wrapper.setProps({ modelValue:false })
+    await wrapper.setProps({ modelValue:true })
+    pendingOps.resolve(response(200, legalOps))
+    await flushPromises()
+
+    expect(wrapper.get('input[name="phone"]').element.value).toBe('')
+    expect(wrapper.find('input[type="checkbox"]').exists()).toBe(false)
+    expect(fetch.mock.calls.some(([url]) => url.startsWith('/api/v1/legal/current/'))).toBe(false)
+  })
+
   it('ignores a code receipt completed after the dialog is reopened', async () => {
     const pending = deferred()
     const fetch = vi.fn(url => {
@@ -211,6 +238,55 @@ describe('PhoneAuthDialog', () => {
 
     expect(wrapper.get('input[name="phone"]').element.value).toBe('')
     expect(wrapper.find('input[name="code"]').exists()).toBe(false)
+  })
+
+  it('does not let a stale verification replace the session from a reopened dialog', async () => {
+    const pendingVerification = deferred()
+    const firstCustomer = { ...customer, id:8, phone:'+79991234568' }
+    const currentCustomer = { ...customer, id:9, phone:'+79991234569' }
+    const fetch = vi.fn((url, options) => {
+      const standard = standardResponse(url)
+      if (standard) return Promise.resolve(standard)
+      if (url === '/api/v1/auth/phone/resolve') {
+        return Promise.resolve(response(200, { nextStep:0, requiredDocumentKinds:[] }))
+      }
+      if (url === '/api/v1/auth/code/request') return Promise.resolve(response(202, { onboardingToken:null }))
+      if (url === '/api/v1/auth/code/verify') {
+        const body = JSON.parse(options.body)
+        return body.phone === firstCustomer.phone
+          ? pendingVerification.promise
+          : Promise.resolve(response(200, {
+              accessToken:'current-token', expiresAt:'2026-09-11T12:15:00Z', customer:currentCustomer
+            }))
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    })
+    vi.stubGlobal('fetch', fetch)
+    const wrapper = mountView()
+
+    await wrapper.get('input[name="phone"]').setValue(firstCustomer.phone)
+    await wrapper.get('.auth-form').trigger('submit')
+    await flushPromises()
+    await wrapper.get('input[name="code"]').setValue('4568')
+    await wrapper.get('.auth-form').trigger('submit')
+    await flushPromises()
+
+    await wrapper.setProps({ modelValue:false })
+    await wrapper.setProps({ modelValue:true })
+    await wrapper.get('input[name="phone"]').setValue(currentCustomer.phone)
+    await wrapper.get('.auth-form').trigger('submit')
+    await flushPromises()
+    await wrapper.get('input[name="code"]').setValue('4569')
+    await wrapper.get('.auth-form').trigger('submit')
+    await flushPromises()
+    expect(useSession().customer.value).toEqual(currentCustomer)
+
+    pendingVerification.resolve(response(200, {
+      accessToken:'stale-token', expiresAt:'2026-09-11T12:15:00Z', customer:firstCustomer
+    }))
+    await flushPromises()
+
+    expect(useSession().customer.value).toEqual(currentCustomer)
   })
 
   it('gradually changes an unknown phone to registration and sends both exact consents', async () => {
@@ -255,6 +331,93 @@ describe('PhoneAuthDialog', () => {
     expect(JSON.parse(fetch.mock.calls.find(([url]) => url.endsWith('/code/verify'))[1].body)).toEqual({
       phone:'+79991234567', code:'4567', onboardingToken:receipt
     })
+  })
+
+  it.each([
+    { title:'unknown legal kind', nextStep:2, required:[2, 99] },
+    { title:'agreement with the wrong document', nextStep:1, required:[1] },
+    { title:'agreement with multiple documents', nextStep:1, required:[2, 1] },
+    { title:'registration without personal-data consent', nextStep:2, required:[2] },
+    { title:'registration with an unrelated document', nextStep:2, required:[1, 4] },
+    { title:'code flow with documents', nextStep:0, required:[2] },
+    { title:'registration without documents', nextStep:2, required:[] }
+  ])('fails closed on $title', async scenario => {
+    const fetch = vi.fn(url => {
+      const standard = standardResponse(url)
+      if (standard) return Promise.resolve(standard)
+      if (url === '/api/v1/auth/phone/resolve') {
+        return Promise.resolve(response(200, {
+          nextStep:scenario.nextStep,
+          requiredDocumentKinds:scenario.required
+        }))
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    })
+    vi.stubGlobal('fetch', fetch)
+    const wrapper = mountView()
+
+    await wrapper.get('input[name="phone"]').setValue('+79991234567')
+    await wrapper.get('.auth-form').trigger('submit')
+    await flushPromises()
+
+    expect(wrapper.find('input[name="phone"]').exists()).toBe(true)
+    expect(wrapper.find('.form-error').exists()).toBe(true)
+  })
+
+  it.each([
+    { title:'agreement', nextStep:1, required:[2], missingKind:2 },
+    { title:'personal-data consent', nextStep:2, required:[1], missingKind:1 }
+  ])('rejects a missing current $title document', async scenario => {
+    const fetch = vi.fn(url => {
+      if (url === `/api/v1/legal/current/${scenario.missingKind}`) {
+        return Promise.resolve(response(200, {
+          serverNow:'2026-09-11T12:00:00Z', nextChangeAt:null, document:null
+        }))
+      }
+      const standard = standardResponse(url)
+      if (standard) return Promise.resolve(standard)
+      if (url === '/api/v1/auth/phone/resolve') {
+        return Promise.resolve(response(200, {
+          nextStep:scenario.nextStep,
+          requiredDocumentKinds:scenario.required
+        }))
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    })
+    vi.stubGlobal('fetch', fetch)
+    const wrapper = mountView()
+
+    await wrapper.get('input[name="phone"]').setValue('+79991234567')
+    await wrapper.get('.auth-form').trigger('submit')
+    await flushPromises()
+
+    expect(wrapper.find('input[name="phone"]').exists()).toBe(true)
+    expect(wrapper.get('.form-error').text()).toContain('Нет действующих документов')
+  })
+
+  it('rejects an onboarding receipt for the direct code flow', async () => {
+    const fetch = vi.fn(url => {
+      const standard = standardResponse(url)
+      if (standard) return Promise.resolve(standard)
+      if (url === '/api/v1/auth/phone/resolve') {
+        return Promise.resolve(response(200, { nextStep:0, requiredDocumentKinds:[] }))
+      }
+      if (url === '/api/v1/auth/code/request') {
+        return Promise.resolve(response(202, {
+          onboardingToken:'unexpected-onboarding-receipt-at-least-32-characters'
+        }))
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    })
+    vi.stubGlobal('fetch', fetch)
+    const wrapper = mountView()
+
+    await wrapper.get('input[name="phone"]').setValue('+79991234567')
+    await wrapper.get('.auth-form').trigger('submit')
+    await flushPromises()
+
+    expect(wrapper.find('input[name="phone"]').exists()).toBe(true)
+    expect(wrapper.find('.form-error').exists()).toBe(true)
   })
 
   it.each([
@@ -365,6 +528,117 @@ describe('PhoneAuthDialog', () => {
     expect(wrapper.get('.form-error').text()).toContain('Введите номер телефона')
     expect(wrapper.text()).toContain('Введите номер телефона')
     expect(fetch.mock.calls.some(([url]) => url.endsWith('/phone/resolve'))).toBe(false)
+  })
+
+  it('re-resolves the retained phone when an automatic code request reports changed requirements', async () => {
+    let resolves = 0
+    let requests = 0
+    const fetch = vi.fn(url => {
+      const standard = standardResponse(url)
+      if (standard) return Promise.resolve(standard)
+      if (url === '/api/v1/auth/phone/resolve') {
+        resolves++
+        return Promise.resolve(response(200, { nextStep:0, requiredDocumentKinds:[] }))
+      }
+      if (url === '/api/v1/auth/code/request') {
+        requests++
+        return Promise.resolve(requests === 1
+          ? problemResponse(409, 'authentication-requirements-changed')
+          : response(202, { onboardingToken:null }))
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    })
+    vi.stubGlobal('fetch', fetch)
+    const wrapper = mountView()
+
+    await wrapper.get('input[name="phone"]').setValue('+79991234567')
+    await wrapper.get('.auth-form').trigger('submit')
+    await flushPromises()
+
+    expect(wrapper.find('input[name="code"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('+79991234567')
+    expect(resolves).toBe(2)
+    expect(requests).toBe(2)
+  })
+
+  it('reloads requirements and clears confirmations when the consent version changes during code request', async () => {
+    let resolves = 0
+    let documentReads = 0
+    const fetch = vi.fn(url => {
+      if (url.startsWith('/api/v1/legal/current/')) {
+        documentReads++
+        return Promise.resolve(standardResponse(url))
+      }
+      const standard = standardResponse(url)
+      if (standard) return Promise.resolve(standard)
+      if (url === '/api/v1/auth/phone/resolve') {
+        resolves++
+        return Promise.resolve(response(200, { nextStep:2, requiredDocumentKinds:[2, 1] }))
+      }
+      if (url === '/api/v1/auth/code/request') {
+        return Promise.resolve(problemResponse(409, 'consent-version-changed'))
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    })
+    vi.stubGlobal('fetch', fetch)
+    const wrapper = mountView()
+
+    await wrapper.get('input[name="phone"]').setValue('+79991234567')
+    await wrapper.get('.auth-form').trigger('submit')
+    await flushPromises()
+    for (const checkbox of wrapper.findAll('input[type="checkbox"]')) await checkbox.setValue(true)
+    await wrapper.get('.auth-form').trigger('submit')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('+79991234567')
+    expect(wrapper.findAll('input[type="checkbox"]')).toHaveLength(2)
+    expect(wrapper.findAll('input[type="checkbox"]').every(item => !item.element.checked)).toBe(true)
+    expect(wrapper.find('input[name="code"]').exists()).toBe(false)
+    expect(resolves).toBe(2)
+    expect(documentReads).toBe(4)
+  })
+
+  it('reloads requirements and clears the receipt when onboarding consent expires during verification', async () => {
+    let resolves = 0
+    let documentReads = 0
+    const fetch = vi.fn(url => {
+      if (url.startsWith('/api/v1/legal/current/')) {
+        documentReads++
+        return Promise.resolve(standardResponse(url))
+      }
+      const standard = standardResponse(url)
+      if (standard) return Promise.resolve(standard)
+      if (url === '/api/v1/auth/phone/resolve') {
+        resolves++
+        return Promise.resolve(response(200, { nextStep:2, requiredDocumentKinds:[2, 1] }))
+      }
+      if (url === '/api/v1/auth/code/request') {
+        return Promise.resolve(response(202, { onboardingToken:'synthetic-onboarding-receipt-at-least-32-characters' }))
+      }
+      if (url === '/api/v1/auth/code/verify') {
+        return Promise.resolve(problemResponse(400, 'onboarding-consent-expired'))
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    })
+    vi.stubGlobal('fetch', fetch)
+    const wrapper = mountView()
+
+    await wrapper.get('input[name="phone"]').setValue('+79991234567')
+    await wrapper.get('.auth-form').trigger('submit')
+    await flushPromises()
+    for (const checkbox of wrapper.findAll('input[type="checkbox"]')) await checkbox.setValue(true)
+    await wrapper.get('.auth-form').trigger('submit')
+    await flushPromises()
+    await wrapper.get('input[name="code"]').setValue('4567')
+    await wrapper.get('.auth-form').trigger('submit')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('+79991234567')
+    expect(wrapper.findAll('input[type="checkbox"]')).toHaveLength(2)
+    expect(wrapper.findAll('input[type="checkbox"]').every(item => !item.element.checked)).toBe(true)
+    expect(wrapper.find('input[name="code"]').exists()).toBe(false)
+    expect(resolves).toBe(2)
+    expect(documentReads).toBe(4)
   })
 
   it('keeps the phone, refreshes requirements, and obtains a fresh code when verification requirements change', async () => {

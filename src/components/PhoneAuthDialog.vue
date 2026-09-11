@@ -132,7 +132,6 @@ function validateResolution(value) {
 }
 
 async function continueResolution(value, resolvedPhone, operation) {
-  if (!currentOperation(operation)) return
   validateResolution(value)
   resolution.value = value
   if (value.nextStep === session.flowValue('code')) {
@@ -192,7 +191,6 @@ function needsRestart(value) {
 }
 
 async function restartFlow(value, operation) {
-  if (!currentOperation(operation)) return
   resetAfterPhone()
   busy.value = true
   problem.value = normalizeProblem(value)
@@ -219,7 +217,9 @@ async function submitPhone() {
   try {
     await resolveCurrentPhone(operation)
   } catch (value) {
-    if (currentOperation(operation)) problem.value = normalizeProblem(value)
+    if (!currentOperation(operation)) return
+    if (needsRestart(value)) await restartFlow(value, operation)
+    else problem.value = normalizeProblem(value)
   } finally {
     if (currentOperation(operation)) busy.value = false
   }
@@ -245,9 +245,6 @@ async function submitRequirements() {
   try {
     const receipt = await session.requestCode(phone.value, consentPayload())
     if (!currentOperation(operation)) return
-    if (typeof receipt?.onboardingToken !== 'string' || receipt.onboardingToken.length < 32) {
-      throw createInternalProblem('protocolError')
-    }
     onboardingToken.value = receipt.onboardingToken
     step.value = 'code'
   } catch (value) {
@@ -272,12 +269,15 @@ async function submitCode() {
   busy.value = true
   problem.value = null
   try {
-    await session.verifyCode({
-      phone: phone.value,
-      code: normalizedCode,
-      ...(onboardingToken.value ? { onboardingToken:onboardingToken.value } : {})
-    })
-    if (!currentOperation(operation)) return
+    const verifiedCustomer = await session.verifyCode(
+      {
+        phone: phone.value,
+        code: normalizedCode,
+        ...(onboardingToken.value ? { onboardingToken:onboardingToken.value } : {})
+      },
+      () => currentOperation(operation)
+    )
+    if (!verifiedCustomer) return
     emit('update:modelValue', false)
   } catch (value) {
     if (!currentOperation(operation)) return

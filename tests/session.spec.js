@@ -69,6 +69,29 @@ describe('session store', () => {
     expect(session.flowValue('code')).toBeUndefined()
   })
 
+  it('shares one in-flight Ops request between concurrent callers', async () => {
+    let resolveAuthentication
+    let resolveCustomers
+    const authentication = new Promise(resolve => { resolveAuthentication = resolve })
+    const customers = new Promise(resolve => { resolveCustomers = resolve })
+    const fetch = vi.fn(url => {
+      if (url === '/api/v1/auth/ops') return authentication
+      if (url === '/api/v1/customers/ops') return customers
+      throw new Error(`Unexpected request: ${url}`)
+    })
+    vi.stubGlobal('fetch', fetch)
+
+    const session = useSession()
+    const first = session.ensureOps()
+    const second = session.ensureOps()
+    resolveAuthentication(response(200, authenticationOps))
+    resolveCustomers(response(200, customerOps))
+    await Promise.all([first, second])
+
+    expect(fetch).toHaveBeenCalledTimes(2)
+    expect(session.flowValue('code')).toBe(0)
+  })
+
   it.each([undefined, 99, '0'])('rejects a restored session with invalid customer state %j', async state => {
     const restoredCustomer = { id:3, phone:'+79990000003', state, profile:{ phone:'+79990000003' } }
     const fetch = withOps(url => {
@@ -83,6 +106,82 @@ describe('session store', () => {
     await session.restoreSession()
 
     expect(session.customer.value).toBeNull()
+    expect(session.restoreProblem.value).toMatchObject({ type:INTERNAL_PROBLEM_TYPES.sessionRestoreUnavailable })
+    expect(session.notice.value).toBe('Сервис недоступен. Пожалуйста, повторите позже.')
+  })
+
+  it('clears an existing session when verification returns an invalid customer state', async () => {
+    const activeCustomer = { id:3, phone:'+79990000003', state:0, profile:{ phone:'+79990000003' } }
+    let verifications = 0
+    const fetch = withOps(url => {
+      if (url === '/api/v1/auth/code/verify') {
+        verifications++
+        return Promise.resolve(response(200, {
+          accessToken:`token-${verifications}`,
+          expiresAt:'2026-08-30T00:15:00Z',
+          customer:verifications === 1 ? activeCustomer : { ...activeCustomer, state:'preliminary' }
+        }))
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    })
+    vi.stubGlobal('fetch', fetch)
+
+    const session = useSession()
+    await session.verifyCode({ phone:activeCustomer.phone, code:'1111' })
+    await expect(session.verifyCode({ phone:activeCustomer.phone, code:'2222' })).rejects.toMatchObject({
+      type:INTERNAL_PROBLEM_TYPES.serviceUnavailable
+    })
+
+    expect(session.customer.value).toBeNull()
+    expect(session.notice.value).toBe('Сервис недоступен. Пожалуйста, повторите позже.')
+  })
+
+  it('does not clear the current session for a stale verification failure', async () => {
+    const activeCustomer = { id:3, phone:'+79990000003', state:0, profile:{ phone:'+79990000003' } }
+    let verifications = 0
+    const fetch = withOps(url => {
+      if (url === '/api/v1/auth/code/verify') {
+        verifications++
+        return Promise.resolve(verifications === 1
+          ? response(200, {
+              accessToken:'active-token', expiresAt:'2026-08-30T00:15:00Z', customer:activeCustomer
+            })
+          : problemResponse(503, 'service-unavailable'))
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    })
+    vi.stubGlobal('fetch', fetch)
+
+    const session = useSession()
+    await session.verifyCode({ phone:activeCustomer.phone, code:'1111' })
+    await expect(session.verifyCode({ phone:activeCustomer.phone, code:'2222' }, () => false)).rejects.toMatchObject({
+      type:INTERNAL_PROBLEM_TYPES.serviceUnavailable
+    })
+
+    expect(session.customer.value).toEqual(activeCustomer)
+    expect(session.notice.value).toBe('')
+  })
+
+  it('clears an existing session when refresh returns an invalid customer state', async () => {
+    const activeCustomer = { id:3, phone:'+79990000003', state:0, profile:{ phone:'+79990000003' } }
+    const fetch = withOps(url => {
+      if (url === '/api/v1/auth/code/verify') return Promise.resolve(response(200, {
+        accessToken:'active-token', expiresAt:'2026-08-30T00:15:00Z', customer:activeCustomer
+      }))
+      if (url === '/api/v1/auth/refresh') return Promise.resolve(response(200, {
+        accessToken:'invalid-token', expiresAt:'2026-08-30T00:30:00Z',
+        customer:{ ...activeCustomer, state:99 }
+      }))
+      throw new Error(`Unexpected request: ${url}`)
+    })
+    vi.stubGlobal('fetch', fetch)
+
+    const session = useSession()
+    await session.verifyCode({ phone:activeCustomer.phone, code:'1111' })
+    await session.restoreSession()
+
+    expect(session.customer.value).toBeNull()
+    expect(session.notice.value).toBe('Сервис недоступен. Пожалуйста, повторите позже.')
     expect(session.restoreProblem.value).toMatchObject({ type:INTERNAL_PROBLEM_TYPES.sessionRestoreUnavailable })
   })
 
@@ -103,6 +202,23 @@ describe('session store', () => {
 
     await expect(useSession().resolvePhone('+79990000003')).rejects.toMatchObject({
       type:INTERNAL_PROBLEM_TYPES.serviceUnavailable
+    })
+  })
+
+  it('preserves a structured client error from phone resolution', async () => {
+    const fetch = withOps(url => {
+      if (url === '/api/v1/auth/phone/resolve') {
+        return Promise.resolve(problemResponse(400, 'invalid-phone', {
+          title:'Некорректный телефон', detail:'Введите российский номер телефона.'
+        }))
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    })
+    vi.stubGlobal('fetch', fetch)
+
+    await expect(useSession().resolvePhone('+70000000000')).rejects.toMatchObject({
+      status:400,
+      code:'invalid_phone'
     })
   })
 
