@@ -98,6 +98,14 @@ watch(() => props.modelValue, open => {
   }
 })
 
+watch([step, busy, () => props.modelValue], async ([currentStep, isBusy, open]) => {
+  if (!open || isBusy || currentStep !== 'code') return
+  await nextTick()
+  if (props.modelValue && !busy.value && step.value === 'code') {
+    codeField.value?.$el?.querySelector('input')?.focus()
+  }
+}, { flush:'post' })
+
 const currentOperation = operation => props.modelValue && operation === operationGeneration
 
 async function loadRequiredDocuments(value, operation) {
@@ -298,8 +306,6 @@ async function submitCode() {
       problem.value = normalizeProblem(value)
       if (problem.value.type === CORE_PROBLEM_TYPES.invalidCode) {
         code.value = ''
-        await nextTick()
-        if (currentOperation(operation)) codeField.value?.$el?.querySelector('input')?.focus()
       }
     }
   } finally {

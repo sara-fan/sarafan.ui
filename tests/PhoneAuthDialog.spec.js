@@ -56,9 +56,10 @@ function legalDocument(url) {
   }
 }
 
-function mountView() {
+function mountView(attachTo) {
   return mount(PhoneAuthDialog, {
     props: { modelValue:true },
+    ...(attachTo ? { attachTo } : {}),
     global: {
       plugins: [createSarafanVuetify()],
       stubs: {
@@ -132,6 +133,29 @@ describe('PhoneAuthDialog', () => {
     await wrapper.setProps({ modelValue:true })
     expect(wrapper.get('input[name="phone"]').element.value).toBe('')
     expect(wrapper.find('input[name="code"]').exists()).toBe(false)
+  })
+
+  it('focuses the confirmation code field when the code step opens', async () => {
+    const fetch = vi.fn(url => {
+      const standard = standardResponse(url)
+      if (standard) return Promise.resolve(standard)
+      if (url === '/api/v1/auth/phone/resolve') {
+        return Promise.resolve(response(200, { nextStep:0, requiredDocumentKinds:[] }))
+      }
+      if (url === '/api/v1/auth/code/request') {
+        return Promise.resolve(response(202, { onboardingToken:null }))
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    })
+    vi.stubGlobal('fetch', fetch)
+    const wrapper = mountView(globalThis.document.body)
+
+    await wrapper.get('input[name="phone"]').setValue('+79991234567')
+    await wrapper.get('.auth-form').trigger('submit')
+    await flushPromises()
+
+    expect(globalThis.document.activeElement).toBe(wrapper.get('input[name="code"]').element)
+    wrapper.unmount()
   })
 
   it('ignores a phone resolution completed after the dialog is reopened', async () => {
