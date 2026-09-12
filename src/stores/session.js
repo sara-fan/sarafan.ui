@@ -31,13 +31,18 @@ const SERVICE_UNAVAILABLE_MESSAGE = 'Сервис недоступен. Пожа
 const REQUIRED_AUTHENTICATION_ALIASES = ['code', 'agreement', 'registration']
 const REQUIRED_CUSTOMER_ALIASES = ['preliminary', 'complete', 'disabled']
 
-function applySession(session) {
+function isValidActiveCustomerState(customerValue) {
   const disabledState = customerOps.value?.states.find(item => item.routeAlias === 'disabled')?.value
+  return !!customerValue && !!customerOps.value
+    && Number.isInteger(customerValue.state)
+    && customerOps.value.states.some(item => item.value === customerValue.state)
+    && customerValue.state !== disabledState
+}
+
+function applySession(session) {
   if (!session?.customer || !customerOps.value
     || typeof session.accessToken !== 'string' || !session.accessToken || session.accessToken.trim() !== session.accessToken
-    || !isRfc3339DateTime(session.expiresAt) || !Number.isInteger(session.customer.state)
-    || !customerOps.value.states.some(item => item.value === session.customer.state)
-    || session.customer.state === disabledState) {
+    || !isRfc3339DateTime(session.expiresAt) || !isValidActiveCustomerState(session.customer)) {
     throw createInternalProblem('protocolError')
   }
   accessToken.value = session.accessToken
@@ -252,10 +257,12 @@ async function authorizedRequest(path, options = {}, policy = {}) {
 }
 
 async function updateProfile(profile) {
-  customer.value = await authorizedRequest(
+  const updatedCustomer = await authorizedRequest(
     `${API_BASE_PATH}/customers/me`,
     jsonOptions('PUT', profile)
   )
+  if (!isValidActiveCustomerState(updatedCustomer)) throw createInternalProblem('protocolError')
+  customer.value = updatedCustomer
   return customer.value
 }
 

@@ -427,7 +427,7 @@ async function submitCode() {
         Для номера {{ phone }} нужна регистрация. Подтвердите необходимые документы.
       </p>
       <p v-else>
-        Чтобы продолжить вход для {{ phone }}, примите актуальное пользовательское соглашение.
+        Чтобы продолжить вход для {{ phone }}, примите актуальное {{ consentStore.kindName(agreementKind).toLowerCase() }}.
       </p>
       <div class="consent-registration">
         <div
@@ -451,7 +451,7 @@ async function submitCode() {
             :to="{ name: 'legal-document', params: { documentRef: termsDocument.id } }"
             @click="emit('update:modelValue', false)"
           >
-            Открыть пользовательское соглашение
+            Открыть {{ consentStore.kindName(agreementKind).toLowerCase() }}
           </RouterLink>
           <p
             v-if="termsErrors.length"
@@ -484,7 +484,7 @@ async function submitCode() {
             :to="{ name: 'legal-document', params: { documentRef: pdDocument.id } }"
             @click="emit('update:modelValue', false)"
           >
-            Открыть согласие на обработку персональных данных
+            Открыть {{ consentStore.kindName(personalDataKind).toLowerCase() }}
           </RouterLink>
           <p
             v-if="personalDataErrors.length"

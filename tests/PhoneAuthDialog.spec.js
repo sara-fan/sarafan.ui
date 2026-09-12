@@ -481,6 +481,36 @@ describe('PhoneAuthDialog', () => {
     expect(wrapper.findAll('.consent-registration small').map(item => item.text())).toEqual([
       agreementName + ' · версия 1', personalDataName + ' · версия 1'
     ])
+    expect(wrapper.findAll('.consent-document-link').map(item => item.text())).toEqual([
+      `Открыть ${agreementName.toLowerCase()}`,
+      `Открыть ${personalDataName.toLowerCase()}`
+    ])
+  })
+
+  it('uses the Core Ops agreement name in the login consent text and link', async () => {
+    const agreementName = 'Условия сервиса из каталога'
+    const fetch = vi.fn(url => {
+      if (url === '/api/v1/legal/ops') return Promise.resolve(response(200, {
+        ...legalOps,
+        kinds:legalOps.kinds.map(item => ({ ...item, name:item.value === 2 ? agreementName : item.name }))
+      }))
+      const standard = standardResponse(url)
+      if (standard) return Promise.resolve(standard)
+      if (url === '/api/v1/auth/phone/resolve') {
+        return Promise.resolve(response(200, { nextStep:1, requiredDocumentKinds:[2] }))
+      }
+      throw new Error('Unexpected request')
+    })
+    vi.stubGlobal('fetch', fetch)
+    const wrapper = mountView()
+    await wrapper.get('input[name="phone"]').setValue('+79991234567')
+    await wrapper.get('.auth-form').trigger('submit')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain(
+      `Чтобы продолжить вход для +79991234567, примите актуальное ${agreementName.toLowerCase()}.`
+    )
+    expect(wrapper.get('.consent-document-link').text()).toBe(`Открыть ${agreementName.toLowerCase()}`)
   })
 
   it('gradually changes an unknown phone to registration and sends both exact consents', async () => {

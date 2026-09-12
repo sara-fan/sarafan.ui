@@ -387,6 +387,37 @@ describe('session store', () => {
     expect(session.customer.value.profile.firstName).toBe('Анна')
   })
 
+  it.each([2, 'preliminary'])('rejects a profile update with an invalid customer state %j', async state => {
+    const originalCustomer = {
+      id: 1,
+      phone: '+79990000001',
+      state: 0,
+      hasPhoto: false,
+      profile: { phone: '+79990000001' }
+    }
+    const fetch = withOps((url) => {
+      if (url === '/api/v1/auth/code/verify') {
+        return Promise.resolve(response(200, {
+          accessToken: 'jwt-value',
+          expiresAt: '2026-08-30T00:15:00Z',
+          customer: originalCustomer
+        }))
+      }
+      if (url === '/api/v1/customers/me') {
+        return Promise.resolve(response(200, { ...originalCustomer, state }))
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    })
+    vi.stubGlobal('fetch', fetch)
+
+    const session = useSession()
+    await session.verifyCode({ phone: originalCustomer.phone, code: '1111' })
+    await expect(session.updateProfile({ firstName: 'Анна' })).rejects.toMatchObject({
+      type: INTERNAL_PROBLEM_TYPES.protocolError
+    })
+    expect(session.customer.value).toEqual(originalCustomer)
+  })
+
   it('refreshes once and retries an authorized request after a 401', async () => {
     const customer = {
       id: 2,
