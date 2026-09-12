@@ -4,13 +4,12 @@
 
 import { computed, readonly, ref } from 'vue'
 import { useSession } from './session.js'
+import { isIsoDate, isRfc3339DateTime } from '../api/validation.js'
 import { createInternalProblem } from '../errors/problem.js'
 import { LEGAL_DOCUMENT_KIND, isDocumentId } from '../consentFormatting.js'
 
 const json = (method, body) => ({ method, headers:{ 'Content-Type':'application/json' }, body:JSON.stringify(body) })
 const SHA256_PATTERN = /^[0-9a-f]{64}$/u
-const LOCAL_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/u
-const validDateTime = value => typeof value === 'string' && Number.isFinite(Date.parse(value))
 const validText = (value, maximum) => typeof value === 'string' && value.trim() && value.length <= maximum
 export function createConsentStore(session) {
   const cookies = ref(null)
@@ -72,8 +71,8 @@ export function createConsentStore(session) {
     if (!value || !isDocumentId(value.id) || value.kind !== kind
       || value.locale !== 'ru' || !validText(value.title, 200) || !validText(value.displayVersion, 64)
       || typeof value.html !== 'string' || !SHA256_PATTERN.test(value.sourceHash) || !SHA256_PATTERN.test(value.contentHash)
-      || !validText(value.rendererVersion, 64) || !validDateTime(value.effectiveAt) || !validDateTime(value.createdAt)
-      || !LOCAL_DATE_PATTERN.test(value.effectiveLocalDate) || value.effectiveTimeZone !== 'Europe/Moscow'
+      || !validText(value.rendererVersion, 64) || !isRfc3339DateTime(value.effectiveAt) || !isRfc3339DateTime(value.createdAt)
+      || !isIsoDate(value.effectiveLocalDate) || value.effectiveTimeZone !== 'Europe/Moscow'
       || value.createdBy !== null || value.canDelete !== null || !Array.isArray(value.cookieCategories)) {
       throw createInternalProblem('protocolError')
     }
@@ -86,10 +85,13 @@ export function createConsentStore(session) {
     await ensureOps()
     if (!Number.isInteger(kind) || !ops.value.kinds.some(item => item.value === kind)) throw createInternalProblem('invalidInput')
     const result = await session.consentRequest(`/api/v1/legal/current/${kind}`)
-    if (!result || !validDateTime(result.serverNow)
-      || result.nextChangeAt !== null && (!validDateTime(result.nextChangeAt)
+    if (!result || !isRfc3339DateTime(result.serverNow)
+      || result.nextChangeAt !== null && (!isRfc3339DateTime(result.nextChangeAt)
         || Date.parse(result.nextChangeAt) <= Date.parse(result.serverNow))) throw createInternalProblem('protocolError')
     if (result.document) validateDocument(result.document, kind)
+    if (result.document && Date.parse(result.document.effectiveAt) > Date.parse(result.serverNow)) {
+      throw createInternalProblem('protocolError')
+    }
     if (result.document && (!Array.isArray(result.document.cookieCategories)
       || result.document.cookieCategories.some(category => !Number.isInteger(category) || !cookieCategoryName(category))
       || (kind === LEGAL_DOCUMENT_KIND.COOKIE_CONSENT

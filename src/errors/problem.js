@@ -46,3 +46,10 @@ export function isServiceUnavailableProblem(problem) {
     || (problem instanceof ProblemError && problem.type.startsWith(PROBLEM_TYPE_ROOT)
       && Number.isInteger(problem.status) && problem.status >= 500)
 }
+
+export function asServiceUnavailableProblem(value) {
+  const problem = normalizeProblem(value)
+  return problem.type === INTERNAL_PROBLEM_TYPES.serviceUnavailable
+    ? problem
+    : createInternalProblem('serviceUnavailable', { cause:problem })
+}

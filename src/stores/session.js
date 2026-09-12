@@ -6,10 +6,11 @@ import { readonly, ref } from 'vue'
 
 import { API_BASE_PATH } from '../api.js'
 import { createApiClient } from '../api/client.js'
+import { isRfc3339DateTime } from '../api/validation.js'
 import {
   CORE_PROBLEM_TYPES,
-  INTERNAL_PROBLEM_TYPES,
   ProblemError,
+  asServiceUnavailableProblem,
   createInternalProblem,
   isServiceUnavailableProblem
 } from '../errors/problem.js'
@@ -30,15 +31,13 @@ const SERVICE_UNAVAILABLE_MESSAGE = 'Сервис недоступен. Пожа
 const REQUIRED_AUTHENTICATION_ALIASES = ['code', 'agreement', 'registration']
 const REQUIRED_CUSTOMER_ALIASES = ['preliminary', 'complete', 'disabled']
 
-function serviceUnavailableProblem(problem) {
-  return problem?.type === INTERNAL_PROBLEM_TYPES.serviceUnavailable
-    ? problem
-    : createInternalProblem('serviceUnavailable', { cause:problem })
-}
-
 function applySession(session) {
-  if (!session?.customer || !customerOps.value || !Number.isInteger(session.customer.state)
-    || !customerOps.value.states.some(item => item.value === session.customer.state)) {
+  const disabledState = customerOps.value?.states.find(item => item.routeAlias === 'disabled')?.value
+  if (!session?.customer || !customerOps.value
+    || typeof session.accessToken !== 'string' || !session.accessToken || session.accessToken.trim() !== session.accessToken
+    || !isRfc3339DateTime(session.expiresAt) || !Number.isInteger(session.customer.state)
+    || !customerOps.value.states.some(item => item.value === session.customer.state)
+    || session.customer.state === disabledState) {
     throw createInternalProblem('protocolError')
   }
   accessToken.value = session.accessToken
@@ -117,7 +116,7 @@ async function refreshSession(operationTrace) {
       .then(applySession)
       .catch((error) => {
         if (isServiceUnavailableProblem(error)) {
-          const problem = serviceUnavailableProblem(error)
+          const problem = asServiceUnavailableProblem(error)
           clearSession(SERVICE_UNAVAILABLE_MESSAGE)
           throw problem
         }
@@ -163,11 +162,11 @@ async function resolvePhone(phone) {
     if (!result || !Number.isInteger(result.nextStep)
       || !authenticationOps.value.steps.some(item => item.value === result.nextStep)
       || !Array.isArray(result.requiredDocumentKinds)
-      || result.requiredDocumentKinds.some(kind => !Number.isInteger(kind))
+      || result.requiredDocumentKinds.some(kind => !Number.isInteger(kind) || kind < 0)
       || new Set(result.requiredDocumentKinds).size !== result.requiredDocumentKinds.length) throw createInternalProblem('protocolError')
     return result
   } catch (error) {
-    throw isServiceUnavailableProblem(error) ? serviceUnavailableProblem(error) : error
+    throw isServiceUnavailableProblem(error) ? asServiceUnavailableProblem(error) : error
   }
 }
 
@@ -188,7 +187,7 @@ async function requestCode(phone, consents = {}, isCurrent = () => true, signal)
     return { onboardingToken:token }
   } catch (error) {
     if (!isCurrent() || signal?.aborted) return null
-    throw isServiceUnavailableProblem(error) ? serviceUnavailableProblem(error) : error
+    throw isServiceUnavailableProblem(error) ? asServiceUnavailableProblem(error) : error
   }
 }
 
@@ -219,7 +218,7 @@ async function verifyCode(payload, isCurrent = () => true, signal) {
   } catch (error) {
     if ((!isCurrent() || signal?.aborted) && isAbortError(error)) return null
     if (isServiceUnavailableProblem(error)) {
-      const problem = serviceUnavailableProblem(error)
+      const problem = asServiceUnavailableProblem(error)
       if (isCurrent()) clearSession(SERVICE_UNAVAILABLE_MESSAGE)
       throw problem
     }
@@ -240,7 +239,7 @@ async function authorizedRequest(path, options = {}, policy = {}) {
     return await client.request(path, options, { ...policy, authorize:true })
   } catch (error) {
     if (isServiceUnavailableProblem(error)) {
-      const problem = serviceUnavailableProblem(error)
+      const problem = asServiceUnavailableProblem(error)
       clearSession(SERVICE_UNAVAILABLE_MESSAGE)
       throw problem
     }

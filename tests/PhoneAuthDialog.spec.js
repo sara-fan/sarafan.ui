@@ -451,6 +451,45 @@ describe('PhoneAuthDialog', () => {
   })
 
   it.each([
+    {
+      title:'network',
+      legalResponse:() => Promise.reject(new TypeError('private network failure'))
+    },
+    {
+      title:'protocol',
+      legalResponse:() => Promise.resolve(response(200, {
+        serverNow:'2026-09-11T12:00:00Z', nextChangeAt:null, document:{ id:'bad' }
+      }))
+    },
+    {
+      title:'server',
+      legalResponse:() => Promise.resolve(problemResponse(503, 'service-unavailable', {
+        detail:'Внутренняя ошибка Core.'
+      }))
+    }
+  ])('presents a $title legal-document failure as authentication service unavailability', async scenario => {
+    const fetch = vi.fn(url => {
+      if (url === '/api/v1/legal/current/2') return scenario.legalResponse()
+      const standard = standardResponse(url)
+      if (standard) return Promise.resolve(standard)
+      if (url === '/api/v1/auth/phone/resolve') {
+        return Promise.resolve(response(200, { nextStep:1, requiredDocumentKinds:[2] }))
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    })
+    vi.stubGlobal('fetch', fetch)
+    const wrapper = mountView()
+
+    await wrapper.get('input[name="phone"]').setValue('+79991234567')
+    await wrapper.get('.auth-form').trigger('submit')
+    await flushPromises()
+
+    expect(wrapper.get('.form-error').text()).toContain('Сервис недоступен. Пожалуйста, повторите позже.')
+    expect(wrapper.get('.form-error').text()).not.toContain('неподдерживаемом формате')
+    expect(wrapper.get('input[name="phone"]').element.value).toBe('+79991234567')
+  })
+
+  it.each([
     { title:'agreement', nextStep:1, required:[2], missingKind:2 },
     { title:'personal-data consent', nextStep:2, required:[1], missingKind:1 }
   ])('rejects a missing current $title document', async scenario => {
@@ -831,6 +870,43 @@ describe('PhoneAuthDialog', () => {
     expect(wrapper.get('input[name="phone"]').element.value).toBe('+79991234567')
     expect(wrapper.find('input[name="code"]').exists()).toBe(false)
     expect(wrapper.get('.form-error').text()).toContain('Сервис недоступен')
+  })
+
+  it('presents a legal-document protocol failure during requirements restart as service unavailability', async () => {
+    let resolves = 0
+    const fetch = vi.fn(url => {
+      if (url === '/api/v1/legal/current/2') {
+        return Promise.resolve(response(200, {
+          serverNow:'2026-09-11T12:00:00Z', nextChangeAt:null, document:{ id:'bad' }
+        }))
+      }
+      const standard = standardResponse(url)
+      if (standard) return Promise.resolve(standard)
+      if (url === '/api/v1/auth/phone/resolve') {
+        resolves++
+        return Promise.resolve(response(200, resolves === 1
+          ? { nextStep:0, requiredDocumentKinds:[] }
+          : { nextStep:1, requiredDocumentKinds:[2] }))
+      }
+      if (url === '/api/v1/auth/code/request') return Promise.resolve(response(202, { onboardingToken:null }))
+      if (url === '/api/v1/auth/code/verify') {
+        return Promise.resolve(problemResponse(409, 'authentication-requirements-changed'))
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    })
+    vi.stubGlobal('fetch', fetch)
+    const wrapper = mountView()
+
+    await wrapper.get('input[name="phone"]').setValue('+79991234567')
+    await wrapper.get('.auth-form').trigger('submit')
+    await flushPromises()
+    await wrapper.get('input[name="code"]').setValue('4567')
+    await wrapper.get('.auth-form').trigger('submit')
+    await flushPromises()
+
+    expect(wrapper.get('input[name="phone"]').element.value).toBe('+79991234567')
+    expect(wrapper.get('.form-error').text()).toContain('Сервис недоступен. Пожалуйста, повторите позже.')
+    expect(wrapper.get('.form-error').text()).not.toContain('неподдерживаемом формате')
   })
 
   it('keeps the code step, clears a wrong code, and does not offer change or resend controls', async () => {

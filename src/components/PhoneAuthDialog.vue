@@ -9,7 +9,9 @@ import { RouterLink } from 'vue-router'
 import { BRAND_ICON_URL } from '../branding.js'
 import {
   CORE_PROBLEM_TYPES,
+  asServiceUnavailableProblem,
   createInternalProblem,
+  isServiceUnavailableProblem,
   normalizeProblem,
   presentProblem,
   problemFieldErrors
@@ -234,14 +236,19 @@ function needsRestart(value) {
   ].includes(value?.type)
 }
 
+function normalizeAuthenticationProblem(value) {
+  const normalized = normalizeProblem(value)
+  return isServiceUnavailableProblem(normalized) ? asServiceUnavailableProblem(normalized) : normalized
+}
+
 async function restartFlow(value, operation) {
   resetAfterPhone()
   busy.value = true
-  problem.value = normalizeProblem(value)
+  problem.value = normalizeAuthenticationProblem(value)
   try {
     await resolveCurrentPhone(operation)
   } catch (restartProblem) {
-    if (currentOperation(operation)) problem.value = normalizeProblem(restartProblem)
+    if (currentOperation(operation)) problem.value = normalizeAuthenticationProblem(restartProblem)
   }
 }
 
@@ -263,7 +270,7 @@ async function submitPhone() {
   } catch (value) {
     if (!currentOperation(operation)) return
     if (needsRestart(value)) await restartFlow(value, operation)
-    else problem.value = normalizeProblem(value)
+    else problem.value = normalizeAuthenticationProblem(value)
   } finally {
     if (currentOperation(operation)) busy.value = false
   }
@@ -295,7 +302,7 @@ async function submitRequirements() {
   } catch (value) {
     if (!currentOperation(operation)) return
     if (needsRestart(value)) await restartFlow(value, operation)
-    else problem.value = normalizeProblem(value)
+    else problem.value = normalizeAuthenticationProblem(value)
   } finally {
     if (currentOperation(operation)) busy.value = false
   }
@@ -332,7 +339,7 @@ async function submitCode() {
     if (needsRestart(value)) {
       await restartFlow(value, operation)
     } else {
-      problem.value = normalizeProblem(value)
+      problem.value = normalizeAuthenticationProblem(value)
       if (problem.value.type === CORE_PROBLEM_TYPES.invalidCode) {
         code.value = ''
       }

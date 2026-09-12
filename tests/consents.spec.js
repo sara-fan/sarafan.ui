@@ -126,8 +126,11 @@ describe('consent state and request contracts', () => {
     ['contentHash', 'invalid'],
     ['rendererVersion', ''],
     ['effectiveAt', 'invalid'],
+    ['effectiveAt', '2026-09-06'],
     ['createdAt', 'invalid'],
+    ['createdAt', '2026-02-30T12:00:00Z'],
     ['effectiveLocalDate', '07.09.2026'],
+    ['effectiveLocalDate', '2026-02-30'],
     ['effectiveTimeZone', 'UTC'],
     ['createdBy', 7],
     ['canDelete', false],
@@ -141,8 +144,22 @@ describe('consent state and request contracts', () => {
 
     await expect(store.current(LEGAL_DOCUMENT_KIND.COOKIE_CONSENT)).rejects.toMatchObject({ code:'ui_protocol_error' })
   })
-  it.each([undefined, 'invalid', now])('rejects an invalid current-document boundary %j', async nextChangeAt => {
+  it.each([undefined, 'invalid', '2026-09-08', '2026-02-30T12:00:00Z', now])('rejects an invalid current-document boundary %j', async nextChangeAt => {
     session.consentRequest.mockResolvedValue({ serverNow:now, nextChangeAt, document })
+
+    await expect(store.current(LEGAL_DOCUMENT_KIND.COOKIE_CONSENT)).rejects.toMatchObject({ code:'ui_protocol_error' })
+  })
+  it.each(['2026-09-07', '2026-02-30T12:00:00Z'])('rejects invalid current-document server time %s', async serverNow => {
+    session.consentRequest.mockResolvedValue({ serverNow, nextChangeAt:null, document })
+
+    await expect(store.current(LEGAL_DOCUMENT_KIND.COOKIE_CONSENT)).rejects.toMatchObject({ code:'ui_protocol_error' })
+  })
+  it('rejects a current document before its effective boundary', async () => {
+    session.consentRequest.mockResolvedValue({
+      serverNow:now,
+      nextChangeAt:null,
+      document:{ ...document, effectiveAt:'2026-09-07T12:00:01Z' }
+    })
 
     await expect(store.current(LEGAL_DOCUMENT_KIND.COOKIE_CONSENT)).rejects.toMatchObject({ code:'ui_protocol_error' })
   })

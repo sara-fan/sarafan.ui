@@ -92,7 +92,7 @@ describe('session store', () => {
     expect(session.flowValue('code')).toBe(0)
   })
 
-  it.each([undefined, 99, '0'])('rejects a restored session with invalid customer state %j', async state => {
+  it.each([undefined, 99, '0', 2])('rejects a restored session with invalid customer state %j', async state => {
     const restoredCustomer = { id:3, phone:'+79990000003', state, profile:{ phone:'+79990000003' } }
     const fetch = withOps(url => {
       if (url === '/api/v1/auth/refresh') return Promise.resolve(response(200, {
@@ -107,6 +107,31 @@ describe('session store', () => {
 
     expect(session.customer.value).toBeNull()
     expect(session.restoreProblem.value).toMatchObject({ type:INTERNAL_PROBLEM_TYPES.sessionRestoreUnavailable })
+    expect(session.notice.value).toBe('Сервис недоступен. Пожалуйста, повторите позже.')
+  })
+
+  it.each([
+    ['missing access token', undefined, '2026-08-30T00:15:00Z'],
+    ['empty access token', '', '2026-08-30T00:15:00Z'],
+    ['padded access token', ' token ', '2026-08-30T00:15:00Z'],
+    ['missing expiry', 'token', undefined],
+    ['date-only expiry', 'token', '2026-08-30'],
+    ['impossible expiry', 'token', '2026-02-30T00:15:00Z']
+  ])('rejects a verified session with %s', async (_label, accessToken, expiresAt) => {
+    const activeCustomer = { id:3, phone:'+79990000003', state:0, profile:{ phone:'+79990000003' } }
+    const fetch = withOps(url => {
+      if (url === '/api/v1/auth/code/verify') {
+        return Promise.resolve(response(200, { accessToken, expiresAt, customer:activeCustomer }))
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    })
+    vi.stubGlobal('fetch', fetch)
+
+    const session = useSession()
+    await expect(session.verifyCode({ phone:activeCustomer.phone, code:'1111' })).rejects.toMatchObject({
+      type:INTERNAL_PROBLEM_TYPES.serviceUnavailable
+    })
+    expect(session.customer.value).toBeNull()
     expect(session.notice.value).toBe('Сервис недоступен. Пожалуйста, повторите позже.')
   })
 
@@ -220,6 +245,7 @@ describe('session store', () => {
     { nextStep:99, requiredDocumentKinds:[] },
     { nextStep:'0', requiredDocumentKinds:[] },
     { nextStep:0, requiredDocumentKinds:null },
+    { nextStep:0, requiredDocumentKinds:[-1] },
     { nextStep:0, requiredDocumentKinds:[1.5] },
     { nextStep:0, requiredDocumentKinds:[1, 1] }
   ])('fails closed on malformed phone resolution %j', async resolution => {
