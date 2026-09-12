@@ -87,6 +87,10 @@ function flowValue(alias) {
   return authenticationOps.value?.steps.find(item => item.routeAlias === alias)?.value
 }
 
+function clearNotice() {
+  notice.value = ''
+}
+
 function clearSession(message = '') {
   accessToken.value = ''
   customer.value = null
@@ -298,6 +302,7 @@ export function useSession() {
     restoring: readonly(restoring),
     restoreProblem: readonly(restoreProblem),
     notice: readonly(notice),
+    clearNotice,
     restoreSession,
     getStatus,
     consentRequest,

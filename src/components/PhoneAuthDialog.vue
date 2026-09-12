@@ -118,6 +118,7 @@ watch(() => props.modelValue, open => {
   invalidateOperation()
   busy.value = false
   if (open) {
+    session.clearNotice()
     phone.value = ''
     resetAfterPhone()
   }

@@ -135,6 +135,46 @@ describe('PhoneAuthDialog', () => {
     expect(wrapper.find('input[name="code"]').exists()).toBe(false)
   })
 
+  it.each(['verification', 'restoration'])('clears the stale %s notice when the dialog reopens', async failure => {
+    const fetch = vi.fn(url => {
+      const standard = standardResponse(url)
+      if (standard) return Promise.resolve(standard)
+      if (url === '/api/v1/auth/phone/resolve') {
+        return Promise.resolve(response(200, { nextStep:0, requiredDocumentKinds:[] }))
+      }
+      if (url === '/api/v1/auth/code/request') return Promise.resolve(response(202, { onboardingToken:null }))
+      if (url === '/api/v1/auth/code/verify' || url === '/api/v1/auth/refresh') {
+        return Promise.resolve(problemResponse(503, 'service-unavailable'))
+      }
+      throw new Error('Unexpected request')
+    })
+    vi.stubGlobal('fetch', fetch)
+    const session = useSession()
+    if (failure === 'restoration') await session.restoreSession()
+    const wrapper = mountView()
+    if (failure === 'verification') {
+      await wrapper.get('input[name="phone"]').setValue('+79991234567')
+      await wrapper.get('.auth-form').trigger('submit')
+      await flushPromises()
+      await wrapper.get('input[name="code"]').setValue('4567')
+      await wrapper.get('.auth-form').trigger('submit')
+      await flushPromises()
+    }
+    expect(wrapper.get('.form-error').text()).toContain('Сервис недоступен. Пожалуйста, повторите позже.')
+    expect(session.notice.value).toBe('Сервис недоступен. Пожалуйста, повторите позже.')
+    const requestCount = fetch.mock.calls.length
+
+    await wrapper.setProps({ modelValue:false })
+    await wrapper.setProps({ modelValue:true })
+    await flushPromises()
+
+    expect(wrapper.get('input[name="phone"]').element.value).toBe('')
+    expect(wrapper.find('.form-error').exists()).toBe(false)
+    expect(session.notice.value).toBe('')
+    expect(session.customer.value).toBeNull()
+    expect(fetch).toHaveBeenCalledTimes(requestCount)
+  })
+
   it('focuses the confirmation code field when the code step opens', async () => {
     const fetch = vi.fn(url => {
       const standard = standardResponse(url)
