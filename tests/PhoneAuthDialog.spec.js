@@ -752,7 +752,13 @@ describe('PhoneAuthDialog', () => {
         requests++
         requestBodies.push(JSON.parse(options.body))
         return Promise.resolve(requests === 1
-          ? problemResponse(400, 'validation-failed', { detail:'Повторите отправку кода.' })
+          ? problemResponse(400, 'validation-failed', { detail:'Повторите отправку кода.', errors:{
+            personalDataConsent:['Проверьте согласие.'],
+            'personalDataConsent.ContentHash':['Проверьте версию документа.', 'Проверьте согласие.'],
+            'PersonalDataConsent.Decision':['Подтвердите решение.'],
+            'personalDataConsent.Categories[0]':['Проверьте категории.'],
+            personalDataConsentOther:['Не относится к согласию.']
+          } })
           : response(202, { onboardingToken:'synthetic-onboarding-receipt-at-least-32-characters' }))
       }
       throw new Error(`Unexpected request: ${url}`)
@@ -767,6 +773,12 @@ describe('PhoneAuthDialog', () => {
     await wrapper.get('.auth-form').trigger('submit')
     await flushPromises()
     expect(wrapper.get('.form-error').text()).toContain('Повторите отправку кода')
+    expect(wrapper.get('#authentication-personal-error').text()).toBe(
+      'Проверьте согласие. Проверьте версию документа. Подтвердите решение. Проверьте категории.'
+    )
+    expect(wrapper.get('#authentication-personal-data').attributes('aria-invalid')).toBe('true')
+    expect(wrapper.get('#authentication-personal-data').attributes('aria-describedby')).toContain('authentication-personal-error')
+    expect(wrapper.find('#authentication-terms-error').exists()).toBe(false)
     expect(wrapper.findAll('input[type="checkbox"]').every(item => item.element.checked)).toBe(true)
 
     await wrapper.get('.auth-form').trigger('submit')

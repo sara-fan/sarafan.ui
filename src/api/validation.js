@@ -2,7 +2,7 @@
 // All rights reserved.
 // This file is a part of the Sarafan application
 
-const RFC3339_PATTERN = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(?:Z|[+-](\d{2}):(\d{2}))$/u
+const RFC3339_PATTERN = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(?:Z|[+-](\d{2}):(\d{2}))$/iu
 const ISO_DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/u
 
 function validCalendarDate(year, month, day) {

@@ -69,11 +69,17 @@ export function createConsentStore(session) {
   function requiredCookieCategories() { return (ops.value?.cookieCategories || []).filter(item => item.required).map(item => item.value) }
   function validateDocument(value, kind) {
     if (!value || !isDocumentId(value.id) || value.kind !== kind
+      || !Number.isInteger(kind) || !kindName(kind)
       || value.locale !== 'ru' || !validText(value.title, 200) || !validText(value.displayVersion, 64)
-      || typeof value.html !== 'string' || !SHA256_PATTERN.test(value.sourceHash) || !SHA256_PATTERN.test(value.contentHash)
+      || typeof value.html !== 'string' || typeof value.sourceHash !== 'string' || !SHA256_PATTERN.test(value.sourceHash)
+      || typeof value.contentHash !== 'string' || !SHA256_PATTERN.test(value.contentHash)
       || !validText(value.rendererVersion, 64) || !isRfc3339DateTime(value.effectiveAt) || !isRfc3339DateTime(value.createdAt)
       || !isIsoDate(value.effectiveLocalDate) || value.effectiveTimeZone !== 'Europe/Moscow'
-      || value.createdBy !== null || value.canDelete !== null || !Array.isArray(value.cookieCategories)) {
+      || value.createdBy !== null || value.canDelete !== null || !Array.isArray(value.cookieCategories)
+      || value.cookieCategories.some(category => !Number.isInteger(category) || !cookieCategoryName(category))
+      || (kind === LEGAL_DOCUMENT_KIND.COOKIE_CONSENT
+        && requiredCookieCategories().some(category => !value.cookieCategories.includes(category)))
+      || (kind !== LEGAL_DOCUMENT_KIND.COOKIE_CONSENT && value.cookieCategories.length)) {
       throw createInternalProblem('protocolError')
     }
   }
@@ -88,20 +94,19 @@ export function createConsentStore(session) {
     if (!result || !isRfc3339DateTime(result.serverNow)
       || result.nextChangeAt !== null && (!isRfc3339DateTime(result.nextChangeAt)
         || Date.parse(result.nextChangeAt) <= Date.parse(result.serverNow))) throw createInternalProblem('protocolError')
-    if (result.document) validateDocument(result.document, kind)
+    if (result.document !== null) validateDocument(result.document, kind)
     if (result.document && Date.parse(result.document.effectiveAt) > Date.parse(result.serverNow)) {
       throw createInternalProblem('protocolError')
     }
-    if (result.document && (!Array.isArray(result.document.cookieCategories)
-      || result.document.cookieCategories.some(category => !Number.isInteger(category) || !cookieCategoryName(category))
-      || (kind === LEGAL_DOCUMENT_KIND.COOKIE_CONSENT
-        && requiredCookieCategories().some(category => !result.document.cookieCategories.includes(category)))
-      || (kind !== LEGAL_DOCUMENT_KIND.COOKIE_CONSENT && result.document.cookieCategories.length))) throw createInternalProblem('protocolError')
     return result
   }
   async function read(id) {
     if (!isDocumentId(id)) throw createInternalProblem('invalidInput')
-    return session.consentRequest(`/api/v1/legal/documents/${id}`)
+    await ensureOps()
+    const value = await session.consentRequest(`/api/v1/legal/documents/${id}`)
+    validateDocument(value, value?.kind)
+    if (value.id.toLowerCase() !== id.toLowerCase()) throw createInternalProblem('protocolError')
+    return value
   }
   async function source(id) {
     if (!isDocumentId(id)) throw createInternalProblem('invalidInput')

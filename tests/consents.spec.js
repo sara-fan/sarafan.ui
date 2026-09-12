@@ -117,13 +117,20 @@ describe('consent state and request contracts', () => {
     expect(session.consentRequest).toHaveBeenLastCalledWith(`/api/v1/legal/documents/${id}/source`, expect.objectContaining({ headers:{ Accept:'text/markdown, application/problem+json' } }), false, 'blob')
   })
   it.each([
+    ['kind', '0'],
+    ['kind', -1],
+    ['kind', 99],
     ['locale', ''],
     ['locale', 'en'],
     ['title', ''],
     ['displayVersion', ''],
     ['html', null],
     ['sourceHash', 'invalid'],
+    ['sourceHash', undefined],
+    ['sourceHash', ['b'.repeat(64)]],
     ['contentHash', 'invalid'],
+    ['contentHash', undefined],
+    ['contentHash', ['a'.repeat(64)]],
     ['rendererVersion', ''],
     ['effectiveAt', 'invalid'],
     ['effectiveAt', '2026-09-06'],
@@ -134,8 +141,11 @@ describe('consent state and request contracts', () => {
     ['effectiveTimeZone', 'UTC'],
     ['createdBy', 7],
     ['canDelete', false],
-    ['cookieCategories', null]
-  ])('rejects a current document with invalid %s', async (property, value) => {
+    ['cookieCategories', null],
+    ['cookieCategories', [99]],
+    ['cookieCategories', ['0']],
+    ['cookieCategories', []]
+  ])('rejects current and UUID documents with invalid %s', async (property, value) => {
     session.consentRequest.mockResolvedValue({
       serverNow:now,
       nextChangeAt:null,
@@ -143,6 +153,31 @@ describe('consent state and request contracts', () => {
     })
 
     await expect(store.current(LEGAL_DOCUMENT_KIND.COOKIE_CONSENT)).rejects.toMatchObject({ code:'ui_protocol_error' })
+    session.consentRequest.mockResolvedValue({ ...document, [property]:value })
+    await expect(store.read(id)).rejects.toMatchObject({ code:'ui_protocol_error' })
+  })
+  it.each([{}, { document:undefined }, { document:false }, { document:0 }, { document:'' }, { document:[] }])(
+    'rejects malformed current-document absence %j', async payload => {
+      session.consentRequest.mockResolvedValue({ serverNow:now, nextChangeAt:null, ...payload })
+      await expect(store.current(LEGAL_DOCUMENT_KIND.COOKIE_CONSENT)).rejects.toMatchObject({ code:'ui_protocol_error' })
+    })
+  it.each([null, undefined, false, {}, [], { ...document, id:'22222222-2222-2222-2222-222222222222' },
+    { ...document, kind:LEGAL_DOCUMENT_KIND.PERSONAL_DATA_CONSENT, cookieCategories:[0] }])(
+    'rejects malformed or mismatched UUID documents %j', async value => {
+      session.consentRequest.mockResolvedValue(value)
+      await expect(store.read(id)).rejects.toMatchObject({ code:'ui_protocol_error' })
+    })
+  it('loads Ops before validating a UUID read and permits an immutable future document', async () => {
+    const futureDocument = { ...document, id:'aaaaaaaa-1111-1111-1111-111111111111',
+      kind:LEGAL_DOCUMENT_KIND.USER_AGREEMENT, cookieCategories:[],
+      effectiveAt:'2026-09-08T21:00:00Z', effectiveLocalDate:'2026-09-09' }
+    const request = vi.fn().mockResolvedValueOnce(ops).mockResolvedValueOnce(futureDocument)
+    const local = createConsentStore({ customer:ref(null), consentRequest:request })
+    await expect(local.read(futureDocument.id.toUpperCase())).resolves.toEqual(futureDocument)
+    expect(request.mock.calls.map(([path]) => path)).toEqual([
+      '/api/v1/legal/ops', '/api/v1/legal/documents/' + futureDocument.id.toUpperCase()
+    ])
+    local.dispose()
   })
   it.each([undefined, 'invalid', '2026-09-08', '2026-02-30T12:00:00Z', now])('rejects an invalid current-document boundary %j', async nextChangeAt => {
     session.consentRequest.mockResolvedValue({ serverNow:now, nextChangeAt, document })

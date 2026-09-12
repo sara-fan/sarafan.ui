@@ -9,6 +9,10 @@ import { isIsoDate, isRfc3339DateTime } from '../src/api/validation.js'
 describe('Core date validation', () => {
   it.each([
     '2026-09-10T12:00:00Z',
+    '2026-09-10t12:00:00z',
+    '2026-09-10t12:00:00Z',
+    '2026-09-10T12:00:00z',
+    '2026-09-10t12:00:00+03:00',
     '2024-02-29T23:59:59.1234567+03:00',
     '2026-09-10T00:00:00-14:00'
   ])('accepts RFC 3339 timestamp %s', value => {

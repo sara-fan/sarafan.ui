@@ -63,7 +63,9 @@ const error = computed(() => problem.value ? presentProblem(problem.value) : ses
 const phoneErrors = computed(() => problemFieldErrors(problem.value, 'phone'))
 const codeErrors = computed(() => problemFieldErrors(problem.value, 'code'))
 const termsErrors = computed(() => problemFieldErrors(problem.value, 'termsAccepted'))
-const personalDataErrors = computed(() => problemFieldErrors(problem.value, 'personalDataConsent'))
+const personalDataErrors = computed(() => [...new Set(Object.keys(problem.value?.errors ?? {})
+  .filter(field => /^personalDataConsent(?:\.|$)/iu.test(field))
+  .flatMap(field => problemFieldErrors(problem.value, field)))])
 const termsDescribedBy = computed(() => [
   termsDocument.value ? 'authentication-terms-document' : null,
   termsErrors.value.length ? 'authentication-terms-error' : null
