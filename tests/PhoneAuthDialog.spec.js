@@ -10,6 +10,7 @@ import { createSarafanVuetify } from '../src/plugins/vuetify.js'
 import { resetConsentsForTests } from '../src/stores/consents.js'
 import { resetSessionForTests, useSession } from '../src/stores/session.js'
 import { problemResponse, response } from './fixtures/http.js'
+import { customerDto } from './fixtures/customer.js'
 
 const authenticationOps = { steps:[
   { value:0, name:'Код подтверждения', routeAlias:'code' },
@@ -32,7 +33,7 @@ const documentIds = {
   1:'11111111-1111-1111-1111-111111111111',
   2:'22222222-2222-2222-2222-222222222222'
 }
-const customer = { id:9, phone:'+79991234567', state:0, hasPhoto:false, profile:{ phone:'+79991234567' } }
+const customer = customerDto({ id:9, phone:'+79991234567', state:0, hasPhoto:false, profile:{ phone:'+79991234567' } })
 
 function legalDocument(url) {
   const kind = Number(url.slice(url.lastIndexOf('/') + 1))
@@ -458,8 +459,8 @@ describe('PhoneAuthDialog', () => {
 
   it('does not let a stale verification replace the session from a reopened dialog', async () => {
     const pendingVerification = deferred()
-    const firstCustomer = { ...customer, id:8, phone:'+79991234568' }
-    const currentCustomer = { ...customer, id:9, phone:'+79991234569' }
+    const firstCustomer = customerDto({ id:8, phone:'+79991234568' })
+    const currentCustomer = customerDto({ id:9, phone:'+79991234569' })
     let staleVerificationSignal = null
     const fetch = vi.fn((url, options) => {
       const standard = standardResponse(url)

@@ -12,6 +12,7 @@ import { createAppRouter } from '../src/router.js'
 import { resetSessionForTests, useSession } from '../src/stores/session.js'
 import ProfileView from '../src/views/ProfileView.vue'
 import { problemResponse, response } from './fixtures/http.js'
+import { customerDto } from './fixtures/customer.js'
 
 const consent = vi.hoisted(() => ({
   requirePersonalData: vi.fn(),
@@ -83,18 +84,18 @@ describe('ProfileView', () => {
   })
 
   it('loads, saves, replaces, removes, and presents customer profile data', async () => {
-    const customer = {
+    const customer = customerDto({
       id: 12,
       phone: '+79991234567',
       state: 0,
       hasPhoto: true,
       profile: { lastName: 'Старая', firstName: null }
-    }
-    const updated = {
+    })
+    const updated = customerDto({
       ...customer,
       state: 1,
       profile: { ...customer.profile, lastName: 'Новая', firstName: 'Мария' }
-    }
+    })
     const photo = new globalThis.Blob(['photo'], { type: 'image/png' })
     const fetch = vi.fn((url, options = {}) => {
       const standard = opsResponse(url)
@@ -171,7 +172,7 @@ describe('ProfileView', () => {
   })
 
   it('retains editable data when current personal-data consent is required', async () => {
-    const customer = { id: 13, phone: '+79991234567', state:0, hasPhoto: false, profile: { firstName: 'Мария' } }
+    const customer = customerDto({ id: 13, phone: '+79991234567', state:0, hasPhoto: false, profile: { firstName: 'Мария' } })
     const fetch = vi.fn(url => Promise.resolve(opsResponse(url) || sessionResponse(customer)))
     vi.stubGlobal('fetch', fetch)
     await useSession().verifyCode({ phone: customer.phone, code: '4567' })
@@ -186,8 +187,37 @@ describe('ProfileView', () => {
     expect(fetch.mock.calls.filter(([url]) => url === '/api/v1/auth/code/verify')).toHaveLength(1)
   })
 
+  it('does not present an abandoned profile save as successful for a new identity', async () => {
+    const original = customerDto({ id:16 })
+    const replacement = customerDto({ id:17, profile:{ firstName:'Новая' } })
+    const pending = deferred()
+    let verifications = 0
+    vi.stubGlobal('fetch', vi.fn(url => {
+      const standard = opsResponse(url)
+      if (standard) return Promise.resolve(standard)
+      if (url === '/api/v1/auth/code/verify') return Promise.resolve(sessionResponse(verifications++ ? replacement : original))
+      if (url === '/api/v1/customers/me') return pending.promise
+      if (url === '/api/v1/auth/logout') return Promise.resolve(response(204))
+      throw new Error('Unexpected request')
+    }))
+    const session = useSession()
+    await session.verifyCode({ phone:original.phone, code:'1111' })
+    const wrapper = mountView()
+    await startEditing(wrapper)
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    await session.logout()
+    await session.verifyCode({ phone:replacement.phone, code:'1111' })
+    pending.resolve(response(200, original))
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('Новая')
+    expect(wrapper.text()).not.toContain('Профиль сохранён')
+    expect(session.customer.value).toEqual(replacement)
+  })
+
   it('ignores a photo response that arrives after unmount', async () => {
-    const customer = { id: 14, phone: '+79990000014', state:0, hasPhoto: true, profile: {} }
+    const customer = customerDto({ id: 14, phone: '+79990000014', state:0, hasPhoto: true, profile: {} })
     const pendingPhoto = deferred()
     vi.stubGlobal('fetch', vi.fn(url => {
       const standard = opsResponse(url)
@@ -206,7 +236,7 @@ describe('ProfileView', () => {
   })
 
   it('keeps editing usable when profile and photo operations fail or input is invalid', async () => {
-    const customer = { id: 15, phone: '+79990000015', state:0, hasPhoto: true, profile: {} }
+    const customer = customerDto({ id: 15, phone: '+79990000015', state:0, hasPhoto: true, profile: {} })
     const fetch = vi.fn((url, options = {}) => {
       const standard = opsResponse(url)
       if (standard) return Promise.resolve(standard)

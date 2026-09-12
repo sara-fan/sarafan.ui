@@ -6,7 +6,7 @@ import { readonly, ref } from 'vue'
 
 import { API_BASE_PATH } from '../api.js'
 import { createApiClient } from '../api/client.js'
-import { isRfc3339DateTime } from '../api/validation.js'
+import { isIsoDate, isRfc3339DateTime } from '../api/validation.js'
 import {
   CORE_PROBLEM_TYPES,
   ProblemError,
@@ -23,6 +23,8 @@ const customer = ref(null)
 const restoring = ref(true)
 const restoreProblem = ref(null)
 const notice = ref('')
+const refreshInvalidations = new WeakMap()
+let identityGeneration = 0
 let refreshPromise = null
 let opsPromise = null
 const authenticationOps = ref(null)
@@ -31,20 +33,33 @@ const SERVICE_UNAVAILABLE_MESSAGE = 'Сервис недоступен. Пожа
 const REQUIRED_AUTHENTICATION_ALIASES = ['code', 'agreement', 'registration']
 const REQUIRED_CUSTOMER_ALIASES = ['preliminary', 'complete', 'disabled']
 
-function isValidActiveCustomerState(customerValue) {
+const PROFILE_TEXT_LIMITS = Object.freeze({
+  lastName:100, firstName:100, patronymic:100, email:254, passportSeries:32,
+  passportNumber:32, passportIssuedBy:500, inn:12, postalCode:20, city:150, address:500
+})
+
+function isValidActiveCustomer(value) {
   const disabledState = customerOps.value?.states.find(item => item.routeAlias === 'disabled')?.value
-  return !!customerValue && !!customerOps.value
-    && Number.isInteger(customerValue.state)
-    && customerOps.value.states.some(item => item.value === customerValue.state)
-    && customerValue.state !== disabledState
+  const profile = value?.profile
+  return !!value && !!customerOps.value
+    && Number.isInteger(value.id) && value.id > 0 && value.id <= 2147483647
+    && typeof value.phone === 'string' && /^\+7[0-9]{10}$/u.test(value.phone)
+    && Number.isInteger(value.state) && customerOps.value.states.some(item => item.value === value.state)
+    && value.state !== disabledState && typeof value.hasPhoto === 'boolean'
+    && isRfc3339DateTime(value.createdAt) && isRfc3339DateTime(value.updatedAt)
+    && !!profile && typeof profile === 'object' && !Array.isArray(profile) && profile.phone === value.phone
+    && Object.entries(PROFILE_TEXT_LIMITS).every(([field, limit]) => profile[field] === null
+      || typeof profile[field] === 'string' && profile[field].length <= limit)
+    && (profile.passportIssueDate === null || isIsoDate(profile.passportIssueDate))
 }
 
 function applySession(session) {
   if (!session?.customer || !customerOps.value
     || typeof session.accessToken !== 'string' || !session.accessToken || session.accessToken.trim() !== session.accessToken
-    || !isRfc3339DateTime(session.expiresAt) || !isValidActiveCustomerState(session.customer)) {
+    || !isRfc3339DateTime(session.expiresAt) || !isValidActiveCustomer(session.customer)) {
     throw createInternalProblem('protocolError')
   }
+  if (customer.value?.id !== session.customer.id || customer.value?.phone !== session.customer.phone) identityGeneration++
   accessToken.value = session.accessToken
   customer.value = session.customer
   notice.value = ''
@@ -92,6 +107,7 @@ function clearNotice() {
 }
 
 function clearSession(message = '') {
+  identityGeneration++
   accessToken.value = ''
   customer.value = null
   notice.value = message
@@ -127,9 +143,11 @@ async function refreshSession(operationTrace) {
         if (isServiceUnavailableProblem(error)) {
           const problem = asServiceUnavailableProblem(error)
           clearSession(SERVICE_UNAVAILABLE_MESSAGE)
+          refreshInvalidations.set(problem, identityGeneration)
           throw problem
         }
         clearSession()
+        refreshInvalidations.set(error, identityGeneration)
         throw error
       })
       .finally(() => {
@@ -247,12 +265,15 @@ async function logout() {
   }
 }
 
-async function authorizedRequest(path, options = {}, policy = {}, validateResponse) {
+async function authorizedRequest(path, options = {}, policy = {}, validateResponse, isCurrent = () => true) {
   try {
     const result = await client.request(path, options, { ...policy, authorize:true })
+    if (!isCurrent()) return null
     if (validateResponse) validateResponse(result)
     return result
   } catch (error) {
+    // Preserve the refresh failure that invalidated this identity; discard failures from older identities.
+    if (!isCurrent() && refreshInvalidations.get(error) !== identityGeneration) return null
     if (isServiceUnavailableProblem(error)) {
       const problem = asServiceUnavailableProblem(error)
       clearSession(SERVICE_UNAVAILABLE_MESSAGE)
@@ -263,14 +284,19 @@ async function authorizedRequest(path, options = {}, policy = {}, validateRespon
 }
 
 async function updateProfile(profile) {
+  if (!customer.value) throw createInternalProblem('invalidInput')
+  const { id, phone } = customer.value
+  const generation = identityGeneration
   const updatedCustomer = await authorizedRequest(
     `${API_BASE_PATH}/customers/me`,
     jsonOptions('PUT', profile),
     {},
     value => {
-      if (!isValidActiveCustomerState(value)) throw createInternalProblem('protocolError')
-    }
+      if (!isValidActiveCustomer(value) || value.id !== id || value.phone !== phone) throw createInternalProblem('protocolError')
+    },
+    () => generation === identityGeneration
   )
+  if (!updatedCustomer || generation !== identityGeneration) return null
   customer.value = updatedCustomer
   return customer.value
 }

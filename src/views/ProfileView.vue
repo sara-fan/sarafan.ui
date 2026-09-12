@@ -85,7 +85,8 @@ async function save() {
   saved.value = false
   try {
     await consents.requirePersonalData()
-    await updateProfile(Object.fromEntries(fields.map(field => [field, form[field] || null])))
+    const updatedCustomer = await updateProfile(Object.fromEntries(fields.map(field => [field, form[field] || null])))
+    if (!updatedCustomer) return
     saved.value = true
     editing.value = false
   } catch (value) {

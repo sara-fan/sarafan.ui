@@ -13,6 +13,7 @@ import { INTERNAL_PROBLEM_TYPES } from '../src/errors/problem.js'
 import { EVENTS } from '../src/observability/catalogue.js'
 import { resetSessionForTests, useSession } from '../src/stores/session.js'
 import { TEST_TRACE_ID, problemResponse, response } from './fixtures/http.js'
+import { customerDto } from './fixtures/customer.js'
 
 const authenticationOps = { steps:[
   { value:0, name:'Код подтверждения', routeAlias:'code' },
@@ -93,7 +94,7 @@ describe('session store', () => {
   })
 
   it.each([undefined, 99, '0', 2])('rejects a restored session with invalid customer state %j', async state => {
-    const restoredCustomer = { id:3, phone:'+79990000003', state, profile:{ phone:'+79990000003' } }
+    const restoredCustomer = customerDto({ id:3, phone:'+79990000003', state, profile:{ phone:'+79990000003' } })
     const fetch = withOps(url => {
       if (url === '/api/v1/auth/refresh') return Promise.resolve(response(200, {
         accessToken:'restored-token', expiresAt:'2026-08-30T00:15:00Z', customer:restoredCustomer
@@ -118,7 +119,7 @@ describe('session store', () => {
     ['date-only expiry', 'token', '2026-08-30'],
     ['impossible expiry', 'token', '2026-02-30T00:15:00Z']
   ])('rejects a verified session with %s', async (_label, accessToken, expiresAt) => {
-    const activeCustomer = { id:3, phone:'+79990000003', state:0, profile:{ phone:'+79990000003' } }
+    const activeCustomer = customerDto({ id:3, phone:'+79990000003', state:0, profile:{ phone:'+79990000003' } })
     const fetch = withOps(url => {
       if (url === '/api/v1/auth/code/verify') {
         return Promise.resolve(response(200, { accessToken, expiresAt, customer:activeCustomer }))
@@ -136,7 +137,7 @@ describe('session store', () => {
   })
 
   it('clears an existing session when verification returns an invalid customer state', async () => {
-    const activeCustomer = { id:3, phone:'+79990000003', state:0, profile:{ phone:'+79990000003' } }
+    const activeCustomer = customerDto({ id:3, phone:'+79990000003', state:0, profile:{ phone:'+79990000003' } })
     let verifications = 0
     const fetch = withOps(url => {
       if (url === '/api/v1/auth/code/verify') {
@@ -162,7 +163,7 @@ describe('session store', () => {
   })
 
   it('does not clear the current session for an aborted stale verification', async () => {
-    const activeCustomer = { id:3, phone:'+79990000003', state:0, profile:{ phone:'+79990000003' } }
+    const activeCustomer = customerDto({ id:3, phone:'+79990000003', state:0, profile:{ phone:'+79990000003' } })
     const controller = new globalThis.AbortController()
     let current = true
     const fetch = withOps((url, options) => {
@@ -217,7 +218,7 @@ describe('session store', () => {
   })
 
   it('clears an existing session when refresh returns an invalid customer state', async () => {
-    const activeCustomer = { id:3, phone:'+79990000003', state:0, profile:{ phone:'+79990000003' } }
+    const activeCustomer = customerDto({ id:3, phone:'+79990000003', state:0, profile:{ phone:'+79990000003' } })
     const fetch = withOps(url => {
       if (url === '/api/v1/auth/code/verify') return Promise.resolve(response(200, {
         accessToken:'active-token', expiresAt:'2026-08-30T00:15:00Z', customer:activeCustomer
@@ -335,6 +336,154 @@ describe('session store', () => {
     expect(useSession().notice.value).toBe('')
   })
 
+  describe.each(['verification', 'restoration', 'profile update'])('%s customer DTO validation', operation => {
+    const invalidCustomers = [
+      ['missing customer', () => null],
+      ['empty customer', () => ({})],
+      ...[undefined, 0, -1, 1.5, '1', 2147483648].map(id => ['invalid ID ' + id, value => ({ ...value, id })]),
+      ...[undefined, 79990000001, '79990000001', '+19990000001', ' +79990000001'].map(phone => ['invalid phone ' + phone, value => ({ ...value, phone })]),
+      ...[undefined, '2026-08-01', '2026-02-30T12:00:00Z'].map(createdAt => ['invalid creation time ' + createdAt, value => ({ ...value, createdAt })]),
+      ['missing update time', value => ({ ...value, updatedAt:undefined })],
+      ['impossible update time', value => ({ ...value, updatedAt:'2026-02-30T12:00:00Z' })],
+      ...[undefined, 'false'].map(hasPhoto => ['invalid photo flag ' + hasPhoto, value => ({ ...value, hasPhoto })]),
+      ...[undefined, null, [], 'profile'].map(profile => ['invalid profile ' + profile, value => ({ ...value, profile })]),
+      ['missing profile phone', value => ({ ...value, profile:{ ...value.profile, phone:undefined } })],
+      ['mismatched profile phone', value => ({ ...value, profile:{ ...value.profile, phone:'+79990000002' } })],
+      ...['lastName', 'firstName', 'patronymic', 'email', 'passportSeries', 'passportNumber', 'passportIssuedBy', 'inn', 'postalCode', 'city', 'address']
+        .flatMap(field => [undefined, 7, 'x'.repeat(501)].map(invalid => ['invalid profile ' + field + ' ' + typeof invalid,
+          value => ({ ...value, profile:{ ...value.profile, [field]:invalid } })])),
+      ...[undefined, '2026-02-30', '2026-08-01T12:00:00Z'].map(passportIssueDate => ['invalid passport date ' + passportIssueDate,
+        value => ({ ...value, profile:{ ...value.profile, passportIssueDate } })])
+    ]
+    it.each(invalidCustomers)('rejects %s and clears the whole session', async (_label, malformed) => {
+      const original = customerDto()
+      let fail = false
+      const fetch = withOps(url => {
+        if (url === '/api/v1/auth/code/verify' || url === '/api/v1/auth/refresh') {
+          return Promise.resolve(response(200, { accessToken:'token', expiresAt:'2026-08-30T00:15:00Z',
+            customer:fail ? malformed(customerDto()) : original }))
+        }
+        if (url === '/api/v1/customers/me') return Promise.resolve(response(200, malformed(customerDto())))
+        if (url === '/api/v1/customers/me/photo') return Promise.resolve(response(200, new globalThis.Blob(['photo']), 'image/png'))
+        throw new Error('Unexpected request')
+      })
+      vi.stubGlobal('fetch', fetch)
+      const session = useSession()
+      await session.verifyCode({ phone:original.phone, code:'1111' })
+      fail = true
+      if (operation === 'restoration') {
+        await session.restoreSession()
+        expect(session.restoreProblem.value).toMatchObject({ type:INTERNAL_PROBLEM_TYPES.sessionRestoreUnavailable })
+      } else {
+        await expect(operation === 'verification'
+          ? session.verifyCode({ phone:original.phone, code:'1111' })
+          : session.updateProfile({ firstName:'Анна' })).rejects.toMatchObject({ type:INTERNAL_PROBLEM_TYPES.serviceUnavailable })
+      }
+      expect(session.customer.value).toBeNull()
+      expect(session.notice.value).toBe('Сервис недоступен. Пожалуйста, повторите позже.')
+      await session.getPhoto()
+      expect(fetch.mock.calls.at(-1)[1].headers.has('Authorization')).toBe(false)
+    })
+  })
+
+  it.each(['id', 'phone'])('rejects a valid profile DTO with a different %s', async field => {
+    const original = customerDto()
+    const other = customerDto(field === 'id' ? { id:2 } : { phone:'+79990000002' })
+    vi.stubGlobal('fetch', withOps(url => Promise.resolve(response(200, url === '/api/v1/customers/me' ? other : {
+      accessToken:'token', expiresAt:'2026-08-30T00:15:00Z', customer:original
+    }))))
+    const session = useSession()
+    await session.verifyCode({ phone:original.phone, code:'1111' })
+    await expect(session.updateProfile({ firstName:'Анна' })).rejects.toMatchObject({ type:INTERNAL_PROBLEM_TYPES.serviceUnavailable })
+    expect(session.customer.value).toBeNull()
+  })
+
+  it('accepts a complete profile with populated nullable fields and a calendar-valid passport date', async () => {
+    const original = customerDto({ profile:{
+      lastName:'Иванова', firstName:'Анна', patronymic:'Ивановна', email:'anna@example.test',
+      passportSeries:'4500', passportNumber:'123456', passportIssuedBy:'ОВД', passportIssueDate:'2024-02-29',
+      inn:'770123456789', postalCode:'101000', city:'Москва', address:'Тверская, 1'
+    } })
+    vi.stubGlobal('fetch', withOps(url => Promise.resolve(response(200, url === '/api/v1/customers/me' ? original : {
+      accessToken:'token', expiresAt:'2026-08-30T00:15:00Z', customer:original
+    }))))
+    const session = useSession()
+    await expect(session.verifyCode({ phone:original.phone, code:'1111' })).resolves.toEqual(original)
+    await expect(session.updateProfile(original.profile)).resolves.toEqual(original)
+  })
+
+  it('rejects profile updates without an authenticated identity before requesting Core', async () => {
+    const fetch = vi.fn()
+    vi.stubGlobal('fetch', fetch)
+    await expect(useSession().updateProfile({ firstName:'Анна' })).rejects.toMatchObject({ type:INTERNAL_PROBLEM_TYPES.invalidInput })
+    expect(fetch).not.toHaveBeenCalled()
+  })
+
+  it.each(['logout', 'switch', 'relogin'])('discards late profile results after %s', async change => {
+    const original = customerDto()
+    const replacement = customerDto({ id:change === 'switch' ? 2 : 1, profile:{ firstName:'Новая' } })
+    let complete
+    const pending = new Promise(resolve => { complete = resolve })
+    let verifications = 0
+    vi.stubGlobal('fetch', withOps(url => {
+      if (url === '/api/v1/customers/me') return pending
+      if (url === '/api/v1/auth/logout') return Promise.resolve(response(204))
+      if (url === '/api/v1/auth/code/verify') return Promise.resolve(response(200, {
+        accessToken:'token', expiresAt:'2026-08-30T00:15:00Z', customer:verifications++ ? replacement : original
+      }))
+      throw new Error('Unexpected request')
+    }))
+    const session = useSession()
+    await session.verifyCode({ phone:original.phone, code:'1111' })
+    const update = session.updateProfile({ firstName:'Поздняя' })
+    if (change !== 'switch') await session.logout()
+    if (change !== 'logout') await session.verifyCode({ phone:replacement.phone, code:'1111' })
+    complete(response(200, customerDto({ profile:{ firstName:'Поздняя' } })))
+    await expect(update).resolves.toBeNull()
+    expect(session.customer.value).toEqual(change === 'logout' ? null : replacement)
+    expect(session.notice.value).toBe('')
+  })
+
+  it('discards a late profile failure without clearing the new identity', async () => {
+    const original = customerDto()
+    const replacement = customerDto({ id:2 })
+    let complete
+    const pending = new Promise(resolve => { complete = resolve })
+    let verifications = 0
+    vi.stubGlobal('fetch', withOps(url => {
+      if (url === '/api/v1/customers/me') return pending
+      if (url === '/api/v1/auth/code/verify') return Promise.resolve(response(200, {
+        accessToken:'token', expiresAt:'2026-08-30T00:15:00Z', customer:verifications++ ? replacement : original
+      }))
+      throw new Error('Unexpected request')
+    }))
+    const session = useSession()
+    await session.verifyCode({ phone:original.phone, code:'1111' })
+    const update = session.updateProfile({ firstName:'Поздняя' })
+    await session.verifyCode({ phone:replacement.phone, code:'1111' })
+    complete(problemResponse(503, 'service-unavailable'))
+    await expect(update).resolves.toBeNull()
+    expect(session.customer.value).toEqual(replacement)
+    expect(session.notice.value).toBe('')
+  })
+
+  it('propagates the refresh failure that invalidates a current profile request', async () => {
+    const original = customerDto()
+    vi.stubGlobal('fetch', withOps(url => {
+      if (url === '/api/v1/auth/code/verify') return Promise.resolve(response(200, {
+        accessToken:'token', expiresAt:'2026-08-30T00:15:00Z', customer:original
+      }))
+      if (url === '/api/v1/customers/me') return Promise.resolve(problemResponse(401, 'invalid-access-token'))
+      if (url === '/api/v1/auth/refresh') return Promise.resolve(problemResponse(503, 'service-unavailable'))
+      throw new Error('Unexpected request')
+    }))
+    const session = useSession()
+    await session.verifyCode({ phone:original.phone, code:'1111' })
+    await expect(session.updateProfile({ firstName:'Анна' })).rejects.toMatchObject({ type:INTERNAL_PROBLEM_TYPES.serviceUnavailable })
+    expect(session.customer.value).toBeNull()
+    expect(session.notice.value).toBe('Сервис недоступен. Пожалуйста, повторите позже.')
+  })
+
   it('preserves a structured client error from phone resolution', async () => {
     const fetch = withOps(url => {
       if (url === '/api/v1/auth/phone/resolve') {
@@ -353,18 +502,18 @@ describe('session store', () => {
   })
 
   it('uses the bearer token for profile updates', async () => {
-    const originalCustomer = {
+    const originalCustomer = customerDto({
       id: 1,
       phone: '+79990000001',
       state: 0,
       hasPhoto: false,
       profile: { phone: '+79990000001' }
-    }
-    const updatedCustomer = {
+    })
+    const updatedCustomer = customerDto({
       ...originalCustomer,
       state: 1,
       profile: { ...originalCustomer.profile, firstName: 'Анна' }
-    }
+    })
     const fetch = withOps((url) => {
       if (url === '/api/v1/auth/code/verify') {
         return Promise.resolve(response(200, {
@@ -388,13 +537,13 @@ describe('session store', () => {
   })
 
   it.each([2, 'preliminary', undefined, null, 99, -1, 0.5])('rejects a profile update with an invalid customer state %j', async state => {
-    const originalCustomer = {
+    const originalCustomer = customerDto({
       id: 1,
       phone: '+79990000001',
       state: 0,
       hasPhoto: false,
       profile: { phone: '+79990000001' }
-    }
+    })
     const fetch = withOps((url) => {
       if (url === '/api/v1/auth/code/verify') {
         return Promise.resolve(response(200, {
@@ -420,13 +569,13 @@ describe('session store', () => {
   })
 
   it('refreshes once and retries an authorized request after a 401', async () => {
-    const customer = {
+    const customer = customerDto({
       id: 2,
       phone: '+79990000002',
       state: 1,
       hasPhoto: false,
       profile: { phone: '+79990000002', firstName: 'Иван' }
-    }
+    })
     let profileAttempts = 0
     const fetch = withOps((url) => {
       if (url === '/api/v1/auth/code/verify') {
@@ -474,7 +623,7 @@ describe('session store', () => {
   })
 
   it('restores one shared refresh request and clears an unavailable session', async () => {
-    const customer = { id: 3, phone: '+79990000003', state:0, profile: { phone: '+79990000003' } }
+    const customer = customerDto({ id: 3, phone: '+79990000003', state:0, profile: { phone: '+79990000003' } })
     const refreshResponses = [
       response(200, {
         accessToken: 'restored-token',
@@ -591,7 +740,7 @@ describe('session store', () => {
   })
 
   it('forces logoff after an authenticated request receives a gateway error', async () => {
-    const customer = { id: 4, phone: '+79990000004', state:0, profile: { phone: '+79990000004' } }
+    const customer = customerDto({ id: 4, phone: '+79990000004', state:0, profile: { phone: '+79990000004' } })
     const fetch = withOps((url) => {
       if (url === '/api/v1/auth/code/verify') return Promise.resolve(response(200, {
         accessToken: 'active-token',
@@ -614,13 +763,13 @@ describe('session store', () => {
   })
 
   it('uploads, refreshes, reads, and deletes a profile photo', async () => {
-    const customer = {
+    const customer = customerDto({
       id: 4,
       phone: '+79990000004',
       state: 0,
       hasPhoto: false,
       profile: { phone: '+79990000004' }
-    }
+    })
     const photo = new globalThis.Blob(['image'], { type: 'image/png' })
     let photoReads = 0
     const fetch = withOps((url) => {
@@ -671,7 +820,7 @@ describe('session store', () => {
   })
 
   it('clears local state when logout fails and surfaces photo errors', async () => {
-    const customer = { id: 5, phone: '+79990000005', state:0, profile: { phone: '+79990000005' } }
+    const customer = customerDto({ id: 5, phone: '+79990000005', state:0, profile: { phone: '+79990000005' } })
     const fetch = withOps((url) => {
       if (url === '/api/v1/auth/code/verify') {
         return Promise.resolve(response(200, {
