@@ -11,6 +11,7 @@ export const CORE_PROBLEM_TYPES = Object.freeze({
   authenticationRequirementsChanged: `${PROBLEM_TYPE_ROOT}authentication-requirements-changed`,
   consentVersionChanged: `${PROBLEM_TYPE_ROOT}consent-version-changed`,
   customerNotFound: `${PROBLEM_TYPE_ROOT}customer-not-found`,
+  invalidAuthRequest: `${PROBLEM_TYPE_ROOT}invalid-auth-request`,
   invalidAccessToken: `${PROBLEM_TYPE_ROOT}invalid-access-token`,
   invalidCode: `${PROBLEM_TYPE_ROOT}invalid-code`,
   invalidRefreshToken: `${PROBLEM_TYPE_ROOT}invalid-refresh-token`,

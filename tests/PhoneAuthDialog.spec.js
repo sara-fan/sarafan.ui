@@ -238,15 +238,24 @@ describe('PhoneAuthDialog', () => {
     expect(fetch.mock.calls.some(([url]) => url.startsWith('/api/v1/legal/current/'))).toBe(false)
   })
 
-  it('ignores a code receipt completed after the dialog is reopened', async () => {
-    const pending = deferred()
-    const fetch = vi.fn(url => {
+  it('aborts a direct code request when the dialog is reopened', async () => {
+    let requestSignal = null
+    const fetch = vi.fn((url, options) => {
       const standard = standardResponse(url)
       if (standard) return Promise.resolve(standard)
       if (url === '/api/v1/auth/phone/resolve') {
         return Promise.resolve(response(200, { nextStep:0, requiredDocumentKinds:[] }))
       }
-      if (url === '/api/v1/auth/code/request') return pending.promise
+      if (url === '/api/v1/auth/code/request') {
+        requestSignal = options.signal
+        return new Promise((_resolve, reject) => {
+          options.signal.addEventListener(
+            'abort',
+            () => reject(new globalThis.DOMException('Aborted', 'AbortError')),
+            { once:true }
+          )
+        })
+      }
       throw new Error(`Unexpected request: ${url}`)
     })
     vi.stubGlobal('fetch', fetch)
@@ -255,11 +264,53 @@ describe('PhoneAuthDialog', () => {
     await wrapper.get('input[name="phone"]').setValue('+79991234567')
     await wrapper.get('.auth-form').trigger('submit')
     await flushPromises()
+    expect(requestSignal).not.toBeNull()
+
     await wrapper.setProps({ modelValue:false })
     await wrapper.setProps({ modelValue:true })
-    pending.resolve(response(202, { onboardingToken:null }))
     await flushPromises()
 
+    expect(requestSignal.aborted).toBe(true)
+    expect(wrapper.get('input[name="phone"]').element.value).toBe('')
+    expect(wrapper.find('input[name="code"]').exists()).toBe(false)
+  })
+
+  it('aborts a requirements code request when the dialog is reopened', async () => {
+    let requestSignal = null
+    const fetch = vi.fn((url, options) => {
+      const standard = standardResponse(url)
+      if (standard) return Promise.resolve(standard)
+      if (url === '/api/v1/auth/phone/resolve') {
+        return Promise.resolve(response(200, { nextStep:2, requiredDocumentKinds:[2, 1] }))
+      }
+      if (url === '/api/v1/auth/code/request') {
+        requestSignal = options.signal
+        return new Promise((_resolve, reject) => {
+          options.signal.addEventListener(
+            'abort',
+            () => reject(new globalThis.DOMException('Aborted', 'AbortError')),
+            { once:true }
+          )
+        })
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    })
+    vi.stubGlobal('fetch', fetch)
+    const wrapper = mountView()
+
+    await wrapper.get('input[name="phone"]').setValue('+79991234567')
+    await wrapper.get('.auth-form').trigger('submit')
+    await flushPromises()
+    for (const checkbox of wrapper.findAll('input[type="checkbox"]')) await checkbox.setValue(true)
+    await wrapper.get('.auth-form').trigger('submit')
+    await flushPromises()
+    expect(requestSignal).not.toBeNull()
+
+    await wrapper.setProps({ modelValue:false })
+    await wrapper.setProps({ modelValue:true })
+    await flushPromises()
+
+    expect(requestSignal.aborted).toBe(true)
     expect(wrapper.get('input[name="phone"]').element.value).toBe('')
     expect(wrapper.find('input[name="code"]').exists()).toBe(false)
   })
@@ -524,7 +575,7 @@ describe('PhoneAuthDialog', () => {
         requests++
         requestBodies.push(JSON.parse(options.body))
         return Promise.resolve(requests === 1
-          ? problemResponse(400, 'invalid-auth-request', { detail:'Повторите отправку кода.' })
+          ? problemResponse(400, 'validation-failed', { detail:'Повторите отправку кода.' })
           : response(202, { onboardingToken:'synthetic-onboarding-receipt-at-least-32-characters' }))
       }
       throw new Error(`Unexpected request: ${url}`)
@@ -545,6 +596,44 @@ describe('PhoneAuthDialog', () => {
     await flushPromises()
     expect(requestBodies[1].personalDataConsent.idempotencyKey)
       .toBe(requestBodies[0].personalDataConsent.idempotencyKey)
+    expect(wrapper.find('input[name="code"]').exists()).toBe(true)
+  })
+
+  it('re-resolves when requirements become a direct code flow during code request', async () => {
+    let resolves = 0
+    const requestBodies = []
+    const fetch = vi.fn((url, options) => {
+      const standard = standardResponse(url)
+      if (standard) return Promise.resolve(standard)
+      if (url === '/api/v1/auth/phone/resolve') {
+        resolves++
+        return Promise.resolve(response(200, resolves === 1
+          ? { nextStep:2, requiredDocumentKinds:[2, 1] }
+          : { nextStep:0, requiredDocumentKinds:[] }))
+      }
+      if (url === '/api/v1/auth/code/request') {
+        requestBodies.push(JSON.parse(options.body))
+        return Promise.resolve(requestBodies.length === 1
+          ? problemResponse(400, 'invalid-auth-request')
+          : response(202, { onboardingToken:null }))
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    })
+    vi.stubGlobal('fetch', fetch)
+    const wrapper = mountView()
+
+    await wrapper.get('input[name="phone"]').setValue('+79991234567')
+    await wrapper.get('.auth-form').trigger('submit')
+    await flushPromises()
+    for (const checkbox of wrapper.findAll('input[type="checkbox"]')) await checkbox.setValue(true)
+    await wrapper.get('.auth-form').trigger('submit')
+    await flushPromises()
+
+    expect(resolves).toBe(2)
+    expect(requestBodies).toHaveLength(2)
+    expect(requestBodies[0]).toMatchObject({ termsAccepted:true, personalDataConsent:{ decision:'grant' } })
+    expect(requestBodies[1]).toEqual({ phone:'+79991234567' })
+    expect(wrapper.get('h2').text()).toBe('Введите код')
     expect(wrapper.find('input[name="code"]').exists()).toBe(true)
   })
 

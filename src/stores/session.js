@@ -171,13 +171,15 @@ async function resolvePhone(phone) {
   }
 }
 
-async function requestCode(phone, consents = {}) {
+async function requestCode(phone, consents = {}, isCurrent = () => true, signal) {
   notice.value = ''
   try {
+    if (!isCurrent() || signal?.aborted) return null
     const receipt = await client.request(
       `${API_BASE_PATH}/auth/code/request`,
-      jsonOptions('POST', { phone, ...consents })
+      { ...jsonOptions('POST', { phone, ...consents }), ...(signal ? { signal } : {}) }
     )
+    if (!isCurrent() || signal?.aborted) return null
     const token = receipt?.onboardingToken
     if (!receipt || !Object.hasOwn(receipt, 'onboardingToken')
       || token !== null && (typeof token !== 'string' || token.length < 32 || token.length > 128)) {
@@ -185,6 +187,7 @@ async function requestCode(phone, consents = {}) {
     }
     return { onboardingToken:token }
   } catch (error) {
+    if (!isCurrent() || signal?.aborted) return null
     throw isServiceUnavailableProblem(error) ? serviceUnavailableProblem(error) : error
   }
 }

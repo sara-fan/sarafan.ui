@@ -408,6 +408,40 @@ describe('session store', () => {
     })
   })
 
+  it('passes the operation signal and suppresses an aborted stale code request', async () => {
+    const controller = new globalThis.AbortController()
+    let current = true
+    let requestSignal = null
+    const fetch = vi.fn((url, options) => {
+      if (url === '/api/v1/auth/code/request') {
+        requestSignal = options.signal
+        return new Promise((_resolve, reject) => {
+          const abortError = new Error('Aborted')
+          abortError.name = 'AbortError'
+          options.signal.addEventListener('abort', () => reject(abortError), { once:true })
+        })
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    })
+    vi.stubGlobal('fetch', fetch)
+
+    const request = useSession().requestCode('+79990000004', {}, () => current, controller.signal)
+    current = false
+    controller.abort()
+
+    await expect(request).resolves.toBeNull()
+    expect(requestSignal).toBe(controller.signal)
+    expect(requestSignal.aborted).toBe(true)
+  })
+
+  it('skips a stale code request before issuing it', async () => {
+    const fetch = vi.fn()
+    vi.stubGlobal('fetch', fetch)
+
+    await expect(useSession().requestCode('+79990000004', {}, () => false)).resolves.toBeNull()
+    expect(fetch).not.toHaveBeenCalled()
+  })
+
   it.each([
     null,
     {},

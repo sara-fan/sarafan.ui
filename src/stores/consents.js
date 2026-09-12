@@ -70,7 +70,7 @@ export function createConsentStore(session) {
   function requiredCookieCategories() { return (ops.value?.cookieCategories || []).filter(item => item.required).map(item => item.value) }
   function validateDocument(value, kind) {
     if (!value || !isDocumentId(value.id) || value.kind !== kind
-      || !validText(value.locale, 8) || !validText(value.title, 200) || !validText(value.displayVersion, 64)
+      || value.locale !== 'ru' || !validText(value.title, 200) || !validText(value.displayVersion, 64)
       || typeof value.html !== 'string' || !SHA256_PATTERN.test(value.sourceHash) || !SHA256_PATTERN.test(value.contentHash)
       || !validText(value.rendererVersion, 64) || !validDateTime(value.effectiveAt) || !validDateTime(value.createdAt)
       || !LOCAL_DATE_PATTERN.test(value.effectiveLocalDate) || value.effectiveTimeZone !== 'Europe/Moscow'

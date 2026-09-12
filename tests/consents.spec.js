@@ -118,6 +118,7 @@ describe('consent state and request contracts', () => {
   })
   it.each([
     ['locale', ''],
+    ['locale', 'en'],
     ['title', ''],
     ['displayVersion', ''],
     ['html', null],
