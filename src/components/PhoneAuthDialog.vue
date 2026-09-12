@@ -289,6 +289,7 @@ async function submitRequirements() {
   try {
     const receipt = await requestCodeForOperation(phone.value, consentPayload(), operation)
     if (!currentOperation(operation) || !receipt) return
+    if (typeof receipt.onboardingToken !== 'string') throw createInternalProblem('protocolError')
     onboardingToken.value = receipt.onboardingToken
     step.value = 'code'
   } catch (value) {
