@@ -3,7 +3,7 @@
 // All rights reserved.
 // This file is a part of the Sarafan application
 
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 
 import { BRAND_ICON_URL } from '../branding.js'
@@ -43,6 +43,7 @@ const codeField = ref(null)
 let consentRetryFingerprint = ''
 let consentRetryKey = ''
 let operationGeneration = 0
+let resolveAbortController = null
 let codeRequestAbortController = null
 let verifyAbortController = null
 
@@ -96,12 +97,20 @@ function cancelCodeRequest() {
   codeRequestAbortController = null
 }
 
+function cancelResolution() {
+  resolveAbortController?.abort()
+  resolveAbortController = null
+}
+
 function invalidateOperation() {
   operationGeneration++
+  cancelResolution()
   cancelCodeRequest()
   cancelVerification()
   return operationGeneration
 }
+
+onBeforeUnmount(invalidateOperation)
 
 watch(() => props.modelValue, open => {
   invalidateOperation()
@@ -200,8 +209,16 @@ async function resolveCurrentPhone(operation) {
   onboardingToken.value = ''
   consentRetryFingerprint = ''
   consentRetryKey = ''
-  const value = await session.resolvePhone(resolvedPhone)
-  if (currentOperation(operation)) await continueResolution(value, resolvedPhone, operation)
+  cancelResolution()
+  const controller = new globalThis.AbortController()
+  resolveAbortController = controller
+  let value
+  try {
+    value = await session.resolvePhone(resolvedPhone, () => currentOperation(operation), controller.signal)
+  } finally {
+    if (resolveAbortController === controller) resolveAbortController = null
+  }
+  if (currentOperation(operation) && value) await continueResolution(value, resolvedPhone, operation)
 }
 
 function consentPayload() {
@@ -426,7 +443,7 @@ async function submitCode() {
             @update:model-value="termsAccepted = $event"
           >
             Я принимаю условия использования сервиса
-            <small>Пользовательское соглашение · версия {{ termsDocument?.displayVersion }}</small>
+            <small>{{ consentStore.kindName(agreementKind) }} · версия {{ termsDocument?.displayVersion }}</small>
           </UiSelectionControl>
           <RouterLink
             id="authentication-terms-document"
@@ -459,7 +476,7 @@ async function submitCode() {
             @update:model-value="personalDataAccepted = $event"
           >
             Я даю отдельное согласие на обработку персональных данных
-            <small>Согласие на обработку персональных данных · версия {{ pdDocument?.displayVersion }}</small>
+            <small>{{ consentStore.kindName(personalDataKind) }} · версия {{ pdDocument?.displayVersion }}</small>
           </UiSelectionControl>
           <RouterLink
             id="authentication-personal-document"

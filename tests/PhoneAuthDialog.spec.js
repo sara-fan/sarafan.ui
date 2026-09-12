@@ -182,6 +182,86 @@ describe('PhoneAuthDialog', () => {
     expect(fetch.mock.calls.some(([url]) => url.startsWith('/api/v1/legal/current/'))).toBe(false)
   })
 
+  it.each(['close', 'replacement', 'unmount'])('aborts phone resolution on dialog %s', async action => {
+    const signals = []
+    const fetch = vi.fn((url, options) => {
+      const standard = standardResponse(url)
+      if (standard) return Promise.resolve(standard)
+      if (url === '/api/v1/auth/phone/resolve') {
+        signals.push(options.signal)
+        return new Promise((_resolve, reject) => {
+          options.signal.addEventListener('abort',
+            () => reject(new globalThis.DOMException('Aborted', 'AbortError')), { once:true })
+        })
+      }
+      throw new Error('Unexpected request')
+    })
+    vi.stubGlobal('fetch', fetch)
+    const wrapper = mountView()
+    await wrapper.get('input[name="phone"]').setValue('+79991234567')
+    await wrapper.get('.auth-form').trigger('submit')
+    await flushPromises()
+    expect(signals).toHaveLength(1)
+    expect(signals[0].aborted).toBe(false)
+
+    if (action === 'unmount') wrapper.unmount()
+    else if (action === 'replacement') await wrapper.get('.auth-form').trigger('submit')
+    else await wrapper.setProps({ modelValue:false })
+    await flushPromises()
+
+    expect(signals[0].aborted).toBe(true)
+    expect(fetch.mock.calls.some(([url]) => url === '/api/v1/auth/code/request')).toBe(false)
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined()
+    if (action === 'replacement') {
+      expect(signals).toHaveLength(2)
+      expect(signals[1].aborted).toBe(false)
+      expect(wrapper.get('input[name="phone"]').attributes('disabled')).toBeDefined()
+      await wrapper.setProps({ modelValue:false })
+      expect(signals[1].aborted).toBe(true)
+    }
+    if (action !== 'unmount') {
+      await wrapper.setProps({ modelValue:true })
+      await flushPromises()
+      expect(wrapper.get('input[name="phone"]').element.value).toBe('')
+      expect(wrapper.find('.form-error').exists()).toBe(false)
+      expect(wrapper.find('input[name="code"]').exists()).toBe(false)
+    }
+  })
+
+  it('resolves only the reopened phone after shared authentication Ops finish loading', async () => {
+    const pendingOps = deferred()
+    const fetch = vi.fn(url => {
+      if (url === '/api/v1/auth/ops') return pendingOps.promise
+      const standard = standardResponse(url)
+      if (standard) return Promise.resolve(standard)
+      if (url === '/api/v1/auth/phone/resolve') {
+        return Promise.resolve(response(200, { nextStep:0, requiredDocumentKinds:[] }))
+      }
+      if (url === '/api/v1/auth/code/request') return Promise.resolve(response(202, { onboardingToken:null }))
+      throw new Error('Unexpected request')
+    })
+    vi.stubGlobal('fetch', fetch)
+    const wrapper = mountView()
+    await wrapper.get('input[name="phone"]').setValue('+79991234567')
+    await wrapper.get('.auth-form').trigger('submit')
+    await flushPromises()
+    await wrapper.setProps({ modelValue:false })
+    await wrapper.setProps({ modelValue:true })
+    await wrapper.get('input[name="phone"]').setValue('+79991234568')
+    await wrapper.get('.auth-form').trigger('submit')
+    await flushPromises()
+
+    pendingOps.resolve(response(200, authenticationOps))
+    await flushPromises()
+
+    const resolutions = fetch.mock.calls.filter(([url]) => url === '/api/v1/auth/phone/resolve')
+    expect(resolutions).toHaveLength(1)
+    expect(JSON.parse(resolutions[0][1].body)).toEqual({ phone:'+79991234568' })
+    expect(wrapper.find('input[name="code"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('+79991234568')
+    expect(wrapper.find('.form-error').exists()).toBe(false)
+  })
+
   it('ignores legal documents completed after the dialog is reopened', async () => {
     const pendingAgreement = deferred()
     const pendingPersonal = deferred()
@@ -373,6 +453,34 @@ describe('PhoneAuthDialog', () => {
     await flushPromises()
 
     expect(useSession().customer.value).toEqual(currentCustomer)
+  })
+
+  it('displays both legal-kind names from the Core Ops catalogue', async () => {
+    const agreementName = 'Условия сервиса из каталога'
+    const personalDataName = 'Согласие на данные из каталога'
+    const fetch = vi.fn(url => {
+      if (url === '/api/v1/legal/ops') return Promise.resolve(response(200, {
+        ...legalOps,
+        kinds:legalOps.kinds.map(item => ({ ...item,
+          name:item.value === 2 ? agreementName : item.value === 1 ? personalDataName : item.name
+        }))
+      }))
+      const standard = standardResponse(url)
+      if (standard) return Promise.resolve(standard)
+      if (url === '/api/v1/auth/phone/resolve') {
+        return Promise.resolve(response(200, { nextStep:2, requiredDocumentKinds:[2, 1] }))
+      }
+      throw new Error('Unexpected request')
+    })
+    vi.stubGlobal('fetch', fetch)
+    const wrapper = mountView()
+    await wrapper.get('input[name="phone"]').setValue('+79991234567')
+    await wrapper.get('.auth-form').trigger('submit')
+    await flushPromises()
+
+    expect(wrapper.findAll('.consent-registration small').map(item => item.text())).toEqual([
+      agreementName + ' · версия 1', personalDataName + ' · версия 1'
+    ])
   })
 
   it('gradually changes an unknown phone to registration and sends both exact consents', async () => {
@@ -907,6 +1015,63 @@ describe('PhoneAuthDialog', () => {
     expect(wrapper.get('input[name="phone"]').element.value).toBe('+79991234567')
     expect(wrapper.get('.form-error').text()).toContain('Сервис недоступен. Пожалуйста, повторите позже.')
     expect(wrapper.get('.form-error').text()).not.toContain('неподдерживаемом формате')
+  })
+
+  it('retains the requirements when Core omits the required onboarding receipt', async () => {
+    const fetch = vi.fn(url => {
+      const standard = standardResponse(url)
+      if (standard) return Promise.resolve(standard)
+      if (url === '/api/v1/auth/phone/resolve') {
+        return Promise.resolve(response(200, { nextStep:2, requiredDocumentKinds:[2, 1] }))
+      }
+      if (url === '/api/v1/auth/code/request') return Promise.resolve(response(202, { onboardingToken:null }))
+      throw new Error('Unexpected request')
+    })
+    vi.stubGlobal('fetch', fetch)
+    const wrapper = mountView()
+    await wrapper.get('input[name="phone"]').setValue('+79991234567')
+    await wrapper.get('.auth-form').trigger('submit')
+    await flushPromises()
+    for (const checkbox of wrapper.findAll('input[type="checkbox"]')) await checkbox.setValue(true)
+    await wrapper.get('.auth-form').trigger('submit')
+    await flushPromises()
+
+    expect(wrapper.find('input[name="code"]').exists()).toBe(false)
+    expect(wrapper.findAll('input[type="checkbox"]').every(item => item.element.checked)).toBe(true)
+    expect(wrapper.get('.form-error').text()).toContain('Сервис недоступен. Пожалуйста, повторите позже.')
+  })
+
+  it('keeps code validation and a recoverable verification failure on the current form', async () => {
+    const fetch = vi.fn(url => {
+      const standard = standardResponse(url)
+      if (standard) return Promise.resolve(standard)
+      if (url === '/api/v1/auth/phone/resolve') {
+        return Promise.resolve(response(200, { nextStep:0, requiredDocumentKinds:[] }))
+      }
+      if (url === '/api/v1/auth/code/request') return Promise.resolve(response(202, { onboardingToken:null }))
+      if (url === '/api/v1/auth/code/verify') return Promise.resolve(problemResponse(400, 'validation-failed', {
+        detail:'Повторите подтверждение.', errors:{ code:['Повторите подтверждение.'] }
+      }))
+      throw new Error('Unexpected request')
+    })
+    vi.stubGlobal('fetch', fetch)
+    const wrapper = mountView()
+    await wrapper.get('input[name="phone"]').setValue('+79991234567')
+    await wrapper.get('.auth-form').trigger('submit')
+    await flushPromises()
+    await wrapper.get('.auth-form').trigger('submit')
+    await flushPromises()
+    expect(wrapper.get('.form-error').text()).toContain('Введите код подтверждения')
+    expect(wrapper.get('input[name="code"]').attributes('aria-invalid')).toBe('true')
+    expect(fetch.mock.calls.some(([url]) => url === '/api/v1/auth/code/verify')).toBe(false)
+
+    await wrapper.get('input[name="code"]').setValue('4567')
+    await wrapper.get('.auth-form').trigger('submit')
+    await flushPromises()
+    expect(wrapper.get('input[name="code"]').element.value).toBe('4567')
+    expect(wrapper.get('.form-error').text()).toContain('Повторите подтверждение.')
+    expect(wrapper.get('input[name="code"]').attributes('aria-invalid')).toBe('true')
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined()
   })
 
   it('keeps the code step, clears a wrong code, and does not offer change or resend controls', async () => {

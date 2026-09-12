@@ -260,6 +260,81 @@ describe('session store', () => {
     })
   })
 
+  it.each(['stale operation', 'aborted signal'])('skips phone resolution before Ops for a %s', async mode => {
+    const controller = new globalThis.AbortController()
+    if (mode === 'aborted signal') controller.abort()
+    const fetch = vi.fn()
+    vi.stubGlobal('fetch', fetch)
+
+    await expect(useSession().resolvePhone('+79990000003', () => mode !== 'stale operation', controller.signal))
+      .resolves.toBeNull()
+    expect(fetch).not.toHaveBeenCalled()
+  })
+
+  it.each(['stale operation', 'aborted signal'])('skips phone resolution invalidated during Ops by a %s', async mode => {
+    const controller = new globalThis.AbortController()
+    let current = true
+    let finishOps
+    const pendingOps = new Promise(resolve => { finishOps = resolve })
+    const fetch = vi.fn(url => {
+      if (url === '/api/v1/auth/ops') return pendingOps
+      return Promise.resolve(opsResponse(url))
+    })
+    vi.stubGlobal('fetch', fetch)
+    const request = useSession().resolvePhone('+79990000003', () => current, controller.signal)
+    if (mode === 'aborted signal') controller.abort()
+    else current = false
+    finishOps(response(200, authenticationOps))
+
+    await expect(request).resolves.toBeNull()
+    expect(fetch.mock.calls.map(([url]) => url)).toEqual(['/api/v1/auth/ops', '/api/v1/customers/ops'])
+  })
+
+  it.each(['stale operation', 'aborted signal'])('discards a phone response invalidated by a %s', async mode => {
+    const controller = new globalThis.AbortController()
+    let current = true
+    let finishRequest
+    const pendingRequest = new Promise(resolve => { finishRequest = resolve })
+    const fetch = withOps((url, options) => {
+      expect(url).toBe('/api/v1/auth/phone/resolve')
+      expect(options.signal).toBe(controller.signal)
+      if (mode === 'aborted signal') controller.abort()
+      else current = false
+      return pendingRequest
+    })
+    vi.stubGlobal('fetch', fetch)
+    const request = useSession().resolvePhone('+79990000003', () => current, controller.signal)
+    finishRequest(response(200, { nextStep:99, requiredDocumentKinds:[] }))
+
+    await expect(request).resolves.toBeNull()
+    expect(useSession().notice.value).toBe('')
+  })
+
+  it('passes the phone-resolution signal and suppresses its cancellation', async () => {
+    const controller = new globalThis.AbortController()
+    let signal
+    let started
+    const requestStarted = new Promise(resolve => { started = resolve })
+    const fetch = withOps((url, options) => {
+      expect(url).toBe('/api/v1/auth/phone/resolve')
+      signal = options.signal
+      return new Promise((_resolve, reject) => {
+        signal.addEventListener('abort',
+          () => reject(new globalThis.DOMException('Aborted', 'AbortError')), { once:true })
+        started()
+      })
+    })
+    vi.stubGlobal('fetch', fetch)
+    const request = useSession().resolvePhone('+79990000003', () => true, controller.signal)
+    await requestStarted
+    controller.abort()
+
+    await expect(request).resolves.toBeNull()
+    expect(signal).toBe(controller.signal)
+    expect(signal.aborted).toBe(true)
+    expect(useSession().notice.value).toBe('')
+  })
+
   it('preserves a structured client error from phone resolution', async () => {
     const fetch = withOps(url => {
       if (url === '/api/v1/auth/phone/resolve') {

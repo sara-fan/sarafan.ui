@@ -151,14 +151,17 @@ async function restoreSession() {
   }
 }
 
-async function resolvePhone(phone) {
+async function resolvePhone(phone, isCurrent = () => true, signal) {
   notice.value = ''
   try {
+    if (!isCurrent() || signal?.aborted) return null
     await ensureOps()
+    if (!isCurrent() || signal?.aborted) return null
     const result = await client.request(
       `${API_BASE_PATH}/auth/phone/resolve`,
-      jsonOptions('POST', { phone })
+      { ...jsonOptions('POST', { phone }), ...(signal ? { signal } : {}) }
     )
+    if (!isCurrent() || signal?.aborted) return null
     if (!result || !Number.isInteger(result.nextStep)
       || !authenticationOps.value.steps.some(item => item.value === result.nextStep)
       || !Array.isArray(result.requiredDocumentKinds)
@@ -166,6 +169,7 @@ async function resolvePhone(phone) {
       || new Set(result.requiredDocumentKinds).size !== result.requiredDocumentKinds.length) throw createInternalProblem('protocolError')
     return result
   } catch (error) {
+    if (!isCurrent() || signal?.aborted) return null
     throw isServiceUnavailableProblem(error) ? asServiceUnavailableProblem(error) : error
   }
 }
