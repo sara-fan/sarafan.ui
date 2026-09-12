@@ -56,9 +56,9 @@ function legalDocument(url) {
   }
 }
 
-function mountView(attachTo) {
+function mountView(attachTo, modelValue = true) {
   return mount(PhoneAuthDialog, {
-    props: { modelValue:true },
+    props: { modelValue },
     ...(attachTo ? { attachTo } : {}),
     global: {
       plugins: [createSarafanVuetify()],
@@ -173,6 +173,27 @@ describe('PhoneAuthDialog', () => {
     expect(session.notice.value).toBe('')
     expect(session.customer.value).toBeNull()
     expect(fetch).toHaveBeenCalledTimes(requestCount)
+  })
+
+  it('preserves restoration failure on the first opening of an initially hidden dialog', async () => {
+    const fetch = vi.fn(url => {
+      const standard = standardResponse(url)
+      if (standard) return Promise.resolve(standard)
+      if (url === '/api/v1/auth/refresh') return Promise.resolve(problemResponse(503, 'service-unavailable'))
+      throw new Error('Unexpected request')
+    })
+    vi.stubGlobal('fetch', fetch)
+    const wrapper = mountView(undefined, false)
+    await useSession().restoreSession()
+    await wrapper.setProps({ modelValue:true })
+    await flushPromises()
+    expect(wrapper.get('.form-error').text()).toContain('Сервис недоступен. Пожалуйста, повторите позже.')
+    expect(useSession().notice.value).toBe('Сервис недоступен. Пожалуйста, повторите позже.')
+
+    await wrapper.setProps({ modelValue:false })
+    await wrapper.setProps({ modelValue:true })
+    expect(wrapper.find('.form-error').exists()).toBe(false)
+    expect(useSession().notice.value).toBe('')
   })
 
   it('focuses the confirmation code field when the code step opens', async () => {
@@ -1099,12 +1120,15 @@ describe('PhoneAuthDialog', () => {
     expect(wrapper.get('.form-error').text()).not.toContain('неподдерживаемом формате')
   })
 
-  it('retains the requirements when Core omits the required onboarding receipt', async () => {
+  it.each([
+    { flow:'agreement', nextStep:1, requiredDocumentKinds:[2] },
+    { flow:'registration', nextStep:2, requiredDocumentKinds:[2, 1] }
+  ])('retains the $flow requirements when Core omits the required onboarding receipt', async scenario => {
     const fetch = vi.fn(url => {
       const standard = standardResponse(url)
       if (standard) return Promise.resolve(standard)
       if (url === '/api/v1/auth/phone/resolve') {
-        return Promise.resolve(response(200, { nextStep:2, requiredDocumentKinds:[2, 1] }))
+        return Promise.resolve(response(200, { nextStep:scenario.nextStep, requiredDocumentKinds:scenario.requiredDocumentKinds }))
       }
       if (url === '/api/v1/auth/code/request') return Promise.resolve(response(202, { onboardingToken:null }))
       throw new Error('Unexpected request')

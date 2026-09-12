@@ -247,9 +247,11 @@ async function logout() {
   }
 }
 
-async function authorizedRequest(path, options = {}, policy = {}) {
+async function authorizedRequest(path, options = {}, policy = {}, validateResponse) {
   try {
-    return await client.request(path, options, { ...policy, authorize:true })
+    const result = await client.request(path, options, { ...policy, authorize:true })
+    if (validateResponse) validateResponse(result)
+    return result
   } catch (error) {
     if (isServiceUnavailableProblem(error)) {
       const problem = asServiceUnavailableProblem(error)
@@ -263,9 +265,12 @@ async function authorizedRequest(path, options = {}, policy = {}) {
 async function updateProfile(profile) {
   const updatedCustomer = await authorizedRequest(
     `${API_BASE_PATH}/customers/me`,
-    jsonOptions('PUT', profile)
+    jsonOptions('PUT', profile),
+    {},
+    value => {
+      if (!isValidActiveCustomerState(value)) throw createInternalProblem('protocolError')
+    }
   )
-  if (!isValidActiveCustomerState(updatedCustomer)) throw createInternalProblem('protocolError')
   customer.value = updatedCustomer
   return customer.value
 }

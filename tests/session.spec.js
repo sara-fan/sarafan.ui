@@ -387,7 +387,7 @@ describe('session store', () => {
     expect(session.customer.value.profile.firstName).toBe('Анна')
   })
 
-  it.each([2, 'preliminary'])('rejects a profile update with an invalid customer state %j', async state => {
+  it.each([2, 'preliminary', undefined, null, 99, -1, 0.5])('rejects a profile update with an invalid customer state %j', async state => {
     const originalCustomer = {
       id: 1,
       phone: '+79990000001',
@@ -413,9 +413,10 @@ describe('session store', () => {
     const session = useSession()
     await session.verifyCode({ phone: originalCustomer.phone, code: '1111' })
     await expect(session.updateProfile({ firstName: 'Анна' })).rejects.toMatchObject({
-      type: INTERNAL_PROBLEM_TYPES.protocolError
+      type: INTERNAL_PROBLEM_TYPES.serviceUnavailable
     })
-    expect(session.customer.value).toEqual(originalCustomer)
+    expect(session.customer.value).toBeNull()
+    expect(session.notice.value).toBe('Сервис недоступен. Пожалуйста, повторите позже.')
   })
 
   it('refreshes once and retries an authorized request after a 401', async () => {

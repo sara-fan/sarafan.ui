@@ -43,6 +43,7 @@ const codeField = ref(null)
 let consentRetryFingerprint = ''
 let consentRetryKey = ''
 let operationGeneration = 0
+let hasOpened = props.modelValue
 let resolveAbortController = null
 let codeRequestAbortController = null
 let verifyAbortController = null
@@ -118,7 +119,8 @@ watch(() => props.modelValue, open => {
   invalidateOperation()
   busy.value = false
   if (open) {
-    session.clearNotice()
+    if (hasOpened) session.clearNotice()
+    hasOpened = true
     phone.value = ''
     resetAfterPhone()
   }
@@ -316,6 +318,7 @@ async function submitRequirements() {
   try {
     const receipt = await requestCodeForOperation(phone.value, consentPayload(), operation)
     if (!currentOperation(operation) || !receipt) return
+    // Core requires receipts for both agreement and registration; only the Code flow permits null.
     if (typeof receipt.onboardingToken !== 'string') throw createInternalProblem('protocolError')
     onboardingToken.value = receipt.onboardingToken
     step.value = 'code'
