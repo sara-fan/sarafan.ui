@@ -9,12 +9,15 @@ import { createApiClient } from '../api/client.js'
 import { isIsoDate, isRfc3339DateTime } from '../api/validation.js'
 import {
   CORE_PROBLEM_TYPES,
+  INTERNAL_PROBLEM_TYPES,
   ProblemError,
   asServiceUnavailableProblem,
   createInternalProblem,
-  isServiceUnavailableProblem
+  isServiceUnavailableProblem,
+  suppressProblem
 } from '../errors/problem.js'
 import { EVENTS } from '../observability/catalogue.js'
+import { markHandled } from '../observability/deduplication.js'
 import { uiLogger } from '../observability/logger.js'
 import { problemAttributes, problemContext } from '../observability/problem-reporting.js'
 
@@ -27,6 +30,7 @@ const refreshInvalidations = new WeakMap()
 let identityGeneration = 0
 let refreshPromise = null
 let refreshPromiseGeneration = null
+let refreshAbortController = null
 let opsPromise = null
 const authenticationOps = ref(null)
 const customerOps = ref(null)
@@ -54,13 +58,25 @@ function isValidActiveCustomer(value) {
     && (profile.passportIssueDate === null || isIsoDate(profile.passportIssueDate))
 }
 
-function applySession(session) {
+function invalidateIdentity() {
+  identityGeneration++
+  refreshAbortController?.abort()
+  refreshAbortController = null
+}
+
+function staleRefreshProblem(cause) {
+  const problem = createInternalProblem('operationCancelled', { cause })
+  suppressProblem(problem, { operation:'session.refresh.stale' })
+  return markHandled(problem)
+}
+
+function applySession(session, replaceIdentity = false) {
   if (!session?.customer || !customerOps.value
     || typeof session.accessToken !== 'string' || !session.accessToken || session.accessToken.trim() !== session.accessToken
     || !isRfc3339DateTime(session.expiresAt) || !isValidActiveCustomer(session.customer)) {
     throw createInternalProblem('protocolError')
   }
-  if (customer.value?.id !== session.customer.id || customer.value?.phone !== session.customer.phone) identityGeneration++
+  if (replaceIdentity || customer.value?.id !== session.customer.id || customer.value?.phone !== session.customer.phone) invalidateIdentity()
   accessToken.value = session.accessToken
   customer.value = session.customer
   restoreProblem.value = null
@@ -109,7 +125,7 @@ function clearNotice() {
 }
 
 function clearSession(message = '') {
-  identityGeneration++
+  invalidateIdentity()
   accessToken.value = ''
   customer.value = null
   notice.value = message
@@ -135,15 +151,27 @@ const client = createApiClient({
 async function refreshSession(operationTrace) {
   if (!refreshPromise || refreshPromiseGeneration !== identityGeneration) {
     const generation = identityGeneration
+    refreshAbortController?.abort()
+    const controller = new globalThis.AbortController()
+    refreshAbortController = controller
     const pendingRefresh = ensureOps()
-      .then(() => client.request(
-        `${API_BASE_PATH}/auth/refresh`,
-        { method: 'POST' },
-        { operationTrace }
-      ))
-      .then(session => generation === identityGeneration ? applySession(session) : null)
+      .then(() => {
+        if (generation !== identityGeneration || controller.signal.aborted) throw staleRefreshProblem()
+        return client.request(
+          `${API_BASE_PATH}/auth/refresh`,
+          { method:'POST', signal:controller.signal },
+          { operationTrace }
+        )
+      })
+      .then(session => {
+        if (generation !== identityGeneration || controller.signal.aborted) throw staleRefreshProblem()
+        return applySession(session)
+      })
       .catch((error) => {
-        if (generation !== identityGeneration) return null
+        if (generation !== identityGeneration || controller.signal.aborted) {
+          if (error?.type === INTERNAL_PROBLEM_TYPES.operationCancelled) throw error
+          throw staleRefreshProblem(error)
+        }
         if (isServiceUnavailableProblem(error)) {
           const problem = asServiceUnavailableProblem(error)
           clearSession(SERVICE_UNAVAILABLE_MESSAGE)
@@ -159,6 +187,7 @@ async function refreshSession(operationTrace) {
           refreshPromise = null
           refreshPromiseGeneration = null
         }
+        if (refreshAbortController === controller) refreshAbortController = null
       })
     refreshPromise = pendingRefresh
     refreshPromiseGeneration = generation
@@ -173,6 +202,7 @@ async function restoreSession() {
   try {
     await refreshSession()
   } catch (error) {
+    if (error?.type === INTERNAL_PROBLEM_TYPES.operationCancelled) return
     if (!(error instanceof ProblemError) || error.type !== CORE_PROBLEM_TYPES.invalidRefreshToken) {
       const problem = createInternalProblem('sessionRestoreUnavailable', { cause: error })
       restoreProblem.value = problem
@@ -254,7 +284,7 @@ async function verifyCode(payload, isCurrent = () => true, signal) {
       { ...jsonOptions('POST', payload), ...(signal ? { signal } : {}) }
     )
     if (!isCurrent() || signal?.aborted) return null
-    return applySession(session)
+    return applySession(session, true)
   } catch (error) {
     if ((!isCurrent() || signal?.aborted) && isAbortError(error)) return null
     if (isServiceUnavailableProblem(error)) {
@@ -311,28 +341,43 @@ async function updateProfile(profile) {
 }
 
 async function uploadPhoto(file) {
+  const generation = identityGeneration
   const body = new globalThis.FormData()
   body.append('file', file)
   await authorizedRequest(
     `${API_BASE_PATH}/customers/me/photo`,
-    { method: 'PUT', body }
+    { method:'PUT', body },
+    {},
+    undefined,
+    () => generation === identityGeneration
   )
-  customer.value = { ...customer.value, hasPhoto: true }
+  if (generation !== identityGeneration || !customer.value) return false
+  customer.value = { ...customer.value, hasPhoto:true }
+  return true
 }
 
 async function deletePhoto() {
+  const generation = identityGeneration
   await authorizedRequest(
     `${API_BASE_PATH}/customers/me/photo`,
-    { method: 'DELETE' }
+    { method:'DELETE' },
+    {},
+    undefined,
+    () => generation === identityGeneration
   )
-  customer.value = { ...customer.value, hasPhoto: false }
+  if (generation !== identityGeneration || !customer.value) return false
+  customer.value = { ...customer.value, hasPhoto:false }
+  return true
 }
 
 async function getPhoto() {
+  const generation = identityGeneration
   return authorizedRequest(
     `${API_BASE_PATH}/customers/me/photo`,
     {},
-    { responseType: 'blob' }
+    { responseType:'blob' },
+    undefined,
+    () => generation === identityGeneration
   )
 }
 
@@ -366,6 +411,7 @@ export function resetSessionForTests() {
   notice.value = ''
   refreshPromise = null
   refreshPromiseGeneration = null
+  refreshAbortController = null
   opsPromise = null
   authenticationOps.value = null
   customerOps.value = null

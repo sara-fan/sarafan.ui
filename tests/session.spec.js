@@ -262,16 +262,17 @@ describe('session store', () => {
     expect(session.notice.value).toBe('')
   })
 
-  it.each(['success', 'failure'])('discards a late refresh %s after a newer identity is authenticated', async outcome => {
+  it.each(['success', 'failure'])('aborts and rejects a late refresh %s after a newer identity is authenticated', async outcome => {
     const original = customerDto({ id:4, phone:'+79990000004', profile:{ phone:'+79990000004' } })
     const replacement = customerDto({ id:5, phone:'+79990000005', profile:{ phone:'+79990000005' } })
     let completeRefresh
     let markRefreshStarted
+    let refreshSignal
     const refreshStarted = new Promise(resolve => { markRefreshStarted = resolve })
     const pendingRefresh = new Promise(resolve => { completeRefresh = resolve })
     let verifications = 0
     let profileAttempts = 0
-    const fetch = withOps(url => {
+    const fetch = withOps((url, options = {}) => {
       if (url === '/api/v1/auth/code/verify') return Promise.resolve(response(200, {
         accessToken:verifications++ ? 'replacement-token' : 'original-token',
         expiresAt:'2026-08-30T00:15:00Z',
@@ -279,11 +280,10 @@ describe('session store', () => {
       }))
       if (url === '/api/v1/customers/me') {
         profileAttempts++
-        return Promise.resolve(profileAttempts === 1
-          ? problemResponse(401, 'invalid-access-token')
-          : response(200, replacement))
+        return Promise.resolve(problemResponse(401, 'invalid-access-token'))
       }
       if (url === '/api/v1/auth/refresh') {
+        refreshSignal = options.signal
         markRefreshStarted()
         return pendingRefresh
       }
@@ -296,6 +296,7 @@ describe('session store', () => {
     const update = session.updateProfile({ firstName:'Old request' })
     await refreshStarted
     await session.verifyCode({ phone:replacement.phone, code:'2222' })
+    expect(refreshSignal.aborted).toBe(true)
     completeRefresh(outcome === 'success'
       ? response(200, {
           accessToken:'stale-token', expiresAt:'2026-08-30T00:30:00Z', customer:original
@@ -303,9 +304,41 @@ describe('session store', () => {
       : problemResponse(503, 'service-unavailable'))
 
     await expect(update).resolves.toBeNull()
+    expect(profileAttempts).toBe(1)
     expect(session.customer.value).toEqual(replacement)
     expect(session.restoreProblem.value).toBeNull()
     expect(session.notice.value).toBe('')
+    expect(loggerMocks.log.mock.calls.some(([event, attributes]) =>
+      event === EVENTS.operationSuppressed && attributes['operation.name'] === 'session.refresh.stale'
+    )).toBe(true)
+  })
+
+  it('does not issue a refresh that becomes stale while Ops are loading', async () => {
+    let finishAuthenticationOps
+    let finishCustomerOps
+    const pendingAuthenticationOps = new Promise(resolve => { finishAuthenticationOps = resolve })
+    const pendingCustomerOps = new Promise(resolve => { finishCustomerOps = resolve })
+    const fetch = vi.fn(url => {
+      if (url === '/api/v1/auth/ops') return pendingAuthenticationOps
+      if (url === '/api/v1/customers/ops') return pendingCustomerOps
+      if (url === '/api/v1/auth/logout') return Promise.resolve(response(204))
+      if (url === '/api/v1/auth/refresh') throw new Error('stale refresh must not be issued')
+      throw new Error(`Unexpected request: ${url}`)
+    })
+    vi.stubGlobal('fetch', fetch)
+
+    const session = useSession()
+    const restoration = session.restoreSession()
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(2))
+    await session.logout()
+    finishAuthenticationOps(response(200, authenticationOps))
+    finishCustomerOps(response(200, customerOps))
+    await restoration
+
+    expect(fetch.mock.calls.some(([url]) => url === '/api/v1/auth/refresh')).toBe(false)
+    expect(session.customer.value).toBeNull()
+    expect(session.restoreProblem.value).toBeNull()
+    expect(session.restoring.value).toBe(false)
   })
 
   it.each([
@@ -828,6 +861,48 @@ describe('session store', () => {
     })
     expect(session.customer.value).toBeNull()
     expect(session.notice.value).toBe('Сервис недоступен. Пожалуйста, повторите позже.')
+  })
+
+
+  it.each(['upload', 'read', 'delete'])('discards a late photo %s result after an identity change', async operation => {
+    const original = customerDto({ id:6, phone:'+79990000006', hasPhoto:operation !== 'upload',
+      profile:{ phone:'+79990000006' } })
+    const replacement = customerDto({ id:7, phone:'+79990000007', hasPhoto:operation === 'delete',
+      profile:{ phone:'+79990000007' } })
+    let finishPhoto
+    let markPhotoStarted
+    const photoStarted = new Promise(resolve => { markPhotoStarted = resolve })
+    const pendingPhoto = new Promise(resolve => { finishPhoto = resolve })
+    let verifications = 0
+    const fetch = withOps(url => {
+      if (url === '/api/v1/auth/code/verify') return Promise.resolve(response(200, {
+        accessToken:verifications++ ? 'replacement-token' : 'original-token',
+        expiresAt:'2026-08-30T00:15:00Z',
+        customer:verifications === 1 ? original : replacement
+      }))
+      if (url === '/api/v1/customers/me/photo') {
+        markPhotoStarted()
+        return pendingPhoto
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    })
+    vi.stubGlobal('fetch', fetch)
+
+    const session = useSession()
+    await session.verifyCode({ phone:original.phone, code:'1111' })
+    const file = new globalThis.File(['photo'], 'photo.png', { type:'image/png' })
+    const request = operation === 'upload' ? session.uploadPhoto(file)
+      : operation === 'delete' ? session.deletePhoto()
+        : session.getPhoto()
+    await photoStarted
+    await session.verifyCode({ phone:replacement.phone, code:'2222' })
+    finishPhoto(operation === 'read'
+      ? response(200, new globalThis.Blob(['old-photo']), 'image/png')
+      : response(204))
+
+    await expect(request).resolves.toBe(operation === 'read' ? null : false)
+    expect(session.customer.value).toEqual(replacement)
+    expect(session.notice.value).toBe('')
   })
 
   it('uploads, refreshes, reads, and deletes a profile photo', async () => {

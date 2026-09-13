@@ -30,6 +30,12 @@ export const { INTERNAL_PROBLEM_TYPES, createInternalProblem, normalizeProblem, 
       title: 'Сервис недоступен',
       detail: 'Сервис недоступен. Пожалуйста, повторите позже.'
     },
+    operationCancelled: {
+      suffix: 'operation-cancelled',
+      code: 'ui_operation_cancelled',
+      title: 'Операция отменена',
+      detail: 'Операция отменена.'
+    },
     photoPreviewUnavailable: {
       suffix: 'photo-preview-unavailable',
       code: 'ui_photo_preview_unavailable',
