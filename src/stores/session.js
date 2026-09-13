@@ -312,7 +312,9 @@ async function authorizedRequest(path, options = {}, policy = {}, validateRespon
     return result
   } catch (error) {
     // Preserve the refresh failure that invalidated this identity; discard failures from older identities.
-    if (!isCurrent() && refreshInvalidations.get(error) !== identityGeneration) return null
+    const refreshInvalidationGeneration = refreshInvalidations.get(error)
+    if (!isCurrent() && refreshInvalidationGeneration !== identityGeneration) return null
+    if (refreshInvalidationGeneration === identityGeneration) throw error
     if (isServiceUnavailableProblem(error)) {
       const problem = asServiceUnavailableProblem(error)
       clearSession(SERVICE_UNAVAILABLE_MESSAGE)

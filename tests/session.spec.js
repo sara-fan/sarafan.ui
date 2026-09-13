@@ -585,6 +585,53 @@ describe('session store', () => {
     expect(session.notice.value).toBe('Сервис недоступен. Пожалуйста, повторите позже.')
   })
 
+  it('propagates one shared refresh failure to every concurrent authorized caller', async () => {
+    const original = customerDto()
+    let finishRefresh
+    let markRefreshStarted
+    const refreshStarted = new Promise(resolve => { markRefreshStarted = resolve })
+    const pendingRefresh = new Promise(resolve => { finishRefresh = resolve })
+    let refreshCount = 0
+    const fetch = withOps(url => {
+      if (url === '/api/v1/auth/code/verify') return Promise.resolve(response(200, {
+        accessToken:'token', expiresAt:'2026-08-30T00:15:00Z', customer:original
+      }))
+      if (url === '/api/v1/customers/me' || url === '/api/v1/customers/me/photo') {
+        return Promise.resolve(problemResponse(401, 'invalid-access-token'))
+      }
+      if (url === '/api/v1/auth/refresh') {
+        refreshCount++
+        markRefreshStarted()
+        return pendingRefresh
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    })
+    vi.stubGlobal('fetch', fetch)
+
+    const session = useSession()
+    await session.verifyCode({ phone:original.phone, code:'1111' })
+    const resultsPromise = Promise.allSettled([
+      session.updateProfile({ firstName:'Anna' }),
+      session.getPhoto()
+    ])
+    await refreshStarted
+    await vi.waitFor(() => expect(fetch.mock.calls.filter(([url]) =>
+      url === '/api/v1/customers/me' || url === '/api/v1/customers/me/photo'
+    )).toHaveLength(2))
+    finishRefresh(problemResponse(503, 'service-unavailable'))
+
+    const results = await resultsPromise
+    expect(refreshCount).toBe(1)
+    expect(results.map(result => result.status)).toEqual(['rejected', 'rejected'])
+    expect(results.map(result => result.reason.type)).toEqual([
+      INTERNAL_PROBLEM_TYPES.serviceUnavailable,
+      INTERNAL_PROBLEM_TYPES.serviceUnavailable
+    ])
+    expect(results[0].reason).toBe(results[1].reason)
+    expect(session.customer.value).toBeNull()
+    expect(session.notice.value).not.toBe('')
+  })
+
   it('preserves a structured client error from phone resolution', async () => {
     const fetch = withOps(url => {
       if (url === '/api/v1/auth/phone/resolve') {
