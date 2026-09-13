@@ -240,6 +240,74 @@ describe('session store', () => {
     expect(session.restoreProblem.value).toMatchObject({ type:INTERNAL_PROBLEM_TYPES.sessionRestoreUnavailable })
   })
 
+  it('clears a previous restoration problem when verification applies a valid session', async () => {
+    const verifiedCustomer = customerDto({ id:4, phone:'+79990000004', profile:{ phone:'+79990000004' } })
+    const fetch = withOps(url => {
+      if (url === '/api/v1/auth/refresh') return Promise.resolve(problemResponse(503, 'service-unavailable'))
+      if (url === '/api/v1/auth/code/verify') return Promise.resolve(response(200, {
+        accessToken:'verified-token', expiresAt:'2026-08-30T00:15:00Z', customer:verifiedCustomer
+      }))
+      throw new Error(`Unexpected request: ${url}`)
+    })
+    vi.stubGlobal('fetch', fetch)
+
+    const session = useSession()
+    await session.restoreSession()
+    expect(session.restoreProblem.value).toMatchObject({ type:INTERNAL_PROBLEM_TYPES.sessionRestoreUnavailable })
+
+    await session.verifyCode({ phone:verifiedCustomer.phone, code:'1111' })
+
+    expect(session.customer.value).toEqual(verifiedCustomer)
+    expect(session.restoreProblem.value).toBeNull()
+    expect(session.notice.value).toBe('')
+  })
+
+  it.each(['success', 'failure'])('discards a late refresh %s after a newer identity is authenticated', async outcome => {
+    const original = customerDto({ id:4, phone:'+79990000004', profile:{ phone:'+79990000004' } })
+    const replacement = customerDto({ id:5, phone:'+79990000005', profile:{ phone:'+79990000005' } })
+    let completeRefresh
+    let markRefreshStarted
+    const refreshStarted = new Promise(resolve => { markRefreshStarted = resolve })
+    const pendingRefresh = new Promise(resolve => { completeRefresh = resolve })
+    let verifications = 0
+    let profileAttempts = 0
+    const fetch = withOps(url => {
+      if (url === '/api/v1/auth/code/verify') return Promise.resolve(response(200, {
+        accessToken:verifications++ ? 'replacement-token' : 'original-token',
+        expiresAt:'2026-08-30T00:15:00Z',
+        customer:verifications === 1 ? original : replacement
+      }))
+      if (url === '/api/v1/customers/me') {
+        profileAttempts++
+        return Promise.resolve(profileAttempts === 1
+          ? problemResponse(401, 'invalid-access-token')
+          : response(200, replacement))
+      }
+      if (url === '/api/v1/auth/refresh') {
+        markRefreshStarted()
+        return pendingRefresh
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    })
+    vi.stubGlobal('fetch', fetch)
+
+    const session = useSession()
+    await session.verifyCode({ phone:original.phone, code:'1111' })
+    const update = session.updateProfile({ firstName:'Old request' })
+    await refreshStarted
+    await session.verifyCode({ phone:replacement.phone, code:'2222' })
+    completeRefresh(outcome === 'success'
+      ? response(200, {
+          accessToken:'stale-token', expiresAt:'2026-08-30T00:30:00Z', customer:original
+        })
+      : problemResponse(503, 'service-unavailable'))
+
+    await expect(update).resolves.toBeNull()
+    expect(session.customer.value).toEqual(replacement)
+    expect(session.restoreProblem.value).toBeNull()
+    expect(session.notice.value).toBe('')
+  })
+
   it.each([
     null,
     {},

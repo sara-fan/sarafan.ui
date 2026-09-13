@@ -26,6 +26,7 @@ const notice = ref('')
 const refreshInvalidations = new WeakMap()
 let identityGeneration = 0
 let refreshPromise = null
+let refreshPromiseGeneration = null
 let opsPromise = null
 const authenticationOps = ref(null)
 const customerOps = ref(null)
@@ -62,6 +63,7 @@ function applySession(session) {
   if (customer.value?.id !== session.customer.id || customer.value?.phone !== session.customer.phone) identityGeneration++
   accessToken.value = session.accessToken
   customer.value = session.customer
+  restoreProblem.value = null
   notice.value = ''
   return session.customer
 }
@@ -131,15 +133,17 @@ const client = createApiClient({
 })
 
 async function refreshSession(operationTrace) {
-  if (!refreshPromise) {
-    refreshPromise = ensureOps()
+  if (!refreshPromise || refreshPromiseGeneration !== identityGeneration) {
+    const generation = identityGeneration
+    const pendingRefresh = ensureOps()
       .then(() => client.request(
         `${API_BASE_PATH}/auth/refresh`,
         { method: 'POST' },
         { operationTrace }
       ))
-      .then(applySession)
+      .then(session => generation === identityGeneration ? applySession(session) : null)
       .catch((error) => {
+        if (generation !== identityGeneration) return null
         if (isServiceUnavailableProblem(error)) {
           const problem = asServiceUnavailableProblem(error)
           clearSession(SERVICE_UNAVAILABLE_MESSAGE)
@@ -151,8 +155,13 @@ async function refreshSession(operationTrace) {
         throw error
       })
       .finally(() => {
-        refreshPromise = null
+        if (refreshPromise === pendingRefresh) {
+          refreshPromise = null
+          refreshPromiseGeneration = null
+        }
       })
+    refreshPromise = pendingRefresh
+    refreshPromiseGeneration = generation
   }
 
   return refreshPromise
@@ -356,6 +365,7 @@ export function resetSessionForTests() {
   restoreProblem.value = null
   notice.value = ''
   refreshPromise = null
+  refreshPromiseGeneration = null
   opsPromise = null
   authenticationOps.value = null
   customerOps.value = null
