@@ -6,14 +6,18 @@ import { readonly, ref } from 'vue'
 
 import { API_BASE_PATH } from '../api.js'
 import { createApiClient } from '../api/client.js'
+import { isIsoDate, isRfc3339DateTime } from '../api/validation.js'
 import {
   CORE_PROBLEM_TYPES,
   INTERNAL_PROBLEM_TYPES,
   ProblemError,
+  asServiceUnavailableProblem,
   createInternalProblem,
-  isServiceUnavailableProblem
+  isServiceUnavailableProblem,
+  suppressProblem
 } from '../errors/problem.js'
 import { EVENTS } from '../observability/catalogue.js'
+import { markHandled } from '../observability/deduplication.js'
 import { uiLogger } from '../observability/logger.js'
 import { problemAttributes, problemContext } from '../observability/problem-reporting.js'
 
@@ -22,23 +26,106 @@ const customer = ref(null)
 const restoring = ref(true)
 const restoreProblem = ref(null)
 const notice = ref('')
+const refreshInvalidations = new WeakMap()
+let identityGeneration = 0
 let refreshPromise = null
+let refreshPromiseGeneration = null
+let refreshAbortController = null
+let opsPromise = null
+const authenticationOps = ref(null)
+const customerOps = ref(null)
 const SERVICE_UNAVAILABLE_MESSAGE = 'Сервис недоступен. Пожалуйста, повторите позже.'
+const REQUIRED_AUTHENTICATION_ALIASES = ['code', 'agreement', 'registration']
+const REQUIRED_CUSTOMER_ALIASES = ['preliminary', 'complete', 'disabled']
 
-function serviceUnavailableProblem(problem) {
-  return problem?.type === INTERNAL_PROBLEM_TYPES.serviceUnavailable
-    ? problem
-    : createInternalProblem('serviceUnavailable', { cause:problem })
+const PROFILE_TEXT_LIMITS = Object.freeze({
+  lastName:100, firstName:100, patronymic:100, email:254, passportSeries:32,
+  passportNumber:32, passportIssuedBy:500, inn:12, postalCode:20, city:150, address:500
+})
+
+function isValidActiveCustomer(value) {
+  const disabledState = customerOps.value?.states.find(item => item.routeAlias === 'disabled')?.value
+  const profile = value?.profile
+  return !!value && !!customerOps.value
+    && Number.isInteger(value.id) && value.id > 0 && value.id <= 2147483647
+    && typeof value.phone === 'string' && /^\+7[0-9]{10}$/u.test(value.phone)
+    && Number.isInteger(value.state) && customerOps.value.states.some(item => item.value === value.state)
+    && value.state !== disabledState && typeof value.hasPhoto === 'boolean'
+    && isRfc3339DateTime(value.createdAt) && isRfc3339DateTime(value.updatedAt)
+    && !!profile && typeof profile === 'object' && !Array.isArray(profile) && profile.phone === value.phone
+    && Object.entries(PROFILE_TEXT_LIMITS).every(([field, limit]) => profile[field] === null
+      || typeof profile[field] === 'string' && profile[field].length <= limit)
+    && (profile.passportIssueDate === null || isIsoDate(profile.passportIssueDate))
 }
 
-function applySession(session) {
+function invalidateIdentity() {
+  identityGeneration++
+  refreshAbortController?.abort()
+  refreshAbortController = null
+}
+
+function staleRefreshProblem(cause) {
+  const problem = createInternalProblem('operationCancelled', { cause })
+  suppressProblem(problem, { operation:'session.refresh.stale' })
+  return markHandled(problem)
+}
+
+function applySession(session, replaceIdentity = false) {
+  if (!session?.customer || !customerOps.value
+    || typeof session.accessToken !== 'string' || !session.accessToken || session.accessToken.trim() !== session.accessToken
+    || !isRfc3339DateTime(session.expiresAt) || !isValidActiveCustomer(session.customer)) {
+    throw createInternalProblem('protocolError')
+  }
+  if (replaceIdentity || customer.value?.id !== session.customer.id || customer.value?.phone !== session.customer.phone) invalidateIdentity()
   accessToken.value = session.accessToken
   customer.value = session.customer
+  restoreProblem.value = null
   notice.value = ''
   return session.customer
 }
 
+function validateEnumOps(value, property, requiredAliases) {
+  const items = value?.[property]
+  if (!Array.isArray(items) || items.length === 0) throw createInternalProblem('protocolError')
+  const values = new Set()
+  const aliases = new Set()
+  for (const item of items) {
+    if (!item || !Number.isInteger(item.value) || item.value < 0 || typeof item.name !== 'string' || !item.name.trim()
+      || typeof item.routeAlias !== 'string' || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(item.routeAlias)
+      || values.has(item.value) || aliases.has(item.routeAlias)) throw createInternalProblem('protocolError')
+    values.add(item.value)
+    aliases.add(item.routeAlias)
+  }
+  if (requiredAliases.some(alias => !aliases.has(alias))) throw createInternalProblem('protocolError')
+  return { [property]:items.map(item => ({ value:item.value, name:item.name, routeAlias:item.routeAlias })) }
+}
+
+async function ensureOps() {
+  if (authenticationOps.value && customerOps.value) return
+  if (!opsPromise) {
+    opsPromise = Promise.all([
+      client.request(`${API_BASE_PATH}/auth/ops`),
+      client.request(`${API_BASE_PATH}/customers/ops`)
+    ]).then(([auth, customers]) => {
+      const validatedAuthentication = validateEnumOps(auth, 'steps', REQUIRED_AUTHENTICATION_ALIASES)
+      const validatedCustomers = validateEnumOps(customers, 'states', REQUIRED_CUSTOMER_ALIASES)
+      authenticationOps.value = validatedAuthentication
+      customerOps.value = validatedCustomers
+    }).finally(() => { opsPromise = null })
+  }
+  await opsPromise
+}
+
+function flowValue(alias) {
+  return authenticationOps.value?.steps.find(item => item.routeAlias === alias)?.value
+}
+
+function clearNotice() {
+  notice.value = ''
+}
+
 function clearSession(message = '') {
+  invalidateIdentity()
   accessToken.value = ''
   customer.value = null
   notice.value = message
@@ -52,31 +139,58 @@ function jsonOptions(method, body) {
   }
 }
 
+function isAbortError(error) {
+  return error?.name === 'AbortError'
+}
+
 const client = createApiClient({
   getAccessToken: () => accessToken.value,
   refreshSession: operationTrace => refreshSession(operationTrace)
 })
 
 async function refreshSession(operationTrace) {
-  if (!refreshPromise) {
-    refreshPromise = client.request(
-      `${API_BASE_PATH}/auth/refresh`,
-      { method: 'POST' },
-      { operationTrace }
-    )
+  if (!refreshPromise || refreshPromiseGeneration !== identityGeneration) {
+    const generation = identityGeneration
+    refreshAbortController?.abort()
+    const controller = new globalThis.AbortController()
+    refreshAbortController = controller
+    const pendingRefresh = ensureOps()
+      .then(() => {
+        if (generation !== identityGeneration || controller.signal.aborted) throw staleRefreshProblem()
+        return client.request(
+          `${API_BASE_PATH}/auth/refresh`,
+          { method:'POST', signal:controller.signal },
+          { operationTrace }
+        )
+      })
+      .then(session => {
+        if (generation !== identityGeneration || controller.signal.aborted) throw staleRefreshProblem()
+        return applySession(session)
+      })
       .catch((error) => {
+        if (generation !== identityGeneration || controller.signal.aborted) {
+          if (error?.type === INTERNAL_PROBLEM_TYPES.operationCancelled) throw error
+          throw staleRefreshProblem(error)
+        }
         if (isServiceUnavailableProblem(error)) {
-          const problem = serviceUnavailableProblem(error)
+          const problem = asServiceUnavailableProblem(error)
           clearSession(SERVICE_UNAVAILABLE_MESSAGE)
+          refreshInvalidations.set(problem, identityGeneration)
           throw problem
         }
         clearSession()
+        refreshInvalidations.set(error, identityGeneration)
         throw error
       })
-      .then(applySession)
       .finally(() => {
-        refreshPromise = null
+        if (refreshPromise === pendingRefresh) {
+          refreshPromise = null
+          refreshPromiseGeneration = null
+        }
+        if (refreshAbortController === controller) refreshAbortController = null
       })
+    refreshPromise = pendingRefresh
+    refreshPromiseGeneration = generation
   }
 
   return refreshPromise
@@ -88,6 +202,7 @@ async function restoreSession() {
   try {
     await refreshSession()
   } catch (error) {
+    if (error?.type === INTERNAL_PROBLEM_TYPES.operationCancelled) return
     if (!(error instanceof ProblemError) || error.type !== CORE_PROBLEM_TYPES.invalidRefreshToken) {
       const problem = createInternalProblem('sessionRestoreUnavailable', { cause: error })
       restoreProblem.value = problem
@@ -102,15 +217,47 @@ async function restoreSession() {
   }
 }
 
-async function requestCode(phone, purpose, consents = {}) {
+async function resolvePhone(phone, isCurrent = () => true, signal) {
   notice.value = ''
   try {
-    return await client.request(
-      `${API_BASE_PATH}/auth/code/request`,
-      jsonOptions('POST', { phone, purpose, ...consents })
+    if (!isCurrent() || signal?.aborted) return null
+    await ensureOps()
+    if (!isCurrent() || signal?.aborted) return null
+    const result = await client.request(
+      `${API_BASE_PATH}/auth/phone/resolve`,
+      { ...jsonOptions('POST', { phone }), ...(signal ? { signal } : {}) }
     )
+    if (!isCurrent() || signal?.aborted) return null
+    if (!result || !Number.isInteger(result.nextStep)
+      || !authenticationOps.value.steps.some(item => item.value === result.nextStep)
+      || !Array.isArray(result.requiredDocumentKinds)
+      || result.requiredDocumentKinds.some(kind => !Number.isInteger(kind) || kind < 0)
+      || new Set(result.requiredDocumentKinds).size !== result.requiredDocumentKinds.length) throw createInternalProblem('protocolError')
+    return result
   } catch (error) {
-    throw isServiceUnavailableProblem(error) ? serviceUnavailableProblem(error) : error
+    if (!isCurrent() || signal?.aborted) return null
+    throw isServiceUnavailableProblem(error) ? asServiceUnavailableProblem(error) : error
+  }
+}
+
+async function requestCode(phone, consents = {}, isCurrent = () => true, signal) {
+  notice.value = ''
+  try {
+    if (!isCurrent() || signal?.aborted) return null
+    const receipt = await client.request(
+      `${API_BASE_PATH}/auth/code/request`,
+      { ...jsonOptions('POST', { phone, ...consents }), ...(signal ? { signal } : {}) }
+    )
+    if (!isCurrent() || signal?.aborted) return null
+    const token = receipt?.onboardingToken
+    if (!receipt || !Object.hasOwn(receipt, 'onboardingToken')
+      || token !== null && (typeof token !== 'string' || token.length < 32 || token.length > 128)) {
+      throw createInternalProblem('protocolError')
+    }
+    return { onboardingToken:token }
+  } catch (error) {
+    if (!isCurrent() || signal?.aborted) return null
+    throw isServiceUnavailableProblem(error) ? asServiceUnavailableProblem(error) : error
   }
 }
 
@@ -126,23 +273,27 @@ async function consentRequest(path, options = {}, authorize = false, responseTyp
   return client.request(path, options, { authorize, responseType })
 }
 
-async function verifyCode(payload) {
+async function verifyCode(payload, isCurrent = () => true, signal) {
   notice.value = ''
-  let session
   try {
-    session = await client.request(
+    if (!isCurrent() || signal?.aborted) return null
+    await ensureOps()
+    if (!isCurrent() || signal?.aborted) return null
+    const session = await client.request(
       `${API_BASE_PATH}/auth/code/verify`,
-      jsonOptions('POST', payload)
+      { ...jsonOptions('POST', payload), ...(signal ? { signal } : {}) }
     )
+    if (!isCurrent() || signal?.aborted) return null
+    return applySession(session, true)
   } catch (error) {
+    if ((!isCurrent() || signal?.aborted) && isAbortError(error)) return null
     if (isServiceUnavailableProblem(error)) {
-      const problem = serviceUnavailableProblem(error)
-      clearSession(SERVICE_UNAVAILABLE_MESSAGE)
+      const problem = asServiceUnavailableProblem(error)
+      if (isCurrent()) clearSession(SERVICE_UNAVAILABLE_MESSAGE)
       throw problem
     }
     throw error
   }
-  return applySession(session)
 }
 
 async function logout() {
@@ -153,12 +304,19 @@ async function logout() {
   }
 }
 
-async function authorizedRequest(path, options = {}, policy = {}) {
+async function authorizedRequest(path, options = {}, policy = {}, validateResponse, isCurrent = () => true) {
   try {
-    return await client.request(path, options, { ...policy, authorize:true })
+    const result = await client.request(path, options, { ...policy, authorize:true })
+    if (!isCurrent()) return null
+    if (validateResponse) validateResponse(result)
+    return result
   } catch (error) {
+    // Preserve the refresh failure that invalidated this identity; discard failures from older identities.
+    const refreshInvalidationGeneration = refreshInvalidations.get(error)
+    if (!isCurrent() && refreshInvalidationGeneration !== identityGeneration) return null
+    if (refreshInvalidationGeneration === identityGeneration) throw error
     if (isServiceUnavailableProblem(error)) {
-      const problem = serviceUnavailableProblem(error)
+      const problem = asServiceUnavailableProblem(error)
       clearSession(SERVICE_UNAVAILABLE_MESSAGE)
       throw problem
     }
@@ -167,36 +325,61 @@ async function authorizedRequest(path, options = {}, policy = {}) {
 }
 
 async function updateProfile(profile) {
-  customer.value = await authorizedRequest(
+  if (!customer.value) throw createInternalProblem('invalidInput')
+  const { id, phone } = customer.value
+  const generation = identityGeneration
+  const updatedCustomer = await authorizedRequest(
     `${API_BASE_PATH}/customers/me`,
-    jsonOptions('PUT', profile)
+    jsonOptions('PUT', profile),
+    {},
+    value => {
+      if (!isValidActiveCustomer(value) || value.id !== id || value.phone !== phone) throw createInternalProblem('protocolError')
+    },
+    () => generation === identityGeneration
   )
+  if (!updatedCustomer || generation !== identityGeneration) return null
+  customer.value = updatedCustomer
   return customer.value
 }
 
 async function uploadPhoto(file) {
+  const generation = identityGeneration
   const body = new globalThis.FormData()
   body.append('file', file)
   await authorizedRequest(
     `${API_BASE_PATH}/customers/me/photo`,
-    { method: 'PUT', body }
+    { method:'PUT', body },
+    {},
+    undefined,
+    () => generation === identityGeneration
   )
-  customer.value = { ...customer.value, hasPhoto: true }
+  if (generation !== identityGeneration || !customer.value) return false
+  customer.value = { ...customer.value, hasPhoto:true }
+  return true
 }
 
 async function deletePhoto() {
+  const generation = identityGeneration
   await authorizedRequest(
     `${API_BASE_PATH}/customers/me/photo`,
-    { method: 'DELETE' }
+    { method:'DELETE' },
+    {},
+    undefined,
+    () => generation === identityGeneration
   )
-  customer.value = { ...customer.value, hasPhoto: false }
+  if (generation !== identityGeneration || !customer.value) return false
+  customer.value = { ...customer.value, hasPhoto:false }
+  return true
 }
 
 async function getPhoto() {
+  const generation = identityGeneration
   return authorizedRequest(
     `${API_BASE_PATH}/customers/me/photo`,
     {},
-    { responseType: 'blob' }
+    { responseType:'blob' },
+    undefined,
+    () => generation === identityGeneration
   )
 }
 
@@ -206,9 +389,13 @@ export function useSession() {
     restoring: readonly(restoring),
     restoreProblem: readonly(restoreProblem),
     notice: readonly(notice),
+    clearNotice,
     restoreSession,
     getStatus,
     consentRequest,
+    ensureOps,
+    flowValue,
+    resolvePhone,
     requestCode,
     verifyCode,
     logout,
@@ -225,4 +412,9 @@ export function resetSessionForTests() {
   restoreProblem.value = null
   notice.value = ''
   refreshPromise = null
+  refreshPromiseGeneration = null
+  refreshAbortController = null
+  opsPromise = null
+  authenticationOps.value = null
+  customerOps.value = null
 }

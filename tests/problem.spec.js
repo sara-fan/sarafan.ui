@@ -7,6 +7,7 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   INTERNAL_PROBLEM_TYPES,
   ProblemError,
+  asServiceUnavailableProblem,
   createInternalProblem,
   isServiceUnavailableProblem,
   normalizeProblem,
@@ -122,5 +123,18 @@ describe('shared problem model', () => {
     expect(isServiceUnavailableProblem({ status:503 })).toBe(false)
     expect(isServiceUnavailableProblem({ status:409 })).toBe(false)
     expect(isServiceUnavailableProblem(null)).toBe(false)
+  })
+
+  it('converts service failures through the shared safe authentication problem', () => {
+    const network = createInternalProblem('networkUnavailable')
+    const converted = asServiceUnavailableProblem(network)
+    const existing = createInternalProblem('serviceUnavailable')
+
+    expect(converted).toMatchObject({
+      type:INTERNAL_PROBLEM_TYPES.serviceUnavailable,
+      detail:'Сервис недоступен. Пожалуйста, повторите позже.'
+    })
+    expect(converted.cause).toBe(network)
+    expect(asServiceUnavailableProblem(existing)).toBe(existing)
   })
 })

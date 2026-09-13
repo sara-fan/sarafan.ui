@@ -22,9 +22,12 @@ const API_ROUTE_TEMPLATES = new Set([
   '/api/v1/consents/me/withdrawal-request',
   '/api/v1/auth/code/request',
   '/api/v1/auth/code/verify',
+  '/api/v1/auth/ops',
+  '/api/v1/auth/phone/resolve',
   '/api/v1/auth/logout',
   '/api/v1/auth/refresh',
   '/api/v1/customers/me',
+  '/api/v1/customers/ops',
   '/api/v1/customers/me/photo',
   '/api/v1/status/status'
 ])

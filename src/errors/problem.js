@@ -8,10 +8,15 @@ import { uiLogger } from '../observability/logger.js'
 export { PROBLEM_TYPE_ROOT, ProblemError } from '@sara-fan/ui-shared/problems'
 
 export const CORE_PROBLEM_TYPES = Object.freeze({
+  authenticationRequirementsChanged: `${PROBLEM_TYPE_ROOT}authentication-requirements-changed`,
+  consentVersionChanged: `${PROBLEM_TYPE_ROOT}consent-version-changed`,
   customerNotFound: `${PROBLEM_TYPE_ROOT}customer-not-found`,
+  invalidAuthRequest: `${PROBLEM_TYPE_ROOT}invalid-auth-request`,
   invalidAccessToken: `${PROBLEM_TYPE_ROOT}invalid-access-token`,
+  invalidCode: `${PROBLEM_TYPE_ROOT}invalid-code`,
   invalidRefreshToken: `${PROBLEM_TYPE_ROOT}invalid-refresh-token`,
   loginFailed: `${PROBLEM_TYPE_ROOT}login-failed`,
+  onboardingConsentExpired: `${PROBLEM_TYPE_ROOT}onboarding-consent-expired`,
   validationFailed: `${PROBLEM_TYPE_ROOT}validation-failed`
 })
 
@@ -24,6 +29,12 @@ export const { INTERNAL_PROBLEM_TYPES, createInternalProblem, normalizeProblem, 
       code: 'ui_service_unavailable',
       title: 'Сервис недоступен',
       detail: 'Сервис недоступен. Пожалуйста, повторите позже.'
+    },
+    operationCancelled: {
+      suffix: 'operation-cancelled',
+      code: 'ui_operation_cancelled',
+      title: 'Операция отменена',
+      detail: 'Операция отменена.'
     },
     photoPreviewUnavailable: {
       suffix: 'photo-preview-unavailable',
@@ -40,4 +51,11 @@ export function isServiceUnavailableProblem(problem) {
     || problem?.type === INTERNAL_PROBLEM_TYPES.serviceUnavailable
     || (problem instanceof ProblemError && problem.type.startsWith(PROBLEM_TYPE_ROOT)
       && Number.isInteger(problem.status) && problem.status >= 500)
+}
+
+export function asServiceUnavailableProblem(value) {
+  const problem = normalizeProblem(value)
+  return problem.type === INTERNAL_PROBLEM_TYPES.serviceUnavailable
+    ? problem
+    : createInternalProblem('serviceUnavailable', { cause:problem })
 }

@@ -77,6 +77,6 @@ The template is opt-in, is not the default PR body, and has no CI enforcement. A
 
 ## Customer consent
 
-The coordinated implementation follows [spec v1.16 §4.18](https://github.com/sara-fan/sarafan.spec/issues/30). [Core API and rollout guide](https://github.com/sara-fan/sarafan.core/blob/v007/docs/customer-consents.md); [contract and text templates](https://github.com/sara-fan/sarafan.spec/blob/consents/spec/Consent%20implementation%20contract.md). An Administrator creates each immutable legal document once with its effective Moscow date. Legal-document kinds are numeric API values; Russian names and readable hash aliases come from Core `/api/v1/legal/ops`, with no compiled client fallback. Registration can process personal data only after the required documents become effective; no consent is silently granted to existing customers.
+The coordinated implementation follows spec v1.17 §§4.3/4.18. Core resolves the combined phone-first authentication flow; the UI loads authentication, customer-state, and legal-document Ops metadata and renders only the current documents required for that phone. The short-lived receipt remains in memory through code verification, and requirement changes restart the flow while retaining only the phone. An Administrator creates each immutable legal document once with its effective Moscow date; authentication never silently grants personal-data processing permission.
 
 For a separate local Core instance, set `SARAFAN_API_TARGET=http://127.0.0.1:25180` before starting Vite. This changes only the development proxy.

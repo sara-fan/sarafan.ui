@@ -228,10 +228,6 @@ a { color: var(--sarafan-secondary); }
 .profile-data-grid dt { color: var(--sarafan-muted); font-size: 12px; }
 .profile-data-grid dd { margin: 4px 0 0; color: var(--sarafan-ink); overflow-wrap: anywhere; font-size: 14px; font-weight: 650; line-height: 20px; }
 .auth-dialog__brand { display: block; width: 48px; height: 48px; flex: 0 0 48px; border: 1px solid var(--sarafan-line); border-radius: 50%; object-fit: cover; box-shadow: 0 8px 22px rgba(11, 38, 87, 0.12); }
-.auth-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin: var(--sarafan-space-16) 0 var(--sarafan-space-24); padding: 4px; border-radius: var(--sarafan-radius-12); background: var(--sarafan-accent-soft); }
-.auth-tabs button { min-height: 42px; border: 0; border-radius: 9px; background: transparent; color: var(--sarafan-muted); cursor: pointer; font-weight: 700; transition: background-color 160ms ease, box-shadow 160ms ease, color 160ms ease; }
-.auth-tabs button.auth-tab--active { background: var(--sarafan-paper); color: var(--sarafan-secondary); box-shadow: 0 5px 16px rgba(11, 38, 87, 0.1); }
-.auth-tabs button:disabled { cursor: wait; }
 .auth-form { display: grid; gap: var(--sarafan-space-16); }
 .auth-form > p { margin: 0; }
 

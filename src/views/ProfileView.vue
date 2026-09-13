@@ -59,7 +59,7 @@ async function loadPhoto() {
   if (!customer.value?.hasPhoto) return
   try {
     const photo = await getPhoto()
-    if (loadVersion !== photoLoadVersion) return
+    if (!photo || loadVersion !== photoLoadVersion) return
     photoUrl.value = globalThis.URL.createObjectURL(photo)
   } catch (value) {
     if (loadVersion === photoLoadVersion) problem.value = createInternalProblem('photoPreviewUnavailable', { cause: value })
@@ -85,7 +85,8 @@ async function save() {
   saved.value = false
   try {
     await consents.requirePersonalData()
-    await updateProfile(Object.fromEntries(fields.map(field => [field, form[field] || null])))
+    const updatedCustomer = await updateProfile(Object.fromEntries(fields.map(field => [field, form[field] || null])))
+    if (!updatedCustomer) return
     saved.value = true
     editing.value = false
   } catch (value) {
@@ -110,8 +111,7 @@ async function selectPhoto(event) {
   problem.value = null
   try {
     await consents.requirePersonalData()
-    await uploadPhoto(file)
-    await loadPhoto()
+    if (await uploadPhoto(file)) await loadPhoto()
   } catch (value) {
     captureProblem(value, 'Не удалось загрузить фотографию')
   } finally {
@@ -123,8 +123,7 @@ async function removePhoto() {
   busy.value = true
   problem.value = null
   try {
-    await deletePhoto()
-    releasePhoto()
+    if (await deletePhoto()) releasePhoto()
   } catch (value) {
     captureProblem(value, 'Не удалось удалить фотографию')
   } finally {

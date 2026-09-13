@@ -4,10 +4,13 @@
 
 import { computed, readonly, ref } from 'vue'
 import { useSession } from './session.js'
+import { isIsoDate, isRfc3339DateTime } from '../api/validation.js'
 import { createInternalProblem } from '../errors/problem.js'
 import { LEGAL_DOCUMENT_KIND, isDocumentId } from '../consentFormatting.js'
 
 const json = (method, body) => ({ method, headers:{ 'Content-Type':'application/json' }, body:JSON.stringify(body) })
+const SHA256_PATTERN = /^[0-9a-f]{64}$/u
+const validText = (value, maximum) => typeof value === 'string' && value.trim() && value.length <= maximum
 export function createConsentStore(session) {
   const cookies = ref(null)
   const mine = ref(null)
@@ -64,6 +67,22 @@ export function createConsentStore(session) {
   function routeAlias(kind) { return ops.value?.kinds.find(item => item.value === kind)?.routeAlias }
   function cookieCategoryName(category) { return ops.value?.cookieCategories.find(item => item.value === category)?.name }
   function requiredCookieCategories() { return (ops.value?.cookieCategories || []).filter(item => item.required).map(item => item.value) }
+  function validateDocument(value, kind) {
+    if (!value || !isDocumentId(value.id) || value.kind !== kind
+      || !Number.isInteger(kind) || !kindName(kind)
+      || value.locale !== 'ru' || !validText(value.title, 200) || !validText(value.displayVersion, 64)
+      || typeof value.html !== 'string' || typeof value.sourceHash !== 'string' || !SHA256_PATTERN.test(value.sourceHash)
+      || typeof value.contentHash !== 'string' || !SHA256_PATTERN.test(value.contentHash)
+      || !validText(value.rendererVersion, 64) || !isRfc3339DateTime(value.effectiveAt) || !isRfc3339DateTime(value.createdAt)
+      || !isIsoDate(value.effectiveLocalDate) || value.effectiveTimeZone !== 'Europe/Moscow'
+      || value.createdBy !== null || value.canDelete !== null || !Array.isArray(value.cookieCategories)
+      || value.cookieCategories.some(category => !Number.isInteger(category) || !cookieCategoryName(category))
+      || (kind === LEGAL_DOCUMENT_KIND.COOKIE_CONSENT
+        && requiredCookieCategories().some(category => !value.cookieCategories.includes(category)))
+      || (kind !== LEGAL_DOCUMENT_KIND.COOKIE_CONSENT && value.cookieCategories.length)) {
+      throw createInternalProblem('protocolError')
+    }
+  }
   function validWithdrawalRequest(value, identity) {
     return value === null || (value && value.customerId === identity
       && Number.isFinite(Date.parse(value.requestedAt)) && typeof value.processed === 'boolean')
@@ -72,17 +91,22 @@ export function createConsentStore(session) {
     await ensureOps()
     if (!Number.isInteger(kind) || !ops.value.kinds.some(item => item.value === kind)) throw createInternalProblem('invalidInput')
     const result = await session.consentRequest(`/api/v1/legal/current/${kind}`)
-    if (!result || !Number.isFinite(Date.parse(result.serverNow)) || (result.document && (!isDocumentId(result.document.id) || result.document.kind !== kind))) throw createInternalProblem('protocolError')
-    if (result.document && (!Array.isArray(result.document.cookieCategories)
-      || result.document.cookieCategories.some(category => !Number.isInteger(category) || !cookieCategoryName(category))
-      || (kind === LEGAL_DOCUMENT_KIND.COOKIE_CONSENT
-        && requiredCookieCategories().some(category => !result.document.cookieCategories.includes(category)))
-      || (kind !== LEGAL_DOCUMENT_KIND.COOKIE_CONSENT && result.document.cookieCategories.length))) throw createInternalProblem('protocolError')
+    if (!result || !isRfc3339DateTime(result.serverNow)
+      || result.nextChangeAt !== null && (!isRfc3339DateTime(result.nextChangeAt)
+        || Date.parse(result.nextChangeAt) <= Date.parse(result.serverNow))) throw createInternalProblem('protocolError')
+    if (result.document !== null) validateDocument(result.document, kind)
+    if (result.document && Date.parse(result.document.effectiveAt) > Date.parse(result.serverNow)) {
+      throw createInternalProblem('protocolError')
+    }
     return result
   }
   async function read(id) {
     if (!isDocumentId(id)) throw createInternalProblem('invalidInput')
-    return session.consentRequest(`/api/v1/legal/documents/${id}`)
+    await ensureOps()
+    const value = await session.consentRequest(`/api/v1/legal/documents/${id}`)
+    validateDocument(value, value?.kind)
+    if (value.id.toLowerCase() !== id.toLowerCase()) throw createInternalProblem('protocolError')
+    return value
   }
   async function source(id) {
     if (!isDocumentId(id)) throw createInternalProblem('invalidInput')
