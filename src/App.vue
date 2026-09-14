@@ -21,7 +21,6 @@ const router = useRouter()
 const { customer, logout, restoreProblem, restoreSession, restoring } = useSession()
 let sessionStarted = false
 const authOpen = ref(false)
-const consentUnavailable = ref(false)
 
 const customerRoute = computed(() => route.meta.access === ACCESS.CUSTOMER)
 const consentRoute = computed(() => route.meta.access === ACCESS.LIMITED)
@@ -44,10 +43,6 @@ async function signOut() {
   }
   await router.replace({ name: 'home' })
 }
-
-watch(consentRoute, active => {
-  if (active) consentUnavailable.value = false
-})
 
 watch(
   [customerRoute, restoring, restoreProblem, customer],
@@ -76,10 +71,8 @@ onMounted(async () => {
     <div class="app-content">
       <ConsentCenter
         v-if="!consentRoute"
-        @service-unavailable="consentUnavailable = $event"
       />
       <div
-        v-show="!consentUnavailable"
         class="app-route-content"
       >
         <div

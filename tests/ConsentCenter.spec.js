@@ -124,12 +124,12 @@ it('recovers a stale catalogue failure and retries a new failure without a custo
     h.store.opsProblem.value = null
   })
   await mountCenter(); await flushPromises()
-  expect(wrapper.find('.service-unavailable-page').exists()).toBe(true)
+  expect(wrapper.find('.consent-recovery-notice').exists()).toBe(true)
+  expect(wrapper.find('.service-unavailable-page').exists()).toBe(false)
   await click('Повторить')
   expect(h.store.loadOps).toHaveBeenCalledTimes(2)
   expect(h.store.loadMine).not.toHaveBeenCalled()
-  expect(wrapper.find('.service-unavailable-page').exists()).toBe(false)
-  expect(wrapper.emitted('service-unavailable').at(-1)).toEqual([false])
+  expect(wrapper.find('.consent-recovery-notice').exists()).toBe(false)
 })
 it('does not load customer history after catalogue loading outlives the notice', async () => {
   h.session.customer.value = { id:7 }
@@ -140,48 +140,23 @@ it('does not load customer history after catalogue loading outlives the notice',
   pending.resolve({ kinds }); await flushPromises()
   expect(h.store.loadMine).not.toHaveBeenCalled()
 })
-it('loads the legal catalogue before authenticated notice history', async () => {
+it('loads only the legal catalogue for an authenticated notice', async () => {
   h.session.customer.value = { id:7 }
   const pending = deferred()
   h.store.loadOps.mockReturnValueOnce(pending.promise)
   await mountCenter(); await nextTick()
   expect(h.store.loadMine).not.toHaveBeenCalled()
   pending.resolve({ kinds }); await flushPromises()
-  expect(h.store.loadMine).toHaveBeenCalledTimes(1)
+  expect(h.store.loadMine).not.toHaveBeenCalled()
 })
-it('retries a failed personal-history load from the notice outage page', async () => {
+it('does not present a consent-history failure outside consent routes', async () => {
   h.session.customer.value = { id:7 }
-  h.store.loadMine.mockRejectedValueOnce(denied())
-  await mountCenter(); await flushPromises()
-  expect(wrapper.find('.service-unavailable-page').exists()).toBe(true)
-  await click('Повторить')
-  expect(h.store.loadMine).toHaveBeenCalledTimes(2)
-  expect(wrapper.find('.service-unavailable-page').exists()).toBe(false)
-})
-it('presents and retries a late personal-history failure from the notice controller', async () => {
-  h.session.customer.value = { id:7 }
-  await mountCenter(); await flushPromises()
-  h.store.loadMine.mockClear()
   h.store.personalProblem.value = denied()
-  h.store.loadMine.mockImplementation(async () => { h.store.personalProblem.value = null })
-  await nextTick()
-  expect(wrapper.find('.service-unavailable-page').exists()).toBe(true)
-  await click('Повторить')
-  expect(h.store.loadMine).toHaveBeenCalledTimes(1)
+  await mountCenter()
+  await flushPromises()
+  expect(h.store.loadMine).not.toHaveBeenCalled()
   expect(wrapper.find('.service-unavailable-page').exists()).toBe(false)
-})
-it('routes the inline notice retry through personal-history recovery', async () => {
-  h.session.customer.value = { id:7 }
-  await mountCenter(); await flushPromises()
-  h.store.loadMine.mockClear()
-  h.store.personalProblem.value = createInternalProblem('invalidInput', { detail:'История временно недоступна.' })
-  h.store.loadMine.mockImplementation(async () => { h.store.personalProblem.value = null })
-  await nextTick()
-  expect(wrapper.find('.consent-recovery-notice').text()).toContain('История временно недоступна.')
-  expect(wrapper.find('.consent-recovery-notice .ui-alert').attributes('role')).toBe('alert')
-  await click('Повторить')
-  expect(h.store.loadMine).toHaveBeenCalledTimes(1)
-  expect(wrapper.text()).not.toContain('История временно недоступна.')
+  expect(wrapper.find('.consent-recovery-notice').exists()).toBe(false)
 })
 
 it('renews personal consent and shows the latest manual request', async () => {

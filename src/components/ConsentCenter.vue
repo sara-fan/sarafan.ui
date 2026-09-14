@@ -33,8 +33,6 @@ const props = defineProps({
     validator: value => ['auto', 'personal'].includes(value)
   }
 })
-const emit = defineEmits(['service-unavailable'])
-
 const session = useSession()
 const store = useConsents()
 const route = useRoute()
@@ -82,10 +80,14 @@ const legalDocumentHasH1 = computed(() => {
   } catch { return false }
 })
 const prioritizedProblem = values => values.find(isServiceUnavailableProblem) || values.find(Boolean) || null
-const activeProblem = computed(() => props.mode === 'legal' ? problem.value
-  : prioritizedProblem([problem.value, personalProblem.value, opsProblem.value]))
+const activeProblem = computed(() => {
+  if (props.mode === 'legal') return problem.value
+  if (props.mode === 'notice') return prioritizedProblem([problem.value, opsProblem.value])
+  return prioritizedProblem([problem.value, personalProblem.value, opsProblem.value])
+})
 const message = computed(() => activeProblem.value ? presentProblem(activeProblem.value) : '')
-const serviceUnavailable = computed(() => isServiceUnavailableProblem(activeProblem.value))
+const serviceUnavailable = computed(() => props.mode !== 'notice'
+  && isServiceUnavailableProblem(activeProblem.value))
 const label = value => CONSENT_STATUSES[value] || value
 function requireDocument(value, detail) {
   if (!value) throw createInternalProblem('invalidInput', { detail })
@@ -271,11 +273,7 @@ async function requestWithdrawal() {
 }
 
 async function refreshNotice(isCurrent = alwaysCurrent) {
-  await perform(async ownsOperation => {
-    await store.loadOps()
-    if (!ownsOperation()) return
-    if (session.customer.value) await store.loadMine()
-  }, undefined, isCurrent)
+  await perform(() => store.loadOps(), undefined, isCurrent)
 }
 
 async function refreshConsentPage(isCurrent = alwaysCurrent, preserveChoice = false) {
@@ -375,10 +373,6 @@ watch(mine, async value => {
   personalRefreshPending = isCurrent
   await drainQueuedRefreshes()
 })
-
-watch(serviceUnavailable, unavailable => {
-  if (props.mode === 'notice') emit('service-unavailable', unavailable)
-}, { immediate:true })
 
 watch(() => route.params.documentRef, async (target, _previous, cleanup) => {
   if (props.mode !== 'legal') return

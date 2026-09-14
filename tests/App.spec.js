@@ -32,8 +32,7 @@ async function mountApp(path = '/') {
       stubs: {
         ConsentCenter: {
           name: 'ConsentCenter',
-          emits: ['service-unavailable'],
-          template: '<button class="consent-unavailable-stub" hidden @click="$emit(\'service-unavailable\', true)" />'
+          template: '<section class="consent-notice-stub" />'
         },
         PhoneAuthDialog: {
           name: 'PhoneAuthDialog',
@@ -57,9 +56,7 @@ describe('App routing and privacy gates', () => {
       restoreSession: vi.fn().mockResolvedValue()
     })
     Object.assign(h.consents, {
-      serviceAllowed: ref(false),
-      ops: ref({ kinds: legalKinds }),
-      loadCookies: vi.fn().mockResolvedValue()
+      ops: ref({ kinds: legalKinds })
     })
     Object.assign(h.orders, {
       orders:ref([{ id:17, orderNumber:'12345678-1', status:0, productName:'Nike Air Max 90 Essential', storeName:'nike.com', imageUrl:null, sellerPrice:null, quantity:1, createdAt:'2026-09-14T10:00:00Z' }]),
@@ -87,18 +84,14 @@ describe('App routing and privacy gates', () => {
     expect(wrapper.find('.phone-auth-stub').exists()).toBe(true)
   })
 
-  it('leaves initial cookie loading to the consent controller before restoring a ready session', async () => {
+  it('restores the session without legacy consent gating', async () => {
     const order = []
-    h.consents.serviceAllowed.value = true
-    h.consents.loadCookies.mockImplementation(async () => { order.push('cookies') })
     h.session.restoreSession.mockImplementation(async () => { order.push('session') })
     await mountApp()
     await flushPromises()
     expect(order).toEqual(['session'])
-    expect(h.consents.loadCookies).not.toHaveBeenCalled()
-    h.consents.serviceAllowed.value = false
-    await flushPromises()
-    expect(order).toEqual(['session'])
+    expect(h.consents).not.toHaveProperty('serviceAllowed')
+    expect(h.consents).not.toHaveProperty('loadCookies')
   })
 
   it('does not mount a protected route until its session is restored', async () => {
@@ -109,7 +102,6 @@ describe('App routing and privacy gates', () => {
     expect(wrapper.text()).not.toContain('Nike Air Max 90 Essential')
     expect(wrapper.findAll('.site-footer')).toHaveLength(1)
 
-    h.consents.serviceAllowed.value = true
     h.session.restoring.value = true
     await flushPromises()
     expect(wrapper.text()).toContain('Восстанавливаем сессию')
@@ -129,14 +121,12 @@ describe('App routing and privacy gates', () => {
   })
 
   it('redirects an unauthenticated protected bookmark to the public home route', async () => {
-    h.consents.serviceAllowed.value = true
     const { router, wrapper } = await mountApp('/profile')
     await vi.waitFor(() => expect(router.currentRoute.value.name).toBe('home'))
     expect(wrapper.text()).toContain('Закажите товар — остальное сделаем мы')
   })
 
   it('returns home from a protected restore failure and closes authentication via v-model', async () => {
-    h.consents.serviceAllowed.value = true
     h.session.restoreProblem.value = createInternalProblem('sessionRestoreUnavailable')
     const { router, wrapper } = await mountApp('/orders')
     await flushPromises()
@@ -151,7 +141,6 @@ describe('App routing and privacy gates', () => {
   })
 
   it('keeps recoverable restore failures non-blocking on public routes', async () => {
-    h.consents.serviceAllowed.value = true
     h.session.restoreProblem.value = createInternalProblem('sessionRestoreUnavailable')
     const { router, wrapper } = await mountApp()
     await flushPromises()
@@ -164,23 +153,25 @@ describe('App routing and privacy gates', () => {
     expect(wrapper.find('.session-notice').exists()).toBe(false)
   })
 
-  it('lets the consent controller replace ordinary content with its outage page', async () => {
+  it('keeps public and customer route content independent of the notice controller', async () => {
     const { router, wrapper } = await mountApp()
     await flushPromises()
     expect(wrapper.text()).toContain('Закажите товар — остальное сделаем мы')
     const productLink = wrapper.get('input')
     await productLink.setValue('https://shop.example/product')
-    await wrapper.get('.consent-unavailable-stub').trigger('click')
-    expect(wrapper.get('.app-route-content').attributes('style')).toContain('display: none')
-    expect(wrapper.text()).toContain('Закажите товар — остальное сделаем мы')
-    expect(productLink.element.value).toBe('https://shop.example/product')
-    wrapper.findComponent({ name:'ConsentCenter' }).vm.$emit('service-unavailable', false)
-    await flushPromises()
+    expect(wrapper.find('.consent-notice-stub').exists()).toBe(true)
     expect(wrapper.get('.app-route-content').attributes('style') || '').not.toContain('display: none')
     expect(productLink.element.value).toBe('https://shop.example/product')
+
+    h.session.customer.value = { id:7, phone:'+79990000007', hasPhoto:false, profile:{} }
+    await router.push('/orders')
+    await flushPromises()
+    expect(wrapper.text()).toContain('Nike Air Max 90 Essential')
+    expect(wrapper.find('.consent-notice-stub').exists()).toBe(true)
+    expect(wrapper.get('.app-route-content').attributes('style') || '').not.toContain('display: none')
+
     await router.push('/consents/cookies'); await flushPromises()
     expect(router.currentRoute.value.name).toBe('consents')
-    expect(wrapper.find('.consent-unavailable-stub').exists()).toBe(true)
     for (const [path, name] of [
       ['/consents', 'consents'],
       ['/consents/personal-data', 'personal-consents'],
@@ -194,7 +185,6 @@ describe('App routing and privacy gates', () => {
   })
 
   it('opens reusable phone authentication and exposes one inert Support entry', async () => {
-    h.consents.serviceAllowed.value = true
     const { wrapper } = await mountApp()
     await flushPromises()
     expect(wrapper.findAll('.global-support')).toHaveLength(1)
@@ -206,7 +196,6 @@ describe('App routing and privacy gates', () => {
   })
 
   it('logs out from the shared header and returns home even when server logout fails', async () => {
-    h.consents.serviceAllowed.value = true
     h.session.customer.value = { id: 8, phone: '+79990000008', hasPhoto: false, profile: {} }
     h.session.logout.mockRejectedValueOnce(createInternalProblem('invalidInput'))
     const { router, wrapper } = await mountApp('/profile')
