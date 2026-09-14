@@ -9,7 +9,7 @@ defineProps({
   section: {
     type: String,
     default: 'auto',
-    validator: value => ['auto', 'cookies', 'personal'].includes(value)
+    validator: value => ['auto', 'personal'].includes(value)
   }
 })
 </script>

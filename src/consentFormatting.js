@@ -6,7 +6,6 @@ import { h } from 'vue'
 import { createInternalProblem } from './errors/problem.js'
 
 export const LEGAL_DOCUMENT_KIND = Object.freeze({
-  COOKIE_CONSENT:0,
   PERSONAL_DATA_CONSENT:1,
   USER_AGREEMENT:2,
   ORDER_RULES:3,

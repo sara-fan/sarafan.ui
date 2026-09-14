@@ -23,7 +23,6 @@ const customerOps = { states:[
   { value:2, name:'Отключённый', routeAlias:'disabled' }
 ] }
 const legalOps = { kinds:[
-  { value:0, name:'Согласие на использование куки', routeAlias:'cookie-consent' },
   { value:1, name:'Согласие на обработку персональных данных', routeAlias:'personal-data-consent' },
   { value:2, name:'Пользовательское соглашение', routeAlias:'user-agreement' },
   { value:3, name:'Правила заказа товаров', routeAlias:'order-rules' },
@@ -606,7 +605,7 @@ describe('PhoneAuthDialog', () => {
       termsAccepted:true,
       termsDocumentId:documentIds[2],
       personalDataConsent:{
-        documentId:documentIds[1], contentHash:'1'.repeat(64), decision:'grant', categories:[]
+        documentId:documentIds[1], contentHash:'1'.repeat(64), decision:'grant'
       }
     })
     expect(requestBody).not.toHaveProperty('purpose')

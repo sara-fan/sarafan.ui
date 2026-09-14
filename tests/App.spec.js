@@ -80,11 +80,11 @@ describe('App routing and privacy gates', () => {
     expect(wrapper.text()).toContain('Закажите товар — остальное сделаем мы')
     expect(wrapper.find('.route-gate').exists()).toBe(false)
     expect(wrapper.findAll('.site-footer')).toHaveLength(1)
-    expect(h.session.restoreSession).not.toHaveBeenCalled()
-    expect(wrapper.get('.app-header__login').attributes('disabled')).toBeDefined()
+    expect(h.session.restoreSession).toHaveBeenCalledOnce()
+    expect(wrapper.get('.app-header__login').attributes('disabled')).toBeUndefined()
     wrapper.findComponent(AppHeader).vm.$emit('authenticate')
     await flushPromises()
-    expect(wrapper.find('.phone-auth-stub').exists()).toBe(false)
+    expect(wrapper.find('.phone-auth-stub').exists()).toBe(true)
   })
 
   it('leaves initial cookie loading to the consent controller before restoring a ready session', async () => {
@@ -101,10 +101,11 @@ describe('App routing and privacy gates', () => {
     expect(order).toEqual(['session'])
   })
 
-  it('does not mount a protected route until cookie and session gates pass', async () => {
+  it('does not mount a protected route until its session is restored', async () => {
+    h.session.restoring.value = true
     const { wrapper } = await mountApp('/orders')
     await flushPromises()
-    expect(wrapper.text()).toContain('Настройте обязательные куки')
+    expect(wrapper.text()).toContain('Восстанавливаем сессию')
     expect(wrapper.text()).not.toContain('Nike Air Max 90 Essential')
     expect(wrapper.findAll('.site-footer')).toHaveLength(1)
 
@@ -178,7 +179,7 @@ describe('App routing and privacy gates', () => {
     expect(wrapper.get('.app-route-content').attributes('style') || '').not.toContain('display: none')
     expect(productLink.element.value).toBe('https://shop.example/product')
     await router.push('/consents/cookies'); await flushPromises()
-    expect(router.currentRoute.value.name).toBe('cookie-consents')
+    expect(router.currentRoute.value.name).toBe('consents')
     expect(wrapper.find('.consent-unavailable-stub').exists()).toBe(true)
     for (const [path, name] of [
       ['/consents', 'consents'],

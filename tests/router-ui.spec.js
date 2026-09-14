@@ -60,7 +60,7 @@ beforeEach(() => {
 
 describe('router and page shells', () => {
   it('declares public, limited, customer, detail, and fallback routes', async () => {
-    expect(new Set(routes.map(route => route.meta.access))).toEqual(new Set(Object.values(ACCESS)))
+    expect(new Set(routes.filter(route => !route.redirect).map(route => route.meta.access))).toEqual(new Set(Object.values(ACCESS)))
     const detail = routes.find(route => route.name === 'order-details')
     expect(routes.find(route => route.name === 'orders').component).toBe(OrdersView)
     expect(detail.props({ params: { orderId: 'A-17' } })).toEqual({
@@ -72,7 +72,9 @@ describe('router and page shells', () => {
     expect(createAppRouter().hasRoute('home')).toBe(true)
     expect(routes.find(route => route.name === 'consents').component).toBe(ConsentsView)
     expect(routes.find(route => route.name === 'legal-document').component).toBe(LegalDocumentView)
-    expect(routes.find(route => route.name === 'cookie-consents').props).toEqual({ section:'cookies' })
+    expect(routes.find(route => route.path === '/consents/cookies').redirect).toBe('/consents')
+    await router.push('/consents/cookies')
+    expect(router.currentRoute.value.name).toBe('consents')
     expect(routes.find(route => route.name === 'personal-consents').props).toEqual({ section:'personal' })
   })
 

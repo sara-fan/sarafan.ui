@@ -10,7 +10,7 @@ const id = '11111111-1111-1111-1111-111111111111'
 const now = '2026-09-07T12:00:00Z'
 const document = {
   id,
-  kind:LEGAL_DOCUMENT_KIND.COOKIE_CONSENT,
+  kind:LEGAL_DOCUMENT_KIND.PRIVACY_POLICY,
   locale:'ru',
   title:'Согласие на использование куки',
   displayVersion:'1',
@@ -18,7 +18,6 @@ const document = {
   sourceHash:'b'.repeat(64),
   contentHash:'a'.repeat(64),
   rendererVersion:'sarafan-safe-markdown-1/markdig-1.3.2',
-  cookieCategories:[0],
   effectiveAt:'2026-09-06T21:00:00Z',
   createdAt:'2026-09-05T12:00:00Z',
   createdBy:null,
@@ -27,13 +26,11 @@ const document = {
   canDelete:null
 }
 const ops = { kinds:[
-  { value:0, name:'Согласие на использование куки', routeAlias:'cookie-consent' },
   { value:1, name:'Согласие на обработку персональных данных', routeAlias:'personal-data-consent' },
   { value:2, name:'Пользовательское соглашение', routeAlias:'user-agreement' },
   { value:3, name:'Правила заказа товаров', routeAlias:'order-rules' },
   { value:4, name:'Политика обработки персональных данных', routeAlias:'privacy-policy' }
-] , cookieCategories:[{ value:0, name:'Обязательные', required:true }] }
-const receipt = { status:'current', categories:[0], documentId:id, serverNow:now, expiresAt:'2026-09-07T13:00:00Z', nextChangeAt:null }
+]  }
 const history = { customerId:7, statuses:[], history:[], withdrawalRequest:null }
 let session, store
 beforeEach(async () => {
@@ -55,9 +52,7 @@ describe('consent state and request contracts', () => {
     await expect(local.loadOps()).resolves.toEqual(ops)
     expect(local.kindByAlias('privacy-policy')).toBe(LEGAL_DOCUMENT_KIND.PRIVACY_POLICY)
     expect(local.kindName(LEGAL_DOCUMENT_KIND.USER_AGREEMENT)).toBe('Пользовательское соглашение')
-    expect(local.routeAlias(LEGAL_DOCUMENT_KIND.COOKIE_CONSENT)).toBe('cookie-consent')
-    expect(local.cookieCategoryName(0)).toBe('Обязательные')
-    expect(local.requiredCookieCategories()).toEqual([0])
+    expect(local.routeAlias(LEGAL_DOCUMENT_KIND.PRIVACY_POLICY)).toBe('privacy-policy')
     expect(local.kindByAlias('unknown')).toBeUndefined()
     local.dispose()
   })
@@ -65,10 +60,7 @@ describe('consent state and request contracts', () => {
     { kinds:[{ value:0, name:'', routeAlias:'cookie-consent' }], cookieCategories:ops.cookieCategories }, { kinds:[{ value:0, name:'Куки', routeAlias:'Bad alias' }], cookieCategories:ops.cookieCategories },
     { kinds:[{ value:0, name:'One', routeAlias:'one' }, { value:0, name:'Two', routeAlias:'two' }], cookieCategories:ops.cookieCategories },
     { kinds:[{ value:0, name:'One', routeAlias:'same' }, { value:1, name:'Two', routeAlias:'same' }], cookieCategories:ops.cookieCategories },
-    { ...ops, cookieCategories:[] }, { ...ops, cookieCategories:[{ value:'0', name:'Обязательные', required:true }] },
-    { ...ops, cookieCategories:[{ value:0, name:'', required:true }] }, { ...ops, cookieCategories:[{ value:0, name:'Обязательные', required:'yes' }] },
-    { ...ops, cookieCategories:[{ value:0, name:'Первая', required:true }, { value:0, name:'Вторая', required:false }] },
-    { ...ops, cookieCategories:[{ value:0, name:'Необязательные', required:false }] }])('rejects malformed legal-document ops %j', async value => {
+])('rejects malformed legal-document ops %j', async value => {
     const local = createConsentStore({ customer:ref(null), consentRequest:vi.fn().mockResolvedValue(value) })
     await expect(local.loadOps()).rejects.toMatchObject({ code:'ui_protocol_error' })
     expect(local.ops.value).toBeNull()
@@ -99,14 +91,14 @@ describe('consent state and request contracts', () => {
   })
   it('loads only supported public documents and exact immutable source', async () => {
     session.consentRequest.mockResolvedValue({ serverNow:now, nextChangeAt:null, document })
-    expect((await store.current(LEGAL_DOCUMENT_KIND.COOKIE_CONSENT)).document.id).toBe(id)
+    expect((await store.current(LEGAL_DOCUMENT_KIND.PRIVACY_POLICY)).document.id).toBe(id)
     await expect(store.current(99)).rejects.toMatchObject({ code:'ui_invalid_input' })
     session.consentRequest.mockResolvedValue(null)
-    await expect(store.current(LEGAL_DOCUMENT_KIND.COOKIE_CONSENT)).rejects.toMatchObject({ code:'ui_protocol_error' })
+    await expect(store.current(LEGAL_DOCUMENT_KIND.PRIVACY_POLICY)).rejects.toMatchObject({ code:'ui_protocol_error' })
     session.consentRequest.mockResolvedValue({ serverNow:'invalid', nextChangeAt:null, document })
-    await expect(store.current(LEGAL_DOCUMENT_KIND.COOKIE_CONSENT)).rejects.toBeDefined()
+    await expect(store.current(LEGAL_DOCUMENT_KIND.PRIVACY_POLICY)).rejects.toBeDefined()
     session.consentRequest.mockResolvedValue({ serverNow:now, nextChangeAt:null, document:{ id:'bad' } })
-    await expect(store.current(LEGAL_DOCUMENT_KIND.COOKIE_CONSENT)).rejects.toBeDefined()
+    await expect(store.current(LEGAL_DOCUMENT_KIND.PRIVACY_POLICY)).rejects.toBeDefined()
     session.consentRequest.mockResolvedValue({ serverNow:now, nextChangeAt:null, document:null })
     expect((await store.current(LEGAL_DOCUMENT_KIND.PRIVACY_POLICY)).document).toBeNull()
     await expect(store.read('bad')).rejects.toBeDefined()
@@ -141,10 +133,6 @@ describe('consent state and request contracts', () => {
     ['effectiveTimeZone', 'UTC'],
     ['createdBy', 7],
     ['canDelete', false],
-    ['cookieCategories', null],
-    ['cookieCategories', [99]],
-    ['cookieCategories', ['0']],
-    ['cookieCategories', []]
   ])('rejects current and UUID documents with invalid %s', async (property, value) => {
     session.consentRequest.mockResolvedValue({
       serverNow:now,
@@ -152,17 +140,16 @@ describe('consent state and request contracts', () => {
       document:{ ...document, [property]:value }
     })
 
-    await expect(store.current(LEGAL_DOCUMENT_KIND.COOKIE_CONSENT)).rejects.toMatchObject({ code:'ui_protocol_error' })
+    await expect(store.current(LEGAL_DOCUMENT_KIND.PRIVACY_POLICY)).rejects.toMatchObject({ code:'ui_protocol_error' })
     session.consentRequest.mockResolvedValue({ ...document, [property]:value })
     await expect(store.read(id)).rejects.toMatchObject({ code:'ui_protocol_error' })
   })
   it.each([{}, { document:undefined }, { document:false }, { document:0 }, { document:'' }, { document:[] }])(
     'rejects malformed current-document absence %j', async payload => {
       session.consentRequest.mockResolvedValue({ serverNow:now, nextChangeAt:null, ...payload })
-      await expect(store.current(LEGAL_DOCUMENT_KIND.COOKIE_CONSENT)).rejects.toMatchObject({ code:'ui_protocol_error' })
+      await expect(store.current(LEGAL_DOCUMENT_KIND.PRIVACY_POLICY)).rejects.toMatchObject({ code:'ui_protocol_error' })
     })
-  it.each([null, undefined, false, {}, [], { ...document, id:'22222222-2222-2222-2222-222222222222' },
-    { ...document, kind:LEGAL_DOCUMENT_KIND.PERSONAL_DATA_CONSENT, cookieCategories:[0] }])(
+  it.each([null, undefined, false, {}, [], { ...document, id:'22222222-2222-2222-2222-222222222222' }])(
     'rejects malformed or mismatched UUID documents %j', async value => {
       session.consentRequest.mockResolvedValue(value)
       await expect(store.read(id)).rejects.toMatchObject({ code:'ui_protocol_error' })
@@ -182,12 +169,12 @@ describe('consent state and request contracts', () => {
   it.each([undefined, 'invalid', '2026-09-08', '2026-02-30T12:00:00Z', now])('rejects an invalid current-document boundary %j', async nextChangeAt => {
     session.consentRequest.mockResolvedValue({ serverNow:now, nextChangeAt, document })
 
-    await expect(store.current(LEGAL_DOCUMENT_KIND.COOKIE_CONSENT)).rejects.toMatchObject({ code:'ui_protocol_error' })
+    await expect(store.current(LEGAL_DOCUMENT_KIND.PRIVACY_POLICY)).rejects.toMatchObject({ code:'ui_protocol_error' })
   })
   it.each(['2026-09-07', '2026-02-30T12:00:00Z'])('rejects invalid current-document server time %s', async serverNow => {
     session.consentRequest.mockResolvedValue({ serverNow, nextChangeAt:null, document })
 
-    await expect(store.current(LEGAL_DOCUMENT_KIND.COOKIE_CONSENT)).rejects.toMatchObject({ code:'ui_protocol_error' })
+    await expect(store.current(LEGAL_DOCUMENT_KIND.PRIVACY_POLICY)).rejects.toMatchObject({ code:'ui_protocol_error' })
   })
   it('rejects a current document before its effective boundary', async () => {
     session.consentRequest.mockResolvedValue({
@@ -196,70 +183,16 @@ describe('consent state and request contracts', () => {
       document:{ ...document, effectiveAt:'2026-09-07T12:00:01Z' }
     })
 
-    await expect(store.current(LEGAL_DOCUMENT_KIND.COOKIE_CONSENT)).rejects.toMatchObject({ code:'ui_protocol_error' })
+    await expect(store.current(LEGAL_DOCUMENT_KIND.PRIVACY_POLICY)).rejects.toMatchObject({ code:'ui_protocol_error' })
   })
-  it('allows service only with all required categories and invalidates exactly at server boundaries', async () => {
-    session.consentRequest.mockResolvedValue(receipt)
-    await store.loadCookies()
-    expect(store.serviceAllowed.value).toBe(true)
-    await vi.advanceTimersByTimeAsync(3600000)
-    expect(store.cookies.value).toBeNull()
-    expect(store.serviceAllowed.value).toBe(false)
-    session.consentRequest.mockResolvedValue({ ...receipt, nextChangeAt:'2026-09-07T12:00:01Z' })
-    await store.loadCookies(); await vi.advanceTimersByTimeAsync(1000)
-    expect(store.cookies.value).toBeNull()
-    session.consentRequest.mockResolvedValue({ ...receipt, expiresAt:'2027-01-01T00:00:00Z' })
-    await store.loadCookies(); await vi.advanceTimersByTimeAsync(2147483647)
-    expect(store.cookies.value.status).toBe('current')
-    session.consentRequest.mockResolvedValue({ ...receipt, expiresAt:now })
-    await store.loadCookies(); expect(store.cookies.value).toBeNull()
-  })
-  it.each([null, {}, { ...receipt, categories:[99] }, { ...receipt, categories:[] }, { ...receipt, serverNow:'bad' }, { ...receipt, status:'unknown' }, { ...receipt, documentId:'bad' }, { ...receipt, expiresAt:null }, { ...receipt, nextChangeAt:'invalid' }])('fails closed on invalid receipts %j', async value => {
-    session.consentRequest.mockResolvedValue(value)
-    await expect(store.loadCookies()).rejects.toBeDefined()
-    expect(store.cookies.value).toBeNull()
-    expect(store.cookieProblem.value).toBeTruthy()
-  })
-  it.each(['missing', 'renewal-required', 'refused', 'withdrawn', 'unavailable'])('keeps service unavailable for %s', async status => {
-    session.consentRequest.mockResolvedValue({ ...receipt, status, expiresAt:null, categories:[] })
-    await store.loadCookies()
-    expect(store.serviceAllowed.value).toBe(false)
-  })
-  it('sends explicit version/hash/decision and associates only an authenticated observed browser', async () => {
-    session.consentRequest.mockResolvedValue(receipt)
-    await store.decideCookies(document, 'grant', [0], 'retry-key')
-    expect(JSON.parse(session.consentRequest.mock.calls[0][1].body)).toEqual({ documentId:id, contentHash:document.contentHash, decision:'grant', categories:[0], idempotencyKey:'retry-key' })
-    session.customer.value = { id:7 }
-    await store.decideCookies(document, 'refuse', [])
-    expect(session.consentRequest).toHaveBeenLastCalledWith('/api/v1/consents/me/browser', { method:'POST' }, true)
-    const error = new Error('private')
-    session.consentRequest.mockRejectedValue(error)
-    await expect(store.decideCookies(document, 'withdraw', [])).rejects.toBe(error)
-    expect(store.cookieProblem.value).toBe(error)
-  })
-  it('ignores out-of-order cookie responses and failures', async () => {
-    let resolve, reject
-    session.consentRequest.mockImplementationOnce(() => new Promise(r => { resolve = r }))
-    const old = store.loadCookies()
-    await Promise.resolve()
-    session.consentRequest.mockResolvedValue({ ...receipt, status:'refused', categories:[] })
-    await store.decideCookies(document, 'refuse', [])
-    resolve(receipt); await old
-    expect(store.cookies.value.status).toBe('refused')
-    session.consentRequest.mockImplementationOnce(() => new Promise((_r,j) => { reject = j }))
-    const fail = store.loadCookies().catch(() => {})
-    await Promise.resolve()
-    session.consentRequest.mockResolvedValue({ ...receipt, status:'refused', categories:[] })
-    await store.loadCookies(); reject(new Error('stale')); await fail
-    expect(store.cookieProblem.value).toBeNull()
-  })
+
   it('scopes customer histories to identity and protects against stale loads', async () => {
-    await store.loadMine(); await store.associate()
+    await store.loadMine();
     expect(session.consentRequest).not.toHaveBeenCalled()
     session.customer.value = { id:7 }
     session.consentRequest.mockResolvedValue(history)
     await store.loadMine(); expect(store.mine.value).toEqual(history)
-    await store.associate()
+
     await store.grant(document)
     await store.requestWithdrawal()
     expect(session.consentRequest.mock.calls.some(x => x[0] === '/api/v1/consents/me/withdrawal-request' && x[1]?.method === 'POST')).toBe(true)

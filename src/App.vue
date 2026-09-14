@@ -14,14 +14,11 @@ import UiAlert from './components/ui/UiAlert.vue'
 import UiButton from './components/ui/UiButton.vue'
 import { presentProblem, suppressProblem } from './errors/problem.js'
 import { ACCESS } from './router.js'
-import { useConsents } from './stores/consents.js'
 import { useSession } from './stores/session.js'
 
 const route = useRoute()
 const router = useRouter()
-const consentStore = useConsents()
 const { customer, logout, restoreProblem, restoreSession, restoring } = useSession()
-const { serviceAllowed } = consentStore
 let sessionStarted = false
 const authOpen = ref(false)
 const consentUnavailable = ref(false)
@@ -31,13 +28,13 @@ const consentRoute = computed(() => route.meta.access === ACCESS.LIMITED)
 const restoreMessage = computed(() => restoreProblem.value ? presentProblem(restoreProblem.value) : '')
 
 async function startSession(force = false) {
-  if (!serviceAllowed.value || (sessionStarted && !force)) return
+  if (sessionStarted && !force) return
   sessionStarted = true
   await restoreSession()
 }
 
 function openAuthentication() {
-  if (serviceAllowed.value) authOpen.value = true
+  authOpen.value = true
 }
 
 async function signOut() {
@@ -48,18 +45,14 @@ async function signOut() {
   await router.replace({ name: 'home' })
 }
 
-watch(serviceAllowed, allowed => {
-  if (allowed) startSession()
-})
-
 watch(consentRoute, active => {
   if (active) consentUnavailable.value = false
 })
 
 watch(
-  [customerRoute, serviceAllowed, restoring, restoreProblem, customer],
-  async ([requiresCustomer, allowed, loading, problem, currentCustomer]) => {
-    if (requiresCustomer && allowed && !loading && !problem && !currentCustomer) {
+  [customerRoute, restoring, restoreProblem, customer],
+  async ([requiresCustomer, loading, problem, currentCustomer]) => {
+    if (requiresCustomer && !loading && !problem && !currentCustomer) {
       await router.replace({ name: 'home' })
     }
   },
@@ -75,7 +68,7 @@ onMounted(async () => {
   <v-app class="sarafan-app">
     <AppHeader
       :authenticated="Boolean(customer)"
-      :authentication-available="serviceAllowed"
+      :authentication-available="true"
       @authenticate="openAuthentication"
       @logout="signOut"
     />
@@ -106,17 +99,7 @@ onMounted(async () => {
 
         <template v-if="customerRoute">
           <main
-            v-if="!serviceAllowed"
-            class="page-container route-gate"
-          >
-            <p class="page-kicker">
-              ТРЕБУЕТСЯ СОГЛАСИЕ
-            </p>
-            <h1>Настройте обязательные куки</h1>
-            <p>После подтверждения мы безопасно восстановим сессию и откроем этот раздел.</p>
-          </main>
-          <main
-            v-else-if="restoring"
+            v-if="restoring"
             class="page-container route-gate"
             aria-label="Восстановление сессии"
           >

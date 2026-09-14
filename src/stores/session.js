@@ -267,7 +267,7 @@ async function getStatus() {
 
 // Consent failures remain recoverable so legal documents and the manual withdrawal request stay accessible.
 async function consentRequest(path, options = {}, authorize = false, responseType = 'json') {
-  if (!/^\/api\/v1\/(legal\/(ops|current\/\d+|documents\/[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}(?:\/source)?)|consents\/(cookies|me(?:\/(personal-data|browser|withdrawal-request))?))$/iu.test(path)) {
+  if (!/^\/api\/v1\/(legal\/(ops|current\/\d+|documents\/[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}(?:\/source)?)|consents\/(me(?:\/(personal-data|withdrawal-request))?))$/iu.test(path)) {
     throw createInternalProblem('invalidInput')
   }
   return client.request(path, options, { authorize, responseType })

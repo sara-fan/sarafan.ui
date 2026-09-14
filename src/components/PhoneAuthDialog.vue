@@ -242,7 +242,6 @@ function consentPayload() {
       documentId: pdDocument.value.id,
       contentHash: pdDocument.value.contentHash,
       decision: 'grant',
-      categories: [],
       idempotencyKey: consentRetryKey
     }
   }

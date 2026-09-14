@@ -27,7 +27,7 @@ export const routes = [
   { path: '/orders/:orderId/payment', name: 'payment', component: PendingView, props: { title: 'Оплата', copy: 'Демонстрационная оплата будет подключена отдельной задачей MVP.' }, meta: { access: ACCESS.CUSTOMER, navigationSection: 'orders' } },
   { path: '/profile', name: 'profile', component: ProfileView, meta: { access: ACCESS.CUSTOMER, navigationSection: 'profile' } },
   { path: '/legal/:documentRef', name: 'legal-document', component: LegalDocumentView, meta: { access: ACCESS.LIMITED, navigationSection: 'home' } },
-  { path: '/consents/cookies', name: 'cookie-consents', component: ConsentsView, props: { section: 'cookies' }, meta: { access: ACCESS.LIMITED, navigationSection: 'home' } },
+  { path: '/consents/cookies', redirect: '/consents' },
   { path: '/consents/personal-data', name: 'personal-consents', component: ConsentsView, props: { section: 'personal' }, meta: { access: ACCESS.LIMITED, navigationSection: 'home' } },
   { path: '/consents', name: 'consents', component: ConsentsView, meta: { access: ACCESS.LIMITED, navigationSection: 'home' } },
   { path: '/:pathMatch(.*)*', name: 'not-found', component: NotFoundView, meta: { access: ACCESS.PUBLIC } }
