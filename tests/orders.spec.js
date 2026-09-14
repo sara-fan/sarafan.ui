@@ -33,14 +33,24 @@ describe('order store', () => {
   it('loads, validates, clones, and resolves Core-owned metadata', async () => {
     const session = {
       customer:ref({ id:7 }),
-      orderRequest:vi.fn(path => Promise.resolve(path.endsWith('/ops') ? ops : orders))
+      orderRequest:vi.fn((path, _options, _isCurrent, validateResponse) => {
+        const value = path.endsWith('/ops') ? ops : orders
+        validateResponse?.(value)
+        return Promise.resolve(value)
+      })
     }
     const store = createOrderStore(session)
 
     await expect(store.load()).resolves.toBe(true)
 
     expect(session.orderRequest).toHaveBeenNthCalledWith(1, '/api/v1/orders/ops')
-    expect(session.orderRequest).toHaveBeenNthCalledWith(2, '/api/v1/orders', {}, expect.any(Function))
+    expect(session.orderRequest).toHaveBeenNthCalledWith(
+      2,
+      '/api/v1/orders',
+      {},
+      expect.any(Function),
+      expect.any(Function)
+    )
     expect(store.loading.value).toBe(false)
     expect(store.orders.value).toEqual(orders)
     expect(store.orders.value).not.toBe(orders)
@@ -56,7 +66,13 @@ describe('order store', () => {
     const pendingOrders = new Promise(resolve => { resolveOrders = resolve })
     const session = {
       customer:ref({ id:7 }),
-      orderRequest:vi.fn(path => path.endsWith('/ops') ? Promise.resolve(ops) : pendingOrders)
+      orderRequest:vi.fn((path, _options, isCurrent, validateResponse) => path.endsWith('/ops')
+        ? Promise.resolve(ops)
+        : pendingOrders.then(value => {
+            if (!isCurrent()) return null
+            validateResponse(value)
+            return value
+          }))
     }
     const store = createOrderStore(session)
     const request = store.load()
@@ -73,14 +89,25 @@ describe('order store', () => {
 
   it('keeps the newest request authoritative', async () => {
     let resolveFirst
-    const session = { customer:ref({ id:7 }), orderRequest:vi.fn() }
-    session.orderRequest
-      .mockResolvedValueOnce(ops)
-      .mockReturnValueOnce(new Promise(resolve => { resolveFirst = resolve }))
-      .mockResolvedValueOnce(ops)
-      .mockResolvedValueOnce([])
+    let orderRequests = 0
+    const session = {
+      customer:ref({ id:7 }),
+      orderRequest:vi.fn((path, _options, isCurrent, validateResponse) => {
+        if (path.endsWith('/ops')) return Promise.resolve(ops)
+        orderRequests++
+        const result = orderRequests === 1
+          ? new Promise(resolve => { resolveFirst = resolve })
+          : Promise.resolve([])
+        return result.then(value => {
+          if (!isCurrent()) return null
+          validateResponse(value)
+          return value
+        })
+      })
+    }
     const store = createOrderStore(session)
     const first = store.load()
+    await Promise.resolve()
     const second = store.load()
     await expect(second).resolves.toBe(true)
     resolveFirst(orders)
@@ -88,21 +115,37 @@ describe('order store', () => {
     expect(store.orders.value).toEqual([])
   })
 
-  it('suppresses a failed request after its customer identity becomes stale', async () => {
-    let rejectOrders
+  it('suppresses a failed Ops request after its customer identity becomes stale', async () => {
+    let rejectOps
     const session = {
       customer:ref({ id:7 }),
       orderRequest:vi.fn(path => path.endsWith('/ops')
-        ? Promise.resolve(ops)
-        : new Promise((_resolve, reject) => { rejectOrders = reject }))
+        ? new Promise((_resolve, reject) => { rejectOps = reject })
+        : Promise.resolve(orders))
     }
     const store = createOrderStore(session)
     const request = store.load()
     session.customer.value = { id:8 }
-    rejectOrders(new Error('private transport detail'))
+    rejectOps(new Error('private transport detail'))
 
     await expect(request).resolves.toBe(false)
     expect(store.orders.value).toEqual([])
+  })
+
+  it('propagates an authorized failure that invalidates the current identity', async () => {
+    const failure = new Error('current refresh failed')
+    const session = {
+      customer:ref({ id:7 }),
+      orderRequest:vi.fn(path => {
+        if (path.endsWith('/ops')) return Promise.resolve(ops)
+        session.customer.value = null
+        return Promise.reject(failure)
+      })
+    }
+    const store = createOrderStore(session)
+
+    await expect(store.load()).rejects.toBe(failure)
+    expect(store.loading.value).toBe(false)
   })
 
   it.each([
@@ -113,9 +156,14 @@ describe('order store', () => {
     { statuses:[...statuses, { ...statuses[0], value:1 }], currencies },
     { statuses:[...statuses, { ...statuses[0], value:600, routeAlias:'under_review' }], currencies },
     { statuses:statuses.map(item => item.routeAlias === 'under_review' ? { ...item, upperStatusValue:999 } : item), currencies },
-    { statuses:statuses.filter(item => item.routeAlias !== 'quote_expired'), currencies },
+    { statuses:statuses.map((item, index) => index ? item : { ...item, name:' ' }), currencies },
+    { statuses:statuses.map((item, index) => index ? item : { ...item, routeAlias:7 }), currencies },
+    { statuses:statuses.map((item, index) => index ? item : { ...item, upperStatusName:' ' }), currencies },
+    { statuses:statuses.map((item, index) => index ? item : { ...item, upperStatusRouteAlias:7 }), currencies },
     { statuses, currencies:[...currencies, { ...currencies[0], value:999 }] },
-    { statuses, currencies:[...currencies, { ...currencies[0], value:999, routeAlias:'rub' }] }
+    { statuses, currencies:[...currencies, { ...currencies[0], value:999, routeAlias:'rub' }] },
+    { statuses, currencies:currencies.map((item, index) => index ? item : { ...item, name:' ' }) },
+    { statuses, currencies:currencies.map((item, index) => index ? item : { ...item, routeAlias:840 }) }
   ])('rejects malformed Ops %#', value => {
     protocolFailure(() => validateOrderOps(value))
   })

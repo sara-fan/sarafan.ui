@@ -273,10 +273,10 @@ async function consentRequest(path, options = {}, authorize = false, responseTyp
   return client.request(path, options, { authorize, responseType })
 }
 
-async function orderRequest(path, options = {}, isCurrent = () => true) {
+async function orderRequest(path, options = {}, isCurrent = () => true, validateResponse) {
   if (path === `${API_BASE_PATH}/orders/ops`) return client.request(path, options)
   if (path !== `${API_BASE_PATH}/orders`) throw createInternalProblem('invalidInput')
-  return authorizedRequest(path, options, {}, undefined, isCurrent)
+  return authorizedRequest(path, options, {}, validateResponse, isCurrent)
 }
 
 async function verifyCode(payload, isCurrent = () => true, signal) {

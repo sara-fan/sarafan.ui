@@ -7,20 +7,12 @@ import { readonly, ref } from 'vue'
 import { isRfc3339DateTime } from '../api/validation.js'
 import { createInternalProblem, suppressProblem } from '../errors/problem.js'
 
-const REQUIRED_UPPER_STATUS_ALIASES = Object.freeze([
-  'under_review',
-  'quote_ready',
-  'quote_expired',
-  'in_progress',
-  'completed',
-  'cancelled'
-])
 const ROUTE_ALIAS_PATTERN = /^[a-z0-9]+(?:_[a-z0-9]+)*$/u
 const ORDER_NUMBER_PATTERN = /^[0-9]{8}-[1-9][0-9]*$/u
 
 function protocolError() { throw createInternalProblem('protocolError') }
 function validText(value, maximum) {
-  return typeof value === 'string' && value.length > 0 && value.length <= maximum
+  return typeof value === 'string' && Boolean(value.trim()) && value.length <= maximum
 }
 function validNullableText(value, maximum) {
   return value === null || typeof value === 'string' && value.length <= maximum
@@ -42,22 +34,22 @@ export function validateOrderOps(value) {
   const statusAliases = new Set()
   for (const item of value.statuses) {
     if (!item || !Number.isInteger(item.value) || item.value < 0
-      || !validText(item.name, 200) || !ROUTE_ALIAS_PATTERN.test(item.routeAlias)
+      || !validText(item.name, 200) || !validText(item.routeAlias, 100) || !ROUTE_ALIAS_PATTERN.test(item.routeAlias)
       || !Number.isInteger(item.upperStatusValue) || item.upperStatusValue < 0
-      || !validText(item.upperStatusName, 200) || !ROUTE_ALIAS_PATTERN.test(item.upperStatusRouteAlias)
+      || !validText(item.upperStatusName, 200) || !validText(item.upperStatusRouteAlias, 100)
+      || !ROUTE_ALIAS_PATTERN.test(item.upperStatusRouteAlias)
       || statusValues.has(item.value) || statusAliases.has(item.routeAlias)) protocolError()
     statusValues.add(item.value)
     statusAliases.add(item.routeAlias)
   }
-  if (value.statuses.some(item => !statusValues.has(item.upperStatusValue))
-    || REQUIRED_UPPER_STATUS_ALIASES.some(alias => !value.statuses.some(item => item.upperStatusRouteAlias === alias))) {
+  if (value.statuses.some(item => !statusValues.has(item.upperStatusValue))) {
     protocolError()
   }
   const currencyValues = new Set()
   const currencyAliases = new Set()
   for (const item of value.currencies) {
     if (!item || !Number.isInteger(item.value) || item.value < 0
-      || !validText(item.name, 200) || !ROUTE_ALIAS_PATTERN.test(item.routeAlias)
+      || !validText(item.name, 200) || !validText(item.routeAlias, 100) || !ROUTE_ALIAS_PATTERN.test(item.routeAlias)
       || currencyValues.has(item.value) || currencyAliases.has(item.routeAlias)) protocolError()
     currencyValues.add(item.value)
     currencyAliases.add(item.routeAlias)
@@ -112,23 +104,25 @@ export function createOrderStore(session) {
     const isCurrent = () => requestGeneration === generation && session.customer.value?.id === customerId
     loading.value = true
     try {
-      const [rawOps, rawOrders] = await Promise.all([
-        session.orderRequest('/api/v1/orders/ops'),
-        session.orderRequest('/api/v1/orders', {}, isCurrent)
-      ])
-      if (!isCurrent() || rawOrders === null) return false
-      const validatedOps = validateOrderOps(rawOps)
-      const validatedOrders = validateCustomerOrders(rawOrders, validatedOps)
+      let validatedOps
+      try {
+        validatedOps = validateOrderOps(await session.orderRequest('/api/v1/orders/ops'))
+      } catch (value) {
+        if (!isCurrent()) {
+          suppressProblem(value, { operation:'orders.load.stale' })
+          return false
+        }
+        throw value
+      }
+      if (!isCurrent()) return false
+      let validatedOrders
+      await session.orderRequest('/api/v1/orders', {}, isCurrent, value => {
+        validatedOrders = validateCustomerOrders(value, validatedOps)
+      })
       if (!isCurrent()) return false
       ops.value = validatedOps
       orders.value = validatedOrders
       return true
-    } catch (value) {
-      if (!isCurrent()) {
-        suppressProblem(value, { operation:'orders.load.stale' })
-        return false
-      }
-      throw value
     } finally {
       if (requestGeneration === generation) loading.value = false
     }

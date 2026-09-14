@@ -9,7 +9,7 @@ vi.mock('../src/observability/logger.js', () => ({
   uiLogger: Object.freeze({ log: loggerMocks.log })
 }))
 
-import { INTERNAL_PROBLEM_TYPES } from '../src/errors/problem.js'
+import { INTERNAL_PROBLEM_TYPES, createInternalProblem } from '../src/errors/problem.js'
 import { EVENTS } from '../src/observability/catalogue.js'
 import { resetSessionForTests, useSession } from '../src/stores/session.js'
 import { TEST_TRACE_ID, problemResponse, response } from './fixtures/http.js'
@@ -1094,7 +1094,9 @@ describe('session store', () => {
     const session = useSession()
     await session.verifyCode({ phone:customer.phone, code:'1111' })
     await expect(session.orderRequest('/api/v1/orders/ops')).resolves.toEqual(orderOps)
-    await expect(session.orderRequest('/api/v1/orders')).resolves.toEqual([])
+    const validateOrders = vi.fn()
+    await expect(session.orderRequest('/api/v1/orders', {}, () => true, validateOrders)).resolves.toEqual([])
+    expect(validateOrders).toHaveBeenCalledWith([])
     await expect(session.orderRequest('/api/v1/orders/17')).rejects.toMatchObject({
       type:INTERNAL_PROBLEM_TYPES.invalidInput
     })
@@ -1103,5 +1105,24 @@ describe('session store', () => {
     const listCall = fetch.mock.calls.find(([url]) => url === '/api/v1/orders')
     expect(opsCall[1].headers.has('Authorization')).toBe(false)
     expect(listCall[1].headers.get('Authorization')).toBe('Bearer order-token')
+  })
+
+  it('treats malformed current order responses as authenticated service unavailability', async () => {
+    const customer = customerDto({ id:7, phone:'+79990000007', state:0, profile:{ phone:'+79990000007' } })
+    vi.stubGlobal('fetch', withOps(url => {
+      if (url === '/api/v1/auth/code/verify') return Promise.resolve(response(200, {
+        accessToken:'order-token', expiresAt:'2026-09-15T00:15:00Z', customer
+      }))
+      if (url === '/api/v1/orders') return Promise.resolve(response(200, null))
+      throw new Error(`Unexpected request: ${url}`)
+    }))
+
+    const session = useSession()
+    await session.verifyCode({ phone:customer.phone, code:'1111' })
+    await expect(session.orderRequest('/api/v1/orders', {}, () => true, () => {
+      throw createInternalProblem('protocolError')
+    })).rejects.toMatchObject({ type:INTERNAL_PROBLEM_TYPES.serviceUnavailable })
+    expect(session.customer.value).toBeNull()
+    expect(session.notice.value).toBe('Сервис недоступен. Пожалуйста, повторите позже.')
   })
 })

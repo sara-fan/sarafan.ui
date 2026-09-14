@@ -190,7 +190,6 @@ onBeforeUnmount(() => {
           :key="order.id"
           class="order-card"
           :to="{ name:'order-details', params:{ orderId:order.id } }"
-          :aria-label="`Открыть заказ ${order.orderNumber}`"
         >
           <div
             class="order-card__visual"
@@ -275,7 +274,6 @@ onBeforeUnmount(() => {
           :key="order.id"
           class="order-card"
           :to="{ name:'order-details', params:{ orderId:order.id } }"
-          :aria-label="`Открыть заказ ${order.orderNumber}`"
         >
           <div
             class="order-card__visual"
