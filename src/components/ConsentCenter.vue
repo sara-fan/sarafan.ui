@@ -406,6 +406,7 @@ onUnmounted(() => {
   documentEpoch++
   sessionEpoch++
   invalidateOperations()
+  if (props.mode === 'consents') store.resetCustomer()
   globalThis.removeEventListener('focus', visible)
   globalThis.document.removeEventListener('visibilitychange', visible)
 })

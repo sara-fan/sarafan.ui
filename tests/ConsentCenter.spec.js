@@ -154,6 +154,27 @@ it('does not load customer history after catalogue loading outlives the notice',
   pending.resolve({ kinds }); await flushPromises()
   expect(h.store.loadMine).not.toHaveBeenCalled()
 })
+it('cancels customer-history work when a consent route unmounts', async () => {
+  h.session.customer.value = { id:7 }
+  await mountCenter('/consents'); await flushPromises()
+  h.store.resetCustomer.mockClear()
+
+  wrapper.unmount()
+
+  expect(h.store.resetCustomer).toHaveBeenCalledTimes(1)
+})
+it.each(['/', '/legal/privacy-policy'])(
+  'does not reset customer history when the %s controller unmounts',
+  async path => {
+    h.session.customer.value = { id:7 }
+    await mountCenter(path); await flushPromises()
+    h.store.resetCustomer.mockClear()
+
+    wrapper.unmount()
+
+    expect(h.store.resetCustomer).not.toHaveBeenCalled()
+  }
+)
 it('loads only the legal catalogue for an authenticated notice', async () => {
   h.session.customer.value = { id:7 }
   const pending = deferred()

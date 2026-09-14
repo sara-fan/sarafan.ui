@@ -600,12 +600,15 @@ describe('PhoneAuthDialog', () => {
     await wrapper.get('.auth-form').trigger('submit')
     await flushPromises()
     const requestBody = JSON.parse(fetch.mock.calls.find(([url]) => url.endsWith('/code/request'))[1].body)
-    expect(requestBody).toMatchObject({
+    expect(requestBody).toEqual({
       phone:'+79991234567',
       termsAccepted:true,
       termsDocumentId:documentIds[2],
       personalDataConsent:{
-        documentId:documentIds[1], contentHash:'1'.repeat(64), decision:'grant'
+        documentId:documentIds[1],
+        contentHash:'1'.repeat(64),
+        decision:'grant',
+        idempotencyKey:expect.any(String)
       }
     })
     expect(requestBody).not.toHaveProperty('purpose')

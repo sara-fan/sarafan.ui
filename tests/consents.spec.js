@@ -89,6 +89,23 @@ describe('consent state and request contracts', () => {
     session.customer.value = null
     await expect(store.requirePersonalData()).rejects.toMatchObject({ code:'ui_invalid_input' })
   })
+  it('cancels scheduled customer-history refreshes when customer state resets', async () => {
+    session.customer.value = { id:7 }
+    session.consentRequest.mockResolvedValue({
+      ...history,
+      serverNow:now,
+      nextChangeAt:'2026-09-07T12:00:01Z'
+    })
+    await store.loadMine()
+    session.consentRequest.mockClear()
+
+    store.resetCustomer()
+    await vi.advanceTimersByTimeAsync(1000)
+
+    expect(session.consentRequest).not.toHaveBeenCalled()
+    expect(store.mine.value).toBeNull()
+    expect(store.personalProblem.value).toBeNull()
+  })
   it('loads only supported public documents and exact immutable source', async () => {
     session.consentRequest.mockResolvedValue({ serverNow:now, nextChangeAt:null, document })
     expect((await store.current(LEGAL_DOCUMENT_KIND.PRIVACY_POLICY)).document.id).toBe(id)
@@ -207,6 +224,24 @@ describe('consent state and request contracts', () => {
     session.consentRequest.mockImplementationOnce(() => new Promise(r => { resolve = r }))
     const stale = store.loadMine(); await store.loadMine(); resolve({ ...history, history:[{ kind:LEGAL_DOCUMENT_KIND.PERSONAL_DATA_CONSENT }] }); await stale
     expect(store.mine.value.history).toEqual([])
+  })
+  it('sends the exact personal-consent grant contract without retired categories', async () => {
+    session.customer.value = { id:7 }
+    session.consentRequest.mockResolvedValue(history)
+
+    await store.grant(document, 'fixed-consent-key')
+
+    const [path, options, authenticated] = session.consentRequest.mock.calls[0]
+    expect(path).toBe('/api/v1/consents/me/personal-data')
+    expect(options.method).toBe('POST')
+    expect(options.headers).toEqual({ 'Content-Type':'application/json' })
+    expect(JSON.parse(options.body)).toEqual({
+      documentId:document.id,
+      contentHash:document.contentHash,
+      decision:'grant',
+      idempotencyKey:'fixed-consent-key'
+    })
+    expect(authenticated).toBe(true)
   })
   it.each([null, { ...history, customerId:8 }, { ...history, statuses:null }, { ...history, history:null },
     { ...history, withdrawalRequest:undefined }, { ...history, withdrawalRequest:{} },
