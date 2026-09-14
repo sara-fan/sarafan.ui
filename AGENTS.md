@@ -7,7 +7,7 @@
 - When a change introduces or changes a lasting convention, API contract, domain invariant, security/privacy rule, workflow, or test pattern, update the nearest relevant `AGENTS.md` in the same PR. Keep entries concise and reusable.
 - Otherwise, include `AGENTS.md: no durable change` in the PR description.
 - Before editing documentation, read its current revision and preserve user-authored changes. Keep product requirements in the specification and task-specific discussion in the issue.
-- Before enabling real orders or a real payment-system integration, replace and disable the predictable phone-suffix demo verification mechanism. A build/runtime environment named Production does not satisfy this requirement. Keep this release gate tracked in the [MVP delivery issue](https://github.com/sara-fan/sarafan.spec/issues/26).
+- The predictable phone-suffix demo verification mechanism permits all non-payment functionality, including orders. Replace and disable it before enabling a real payment-system integration; a build/runtime environment named Production does not satisfy this requirement. Keep this payment release gate tracked in the [MVP delivery issue](https://github.com/sara-fan/sarafan.spec/issues/26).
 
 ## Copyright headers
 
@@ -58,6 +58,7 @@ For other comment-capable formats, use the same three lines with that format's n
 
 - Use @sara-fan/ui-shared for problem parsing, HTTP transport, tracing and privacy-safe diagnostics. Keep identity state, runtime configuration, route allowlists, fixed event catalogues and domain-specific problems in this application.
 - Declare route access through `meta.access`: public and limited legal/consent routes render without waiting for session restoration, while customer routes must pass the cookie and session gates before their component mounts.
+- Treat `GET /api/v1/orders` as an authenticated, current-customer-only, newest-first list. Validate both its complete response and `GET /api/v1/orders/ops` inside the identity-scoped service-unavailability policy: positive unique IDs, opaque unique non-blank order-number strings, Core-owned status/currency values, HTTP(S) URLs, positive quantity and seller amount, nullable product/store/image/price fields, and calendar-valid RFC 3339 creation times. Resolve names, terminal grouping, and the accessible progress percentage exclusively from validated Ops metadata; never compile aliases, infer progress from catalogue order, or add fallback mappings. Clear and reload cards synchronously when the customer ID changes. Discard completions from an older customer identity, but propagate the current request failure that invalidates its session.
 - Keep reusable controls in `src/components/ui`, name them by generic UI role, and style them with the shared `--sarafan-*` semantic tokens. Domain components may compose these controls but must not duplicate their visual states.
 - Use Vue Router for application and legal/consent navigation. Route-focused component tests use `createMemoryHistory` so bookmarks and access gates are deterministic and do not mutate browser history.
 - Treat `/consents`, `/consents/cookies`, `/consents/personal-data`, and `/legal/:documentRef` as stable limited-access routes. Keep consent and legal failures recoverable in place, and scope asynchronous results to the current route and customer identity.

@@ -13,9 +13,10 @@ import { createInternalProblem } from '../src/errors/problem.js'
 import { createSarafanVuetify } from '../src/plugins/vuetify.js'
 import { createAppRouter } from '../src/router.js'
 
-const h = vi.hoisted(() => ({ session: {}, consents: {} }))
+const h = vi.hoisted(() => ({ session: {}, consents: {}, orders:{} }))
 vi.mock('../src/stores/session.js', () => ({ useSession: () => h.session }))
 vi.mock('../src/stores/consents.js', () => ({ useConsents: () => h.consents }))
+vi.mock('../src/stores/orders.js', () => ({ createOrderStore: () => h.orders }))
 
 const legalKinds = [
   { value: 2, name: 'Пользовательское соглашение', routeAlias: 'user-agreement' },
@@ -59,6 +60,16 @@ describe('App routing and privacy gates', () => {
       serviceAllowed: ref(false),
       ops: ref({ kinds: legalKinds }),
       loadCookies: vi.fn().mockResolvedValue()
+    })
+    Object.assign(h.orders, {
+      orders:ref([{ id:17, orderNumber:'12345678-1', status:0, productName:'Nike Air Max 90 Essential', storeName:'nike.com', imageUrl:null, sellerPrice:null, quantity:1, createdAt:'2026-09-14T10:00:00Z' }]),
+      loading:ref(false),
+      load:vi.fn().mockResolvedValue(true),
+      reset:vi.fn(),
+      dispose:vi.fn(),
+      statusFor:vi.fn(() => ({ name:'На проверке', routeAlias:'under_review', upperStatusName:'На проверке', upperStatusRouteAlias:'under_review', isTerminal:false, progressPercent:14 })),
+      progressFor:vi.fn(() => 14),
+      currencyFor:vi.fn()
     })
   })
 

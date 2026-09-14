@@ -3,34 +3,92 @@
 // All rights reserved.
 // This file is a part of the Sarafan application
 
-import { RouterLink } from 'vue-router'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { RouterLink, useRouter } from 'vue-router'
 
-const placeholderOrders = Object.freeze([
-  {
-    id: 'SRF-000123',
-    title: 'Nike Air Max 90 Essential',
-    domain: 'nike.com · 1 товар',
-    status: 'Проверяем заказ',
-    tone: 'review',
-    progress: 46,
-    progressLabel: 'На проверке',
-    priceLabel: 'Ожидаемая стоимость',
-    price: '€ 129,90',
-    visual: 'shoe'
-  },
-  {
-    id: 'SRF-000119',
-    title: 'Mini Quilted Shoulder Bag',
-    domain: 'cos.com · 1 товар',
-    status: 'Ожидает оплаты',
-    tone: 'payment',
-    progress: 68,
-    progressLabel: 'К оплате',
-    priceLabel: 'К оплате',
-    price: '$ 85,00',
-    visual: 'bag'
+import UiAlert from '../components/ui/UiAlert.vue'
+import UiButton from '../components/ui/UiButton.vue'
+import { normalizeProblem, presentProblem } from '../errors/problem.js'
+import { createOrderStore } from '../stores/orders.js'
+import { useSession } from '../stores/session.js'
+
+const session = useSession()
+const router = useRouter()
+const store = createOrderStore(session)
+const problem = ref(null)
+const failedImages = ref(new Set())
+let mounted = true
+
+const activeOrders = computed(() => store.orders.value.filter(order => !store.statusFor(order.status)?.isTerminal))
+const historyOrders = computed(() => store.orders.value.filter(order => store.statusFor(order.status)?.isTerminal))
+const error = computed(() => problem.value ? presentProblem(problem.value) : '')
+
+function pluralizeOrders(count) {
+  const lastTwo = count % 100
+  const last = count % 10
+  const word = lastTwo >= 11 && lastTwo <= 14 ? 'заказов'
+    : last === 1 ? 'заказ'
+      : last >= 2 && last <= 4 ? 'заказа' : 'заказов'
+  return `${count} ${word}`
+}
+function quantityText(quantity) {
+  const lastTwo = quantity % 100
+  const last = quantity % 10
+  const word = lastTwo >= 11 && lastTwo <= 14 ? 'товаров'
+    : last === 1 ? 'товар'
+      : last >= 2 && last <= 4 ? 'товара' : 'товаров'
+  return `${quantity} ${word}`
+}
+function status(order) { return store.statusFor(order.status) }
+function productName(order) { return order.productName?.trim() || 'Товар уточняется' }
+function storeName(order) { return order.storeName?.trim() || 'Магазин уточняется' }
+function createdAt(value) {
+  return new Intl.DateTimeFormat('ru-RU', { day:'numeric', month:'long', year:'numeric' }).format(new Date(value))
+}
+function sellerPrice(order) {
+  if (!order.sellerPrice) return 'Уточняется'
+  const currency = store.currencyFor(order.sellerPrice.currency)
+  const formatted = new Intl.NumberFormat('ru-RU', {
+    minimumFractionDigits:2, maximumFractionDigits:2
+  }).format(order.sellerPrice.amount)
+  let symbol
+  try {
+    symbol = new Intl.NumberFormat('ru-RU', {
+      style:'currency', currency:currency.routeAlias.toUpperCase(), currencyDisplay:'narrowSymbol'
+    }).formatToParts(0).find(part => part.type === 'currency')?.value
+  } catch {
+    symbol = null
   }
-])
+  return symbol ? `${symbol} ${formatted}` : `${formatted} ${currency.name}`
+}
+function hasImage(order) { return Boolean(order.imageUrl) && !failedImages.value.has(order.id) }
+function markImageFailed(orderId) {
+  failedImages.value = new Set([...failedImages.value, orderId])
+}
+function addProduct() { return router.push({ name:'home' }) }
+async function load() {
+  problem.value = null
+  try {
+    await store.load()
+  } catch (value) {
+    if (mounted) problem.value = normalizeProblem(value, { detail:'Не удалось загрузить заказы' })
+  }
+}
+
+const stopCustomerWatch = watch(() => session.customer.value?.id, (customerId, previousCustomerId) => {
+  if (customerId === previousCustomerId) return
+  store.reset()
+  problem.value = null
+  failedImages.value = new Set()
+  if (customerId) void load()
+}, { flush:'sync' })
+
+onMounted(load)
+onBeforeUnmount(() => {
+  mounted = false
+  stopCustomerWatch()
+  store.dispose()
+})
 </script>
 
 <template>
@@ -42,9 +100,23 @@ const placeholderOrders = Object.freeze([
       </div>
     </header>
 
+    <UiAlert
+      v-if="problem"
+      title="Не удалось загрузить заказы"
+    >
+      <p>{{ error }}</p>
+      <UiButton
+        :loading="store.loading.value"
+        @click="load"
+      >
+        Повторить
+      </UiButton>
+    </UiAlert>
+
     <section
       class="orders-panel"
       aria-labelledby="active-orders-title"
+      :aria-busy="store.loading.value || undefined"
     >
       <div class="orders-panel__heading">
         <div>
@@ -55,67 +127,176 @@ const placeholderOrders = Object.freeze([
             Активные заказы
           </h2>
         </div>
-        <span class="orders-panel__count">2 заказа</span>
+        <span class="orders-panel__count">{{ pluralizeOrders(activeOrders.length) }}</span>
       </div>
 
-      <div class="orders-list">
-        <article
-          v-for="order in placeholderOrders"
+      <div
+        v-if="store.loading.value"
+        class="orders-state"
+        role="status"
+      >
+        <span
+          class="route-gate__spinner"
+          aria-hidden="true"
+        />
+        <p>Загружаем заказы…</p>
+      </div>
+      <p
+        v-else-if="problem"
+        class="orders-state orders-state--compact"
+      >
+        Список заказов временно недоступен.
+      </p>
+      <div
+        v-else-if="!store.orders.value.length"
+        class="orders-state orders-state--empty"
+      >
+        <strong>Заказов пока нет</strong>
+        <p>Добавьте товар — созданный заказ появится здесь.</p>
+        <UiButton @click="addProduct">
+          Добавить товар
+        </UiButton>
+      </div>
+      <p
+        v-else-if="!activeOrders.length"
+        class="orders-state orders-state--compact"
+      >
+        Активных заказов нет.
+      </p>
+
+      <div
+        v-if="!store.loading.value && activeOrders.length"
+        class="orders-list"
+      >
+        <RouterLink
+          v-for="order in activeOrders"
           :key="order.id"
           class="order-card"
+          :to="{ name:'order-details', params:{ orderId:order.id } }"
         >
           <div
             class="order-card__visual"
-            :class="`order-card__visual--${order.visual}`"
             aria-hidden="true"
           >
-            <span>{{ order.visual === 'shoe' ? '👟' : '▱' }}</span>
+            <img
+              v-if="hasImage(order)"
+              :src="order.imageUrl"
+              alt=""
+              referrerpolicy="no-referrer"
+              @error="markImageFailed(order.id)"
+            >
+            <span v-else>◇</span>
           </div>
 
           <div class="order-card__summary">
             <div class="order-card__meta">
-              <span class="order-card__number">{{ order.id }}</span>
-              <span
-                class="order-card__status"
-                :class="`order-card__status--${order.tone}`"
-              >{{ order.status }}</span>
+              <span class="order-card__number">{{ order.orderNumber }}</span>
+              <span class="order-card__status">
+                {{ status(order).upperStatusName }}
+              </span>
             </div>
-            <h3>{{ order.title }}</h3>
+            <h3>{{ productName(order) }}</h3>
             <p class="order-card__domain">
-              {{ order.domain }}
+              {{ storeName(order) }} · {{ quantityText(order.quantity) }}
+            </p>
+            <p class="order-card__details">
+              <span>Создан {{ createdAt(order.createdAt) }}</span>
+              <span>Срок доставки уточняется</span>
             </p>
 
             <div class="order-card__progress">
               <div class="order-card__progress-labels">
                 <span>Заказ оформлен</span>
-                <strong>{{ order.progressLabel }}</strong>
+                <strong>{{ status(order).name }}</strong>
                 <span>Доставка</span>
               </div>
               <div
                 class="order-card__progress-track"
                 role="progressbar"
-                aria-label="Прогресс заказа"
                 aria-valuemin="0"
                 aria-valuemax="100"
-                :aria-valuenow="order.progress"
+                :aria-valuenow="store.progressFor(order.status)"
+                :aria-label="`Выполнение заказа ${order.orderNumber}`"
               >
-                <span :style="{ width: `${order.progress}%` }" />
+                <span :style="{ width:`${store.progressFor(order.status)}%` }" />
               </div>
             </div>
           </div>
 
           <div class="order-card__price">
-            <small>{{ order.priceLabel }}</small>
-            <strong>{{ order.price }}</strong>
-            <RouterLink
+            <small>Цена продавца</small>
+            <strong>{{ sellerPrice(order) }}</strong>
+            <span
               class="order-card__action"
-              :to="{ name: 'order-details', params: { orderId: order.id } }"
-              :aria-label="`Открыть заказ ${order.id}`"
-            >
-              <span aria-hidden="true">→</span>
-            </RouterLink>
+              aria-hidden="true"
+            >→</span>
           </div>
-        </article>
+        </RouterLink>
+      </div>
+    </section>
+
+    <section
+      v-if="!store.loading.value && historyOrders.length"
+      class="orders-panel orders-panel--history"
+      aria-labelledby="history-orders-title"
+    >
+      <div class="orders-panel__heading">
+        <div>
+          <p class="page-kicker">
+            ИСТОРИЯ
+          </p>
+          <h2 id="history-orders-title">
+            Завершённые и отменённые заказы
+          </h2>
+        </div>
+        <span class="orders-panel__count">{{ pluralizeOrders(historyOrders.length) }}</span>
+      </div>
+
+      <div class="orders-list">
+        <RouterLink
+          v-for="order in historyOrders"
+          :key="order.id"
+          class="order-card"
+          :to="{ name:'order-details', params:{ orderId:order.id } }"
+        >
+          <div
+            class="order-card__visual"
+            aria-hidden="true"
+          >
+            <img
+              v-if="hasImage(order)"
+              :src="order.imageUrl"
+              alt=""
+              referrerpolicy="no-referrer"
+              @error="markImageFailed(order.id)"
+            >
+            <span v-else>◇</span>
+          </div>
+          <div class="order-card__summary">
+            <div class="order-card__meta">
+              <span class="order-card__number">{{ order.orderNumber }}</span>
+              <span class="order-card__status">
+                {{ status(order).upperStatusName }}
+              </span>
+            </div>
+            <h3>{{ productName(order) }}</h3>
+            <p class="order-card__domain">
+              {{ storeName(order) }} · {{ quantityText(order.quantity) }}
+            </p>
+            <p class="order-card__details">
+              <span>Создан {{ createdAt(order.createdAt) }}</span>
+              <span>Срок доставки уточняется</span>
+            </p>
+          </div>
+          <div class="order-card__price">
+            <small>Цена продавца</small>
+            <strong>{{ sellerPrice(order) }}</strong>
+            <span
+              class="order-card__action"
+              aria-hidden="true"
+            >→</span>
+          </div>
+        </RouterLink>
       </div>
     </section>
   </main>
