@@ -273,6 +273,12 @@ async function consentRequest(path, options = {}, authorize = false, responseTyp
   return client.request(path, options, { authorize, responseType })
 }
 
+async function orderRequest(path, options = {}, isCurrent = () => true) {
+  if (path === `${API_BASE_PATH}/orders/ops`) return client.request(path, options)
+  if (path !== `${API_BASE_PATH}/orders`) throw createInternalProblem('invalidInput')
+  return authorizedRequest(path, options, {}, undefined, isCurrent)
+}
+
 async function verifyCode(payload, isCurrent = () => true, signal) {
   notice.value = ''
   try {
@@ -393,6 +399,7 @@ export function useSession() {
     restoreSession,
     getStatus,
     consentRequest,
+    orderRequest,
     ensureOps,
     flowValue,
     resolvePhone,

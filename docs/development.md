@@ -34,7 +34,7 @@ SARAFAN_API_TARGET=http://localhost:5080 npm run dev
 
 For another isolated Core instance, use its address, for example `http://127.0.0.1:25180`. `SARAFAN_API_TARGET` changes only the Vite development proxy; it does not configure the production container.
 
-The demo verification code is the phone number's last four digits in every build; the UI does not disclose that rule. This predictable demo mechanism must be replaced and disabled before real orders or a real payment-system integration are enabled, regardless of the build/runtime environment name; see the [release prerequisites](https://github.com/sara-fan/sarafan.spec/issues/26).
+The demo verification code is the phone number's last four digits in every build; the UI does not disclose that rule. This predictable demo mechanism permits all non-payment functionality, including orders, but must be replaced and disabled before a real payment-system integration is enabled, regardless of the build/runtime environment name; see the [release prerequisites](https://github.com/sara-fan/sarafan.spec/issues/26).
 
 Access tokens are kept in memory. The browser receives the rotating refresh token only as an HttpOnly cookie. The UI attempts one session refresh on startup. An authorized request triggers refresh only for Core's canonical `invalid-access-token` Problem Details type, followed by at most one retry; other `401` responses do not trigger refresh.
 

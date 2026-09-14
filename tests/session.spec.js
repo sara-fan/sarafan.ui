@@ -1077,4 +1077,31 @@ describe('session store', () => {
       && context.traceId === TEST_TRACE_ID
     )).toBe(true)
   })
+
+  it('allows only the public Ops and authorized customer order-list requests', async () => {
+    const customer = customerDto({ id:7, phone:'+79990000007', state:0, profile:{ phone:'+79990000007' } })
+    const orderOps = { statuses:[], currencies:[] }
+    const fetch = withOps((url) => {
+      if (url === '/api/v1/auth/code/verify') return Promise.resolve(response(200, {
+        accessToken:'order-token', expiresAt:'2026-09-15T00:15:00Z', customer
+      }))
+      if (url === '/api/v1/orders/ops') return Promise.resolve(response(200, orderOps))
+      if (url === '/api/v1/orders') return Promise.resolve(response(200, []))
+      throw new Error(`Unexpected request: ${url}`)
+    })
+    vi.stubGlobal('fetch', fetch)
+
+    const session = useSession()
+    await session.verifyCode({ phone:customer.phone, code:'1111' })
+    await expect(session.orderRequest('/api/v1/orders/ops')).resolves.toEqual(orderOps)
+    await expect(session.orderRequest('/api/v1/orders')).resolves.toEqual([])
+    await expect(session.orderRequest('/api/v1/orders/17')).rejects.toMatchObject({
+      type:INTERNAL_PROBLEM_TYPES.invalidInput
+    })
+
+    const opsCall = fetch.mock.calls.find(([url]) => url === '/api/v1/orders/ops')
+    const listCall = fetch.mock.calls.find(([url]) => url === '/api/v1/orders')
+    expect(opsCall[1].headers.has('Authorization')).toBe(false)
+    expect(listCall[1].headers.get('Authorization')).toBe('Bearer order-token')
+  })
 })

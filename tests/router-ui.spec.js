@@ -24,8 +24,9 @@ import NotFoundView from '../src/views/NotFoundView.vue'
 import OrdersView from '../src/views/OrdersView.vue'
 import PendingView from '../src/views/PendingView.vue'
 
-const h = vi.hoisted(() => ({ store: {} }))
+const h = vi.hoisted(() => ({ store: {}, orderStore: {} }))
 vi.mock('../src/stores/consents.js', () => ({ useConsents: () => h.store }))
+vi.mock('../src/stores/orders.js', () => ({ createOrderStore: () => h.orderStore }))
 
 async function routerAt(path = '/') {
   const router = createAppRouter(createMemoryHistory())
@@ -40,6 +41,19 @@ beforeEach(() => {
       { value: 4, name: 'Политика обработки персональных данных', routeAlias: 'privacy-policy' }
     ]
   })
+  const orderStatuses = new Map([
+    [0, { value:0, name:'На проверке', routeAlias:'under_review', upperStatusName:'На проверке', upperStatusRouteAlias:'under_review' }],
+    [100, { value:100, name:'Расчёт готов', routeAlias:'quote_ready', upperStatusName:'Расчёт готов', upperStatusRouteAlias:'quote_ready' }]
+  ])
+  h.orderStore.orders = ref([
+    { id:17, orderNumber:'12345678-2', status:0, sourceUrl:'https://nike.com/item', productName:'Nike Air Max 90 Essential', storeName:'nike.com', imageUrl:null, sellerPrice:null, quantity:1, createdAt:'2026-09-14T10:00:00Z' },
+    { id:16, orderNumber:'12345678-1', status:100, sourceUrl:'https://cos.com/item', productName:'Mini Quilted Shoulder Bag', storeName:'cos.com', imageUrl:null, sellerPrice:{ amount:85, currency:840 }, quantity:2, createdAt:'2026-09-13T10:00:00Z' }
+  ])
+  h.orderStore.loading = ref(false)
+  h.orderStore.load = vi.fn().mockResolvedValue(true)
+  h.orderStore.dispose = vi.fn()
+  h.orderStore.statusFor = vi.fn(value => orderStatuses.get(value))
+  h.orderStore.currencyFor = vi.fn(() => ({ value:840, name:'Доллар США', routeAlias:'usd' }))
 })
 
 describe('router and page shells', () => {
@@ -105,20 +119,24 @@ describe('router and page shells', () => {
     expect(router.currentRoute.value.name).toBe('home')
   })
 
-  it('renders the main-branch order placeholders and opens order details', async () => {
+  it('renders persisted order cards and opens order details from the whole card', async () => {
     const router = await routerAt('/orders')
     const wrapper = mount(OrdersView, { global: { plugins: [router] } })
+    await flushPromises()
 
     expect(wrapper.findAll('.order-card')).toHaveLength(2)
     expect(wrapper.text()).toContain('Nike Air Max 90 Essential')
     expect(wrapper.text()).toContain('Mini Quilted Shoulder Bag')
-    expect(wrapper.text()).toContain('Проверяем заказ')
-    expect(wrapper.text()).toContain('Ожидает оплаты')
-    expect(wrapper.findAll('[role="progressbar"]').map(item => item.attributes('aria-valuenow'))).toEqual(['46', '68'])
+    expect(wrapper.text()).toContain('На проверке')
+    expect(wrapper.text()).toContain('Расчёт готов')
+    expect(wrapper.text()).toContain('Цена продавца')
+    expect(wrapper.text()).toContain('Уточняется')
+    expect(wrapper.findAll('[role="progressbar"]')).toHaveLength(0)
+    expect(h.orderStore.load).toHaveBeenCalledOnce()
 
-    await wrapper.findAll('.order-card__action')[0].trigger('click')
+    await wrapper.findAll('.order-card')[0].trigger('click')
     await flushPromises()
-    expect(router.currentRoute.value).toMatchObject({ name: 'order-details', params: { orderId: 'SRF-000123' } })
+    expect(router.currentRoute.value).toMatchObject({ name: 'order-details', params: { orderId: '17' } })
   })
 })
 
