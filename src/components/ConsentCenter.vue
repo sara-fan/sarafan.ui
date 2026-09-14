@@ -65,7 +65,8 @@ const currentPredicate = value => typeof value === 'function' ? value : alwaysCu
 
 const authenticated = computed(() => Boolean(session.customer.value))
 const personalPage = computed(() => props.mode === 'consents' && authenticated.value)
-const consentPageTitle = 'Согласие на обработку персональных данных'
+const consentPageTitle = computed(() => store.kindName(LEGAL_DOCUMENT_KIND.PERSONAL_DATA_CONSENT)
+  || 'Загрузка юридического документа')
 const consentPageCopy = 'Здесь можно проверить актуальность согласия, историю документов и состояние обращения.'
 const status = computed(() => mine.value?.statuses.find(item => item.kind === LEGAL_DOCUMENT_KIND.PERSONAL_DATA_CONSENT))
 const latestPersonalGrant = computed(() => (mine.value?.history || [])
@@ -163,7 +164,7 @@ async function retry() {
   }
   if (props.mode === 'notice') await refreshNotice(isCurrent)
   else if (props.mode === 'legal') await openLegal(undefined, isCurrent)
-  else if (personalPage.value) await openPersonal(isCurrent)
+  else if (props.mode === 'consents') await refreshConsentPage(isCurrent)
 }
 
 async function openLegal(target = route.params.documentRef, isCurrent = alwaysCurrent) {
@@ -277,6 +278,14 @@ async function refreshNotice(isCurrent = alwaysCurrent) {
   }, undefined, isCurrent)
 }
 
+async function refreshConsentPage(isCurrent = alwaysCurrent, preserveChoice = false) {
+  if (personalPage.value) {
+    await openPersonal(isCurrent, preserveChoice)
+    return
+  }
+  await perform(() => store.loadOps(), undefined, isCurrent)
+}
+
 async function refreshVisible() {
   const epoch = ++viewEpoch
   const currentSession = sessionEpoch
@@ -286,7 +295,7 @@ async function refreshVisible() {
     return
   }
   if (props.mode === 'consents') {
-    if (personalPage.value) await openPersonal(isCurrent, true)
+    await refreshConsentPage(isCurrent, true)
     return
   }
   await refreshNotice(isCurrent)
@@ -337,12 +346,13 @@ watch(() => session.customer.value?.id, async (id, _previous, cleanup) => {
   personalDocument.value = null
   if (!id) {
     if (props.mode === 'notice') await refreshNotice(isCurrent)
+    else if (props.mode === 'consents') await refreshConsentPage(isCurrent)
     return
   }
   try {
     if (!isCurrent()) return
     if (props.mode === 'notice') await refreshNotice(isCurrent)
-    if (personalPage.value) await showPersonal(isCurrent)
+    if (props.mode === 'consents') await refreshConsentPage(isCurrent)
   } catch (error) {
     if (isCurrent()) problem.value = normalizeProblem(error)
   }

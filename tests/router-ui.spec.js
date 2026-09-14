@@ -80,15 +80,15 @@ describe('router and page shells', () => {
 
   it('renders the consent and legal route wrappers without dialog overlays', async () => {
     const consent = shallowMount(ConsentsView, {
-      props:{ section:'personal' },
+      props:{ section:'auto' },
       global:{ stubs:{ ConsentCenter:true } }
     })
     const initialCenter = consent.getComponent({ name:'ConsentCenter' })
-    expect(initialCenter.props()).toMatchObject({ mode:'consents', section:'personal' })
+    expect(initialCenter.props()).toMatchObject({ mode:'consents', section:'auto' })
     const initialUid = initialCenter.vm.$.uid
-    await consent.setProps({ section:'cookies' })
+    await consent.setProps({ section:'personal' })
     const replacementCenter = consent.getComponent({ name:'ConsentCenter' })
-    expect(replacementCenter.props()).toMatchObject({ mode:'consents', section:'cookies' })
+    expect(replacementCenter.props()).toMatchObject({ mode:'consents', section:'personal' })
     expect(replacementCenter.vm.$.uid).not.toBe(initialUid)
 
     const legal = shallowMount(LegalDocumentView, { global:{ stubs:{ ConsentCenter:true } } })

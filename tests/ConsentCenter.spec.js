@@ -90,6 +90,34 @@ it('loads legal footer links on a fresh anonymous public visit', async () => {
     ])
   } finally { footer.unmount() }
 })
+it.each(['/consents', '/consents/personal-data'])(
+  'loads legal footer links on a fresh anonymous visit to %s',
+  async path => {
+    h.store.ops.value = null
+    h.store.loadOps.mockImplementation(async () => { h.store.ops.value = { kinds } })
+    await mountCenter(path); await flushPromises()
+    const footer = mount(SiteFooter, { global:{ plugins:[router] } })
+    try {
+      expect(h.store.loadOps).toHaveBeenCalledTimes(1)
+      expect(h.store.loadMine).not.toHaveBeenCalled()
+      expect(footer.findAll('nav a').map(link => link.attributes('href'))).toEqual([
+        ...kinds.map(kind => `/legal/${kind.routeAlias}`), '/consents'
+      ])
+    } finally { footer.unmount() }
+  }
+)
+it('presents and retries a legal catalogue failure on an anonymous consent page', async () => {
+  h.store.opsProblem.value = denied()
+  h.store.loadOps.mockRejectedValueOnce(denied()).mockImplementation(async () => {
+    h.store.opsProblem.value = null
+  })
+  await mountCenter('/consents'); await flushPromises()
+  expect(wrapper.find('.service-unavailable-page').exists()).toBe(true)
+  await click('Повторить')
+  expect(h.store.loadOps).toHaveBeenCalledTimes(2)
+  expect(h.store.loadMine).not.toHaveBeenCalled()
+  expect(wrapper.find('.service-unavailable-page').exists()).toBe(false)
+})
 it('recovers a stale catalogue failure and retries a new failure without a customer', async () => {
   h.store.opsProblem.value = denied()
   h.store.loadOps.mockRejectedValueOnce(denied()).mockImplementation(async () => {
@@ -158,14 +186,16 @@ it('routes the inline notice retry through personal-history recovery', async () 
 
 it('renews personal consent and shows the latest manual request', async () => {
   h.session.customer.value = { id:7 }
+  h.store.kindName.mockImplementation(kind => kind === LEGAL_DOCUMENT_KIND.PERSONAL_DATA_CONSENT
+    ? 'Серверное название согласия'
+    : kinds.find(item => item.value === kind)?.name)
   h.store.mine.value = {
     statuses:[{ kind:LEGAL_DOCUMENT_KIND.PERSONAL_DATA_CONSENT, status:'renewal-required' }],
     history:[{ id:'1', kind:LEGAL_DOCUMENT_KIND.PERSONAL_DATA_CONSENT, decision:'grant', at:'2026-09-01T10:00:00Z', documentId:id, displayVersion:'1' }],
     withdrawalRequest:{ customerId:7, requestedAt:'2026-09-01T10:00:00Z', processed:true }
   }
   await mountCenter('/consents'); await flushPromises()
-  expect(wrapper.get('h1').text()).toBe('Согласие на обработку персональных данных')
-  expect(wrapper.get('h1').text()).toBe('Согласие на обработку персональных данных')
+  expect(wrapper.get('h1').text()).toBe('Серверное название согласия')
   expect(wrapper.text()).toContain('Требуется новое согласие')
   expect(wrapper.text()).toContain('Принятая версия1')
   expect(wrapper.text()).toContain('Актуальная версия2')
@@ -188,6 +218,17 @@ it('renews personal consent and shows the latest manual request', async () => {
   h.session.customer.value = null; await flushPromises()
   expect(wrapper.text()).not.toContain('Покупатель')
   expect(h.store.resetCustomer).toHaveBeenCalledTimes(2)
+})
+it('uses a generic consent-page heading while legal operations are loading', async () => {
+  h.session.customer.value = { id:7 }
+  h.store.kindName.mockReturnValue(undefined)
+  const pending = deferred()
+  h.store.loadOps.mockReturnValueOnce(pending.promise)
+  await mountCenter('/consents')
+  await nextTick()
+  expect(wrapper.get('h1').text()).toBe('Загрузка юридического документа')
+  pending.resolve({ kinds })
+  await flushPromises()
 })
 it('shows personal-data and withdrawal failures without losing consent choices or identity', async () => {
   h.session.customer.value = { id:7 }
