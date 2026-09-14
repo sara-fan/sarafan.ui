@@ -270,7 +270,11 @@ async function requestWithdrawal() {
 }
 
 async function refreshNotice(isCurrent = alwaysCurrent) {
-  if (session.customer.value) await perform(() => store.loadMine(), undefined, isCurrent)
+  await perform(async ownsOperation => {
+    await store.loadOps()
+    if (!ownsOperation()) return
+    if (session.customer.value) await store.loadMine()
+  }, undefined, isCurrent)
 }
 
 async function refreshVisible() {

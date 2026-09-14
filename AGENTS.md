@@ -92,3 +92,4 @@ For other comment-capable formats, use the same three lines with that format's n
 - Core and both interfaces ship together because the removed endpoints and DTO fields are intentionally incompatible with older clients. Never apply the migration to protected local storage without explicit authorization.
 
 - Declare route access with meta.access. Public and limited legal/consent routes render independently of session restoration; customer routes require session restoration and authentication before mounting. The retired cookie-settings route is a redirect.
+- The public notice controller loads legal Ops for footer links, including anonymous visits, and retries catalogue failures without requiring a customer. Keep this loading independent of authentication restoration and discard stale follow-up work after navigation or identity changes.

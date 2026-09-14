@@ -7,6 +7,7 @@ import { beforeEach, afterEach, expect, it, vi } from 'vitest'
 import { createMemoryHistory } from 'vue-router'
 import { createSarafanVuetify } from '../src/plugins/vuetify.js'
 import ConsentCenter from '../src/components/ConsentCenter.vue'
+import SiteFooter from '../src/components/SiteFooter.vue'
 import UiDialog from '../src/components/ui/UiDialog.vue'
 import LegalDocumentReader from '../src/components/LegalDocumentReader.vue'
 import { createAppRouter } from '../src/router.js'
@@ -76,6 +77,50 @@ afterEach(() => { wrapper?.unmount(); vi.useRealTimers(); vi.restoreAllMocks(); 
 
 
 
+it('loads legal footer links on a fresh anonymous public visit', async () => {
+  h.store.ops.value = null
+  h.store.loadOps.mockImplementation(async () => { h.store.ops.value = { kinds } })
+  await mountCenter(); await flushPromises()
+  const footer = mount(SiteFooter, { global:{ plugins:[router] } })
+  try {
+    expect(h.store.loadOps).toHaveBeenCalledTimes(1)
+    expect(h.store.loadMine).not.toHaveBeenCalled()
+    expect(footer.findAll('nav a').map(link => link.attributes('href'))).toEqual([
+      ...kinds.map(kind => `/legal/${kind.routeAlias}`), '/consents'
+    ])
+  } finally { footer.unmount() }
+})
+it('recovers a stale catalogue failure and retries a new failure without a customer', async () => {
+  h.store.opsProblem.value = denied()
+  h.store.loadOps.mockRejectedValueOnce(denied()).mockImplementation(async () => {
+    h.store.opsProblem.value = null
+  })
+  await mountCenter(); await flushPromises()
+  expect(wrapper.find('.service-unavailable-page').exists()).toBe(true)
+  await click('Повторить')
+  expect(h.store.loadOps).toHaveBeenCalledTimes(2)
+  expect(h.store.loadMine).not.toHaveBeenCalled()
+  expect(wrapper.find('.service-unavailable-page').exists()).toBe(false)
+  expect(wrapper.emitted('service-unavailable').at(-1)).toEqual([false])
+})
+it('does not load customer history after catalogue loading outlives the notice', async () => {
+  h.session.customer.value = { id:7 }
+  const pending = deferred()
+  h.store.loadOps.mockReturnValueOnce(pending.promise)
+  await mountCenter(); await nextTick()
+  wrapper.unmount()
+  pending.resolve({ kinds }); await flushPromises()
+  expect(h.store.loadMine).not.toHaveBeenCalled()
+})
+it('loads the legal catalogue before authenticated notice history', async () => {
+  h.session.customer.value = { id:7 }
+  const pending = deferred()
+  h.store.loadOps.mockReturnValueOnce(pending.promise)
+  await mountCenter(); await nextTick()
+  expect(h.store.loadMine).not.toHaveBeenCalled()
+  pending.resolve({ kinds }); await flushPromises()
+  expect(h.store.loadMine).toHaveBeenCalledTimes(1)
+})
 it('retries a failed personal-history load from the notice outage page', async () => {
   h.session.customer.value = { id:7 }
   h.store.loadMine.mockRejectedValueOnce(denied())
