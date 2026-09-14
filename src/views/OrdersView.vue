@@ -3,7 +3,7 @@
 // All rights reserved.
 // This file is a part of the Sarafan application
 
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { RouterLink, useRouter } from 'vue-router'
 
 import UiAlert from '../components/ui/UiAlert.vue'
@@ -19,39 +19,8 @@ const problem = ref(null)
 const failedImages = ref(new Set())
 let mounted = true
 
-// Presentation-only positions for the decorative Figma track. They are not delivery percentages.
-const PROGRESS_POSITION = Object.freeze({
-  under_review:14,
-  quote_ready:32,
-  quote_expired:32,
-  paid:48,
-  purchasing_item:56,
-  delivering_to_us_warehouse:64,
-  delivered_to_us_warehouse:70,
-  delivering_to_russia:78,
-  delivered_to_russian_warehouse:86,
-  delivering_in_russia:94,
-  received:100,
-  cancelled:100
-})
-const STATUS_TONE = Object.freeze({
-  under_review:'review',
-  quote_ready:'payment',
-  quote_expired:'warning',
-  in_progress:'transit',
-  completed:'success',
-  cancelled:'cancelled'
-})
-const CURRENCY_SYMBOLS = Object.freeze({ rub:'₽', usd:'$' })
-
-const activeOrders = computed(() => store.orders.value.filter(order => {
-  const alias = store.statusFor(order.status)?.upperStatusRouteAlias
-  return alias !== 'completed' && alias !== 'cancelled'
-}))
-const historyOrders = computed(() => store.orders.value.filter(order => {
-  const alias = store.statusFor(order.status)?.upperStatusRouteAlias
-  return alias === 'completed' || alias === 'cancelled'
-}))
+const activeOrders = computed(() => store.orders.value.filter(order => !store.statusFor(order.status)?.isTerminal))
+const historyOrders = computed(() => store.orders.value.filter(order => store.statusFor(order.status)?.isTerminal))
 const error = computed(() => problem.value ? presentProblem(problem.value) : '')
 
 function pluralizeOrders(count) {
@@ -71,8 +40,6 @@ function quantityText(quantity) {
   return `${quantity} ${word}`
 }
 function status(order) { return store.statusFor(order.status) }
-function statusTone(order) { return STATUS_TONE[status(order)?.upperStatusRouteAlias] || 'review' }
-function progressPosition(order) { return PROGRESS_POSITION[status(order)?.routeAlias] ?? 0 }
 function productName(order) { return order.productName?.trim() || 'Товар уточняется' }
 function storeName(order) { return order.storeName?.trim() || 'Магазин уточняется' }
 function createdAt(value) {
@@ -84,7 +51,14 @@ function sellerPrice(order) {
   const formatted = new Intl.NumberFormat('ru-RU', {
     minimumFractionDigits:2, maximumFractionDigits:2
   }).format(order.sellerPrice.amount)
-  const symbol = CURRENCY_SYMBOLS[currency?.routeAlias]
+  let symbol
+  try {
+    symbol = new Intl.NumberFormat('ru-RU', {
+      style:'currency', currency:currency.routeAlias.toUpperCase(), currencyDisplay:'narrowSymbol'
+    }).formatToParts(0).find(part => part.type === 'currency')?.value
+  } catch {
+    symbol = null
+  }
   return symbol ? `${symbol} ${formatted}` : `${formatted} ${currency.name}`
 }
 function hasImage(order) { return Boolean(order.imageUrl) && !failedImages.value.has(order.id) }
@@ -101,9 +75,18 @@ async function load() {
   }
 }
 
+const stopCustomerWatch = watch(() => session.customer.value?.id, (customerId, previousCustomerId) => {
+  if (customerId === previousCustomerId) return
+  store.reset()
+  problem.value = null
+  failedImages.value = new Set()
+  if (customerId) void load()
+}, { flush:'sync' })
+
 onMounted(load)
 onBeforeUnmount(() => {
   mounted = false
+  stopCustomerWatch()
   store.dispose()
 })
 </script>
@@ -208,10 +191,7 @@ onBeforeUnmount(() => {
           <div class="order-card__summary">
             <div class="order-card__meta">
               <span class="order-card__number">{{ order.orderNumber }}</span>
-              <span
-                class="order-card__status"
-                :class="`order-card__status--${statusTone(order)}`"
-              >
+              <span class="order-card__status">
                 {{ status(order).upperStatusName }}
               </span>
             </div>
@@ -234,7 +214,7 @@ onBeforeUnmount(() => {
                 class="order-card__progress-track"
                 aria-hidden="true"
               >
-                <span :style="{ width:`${progressPosition(order)}%` }" />
+                <span :style="{ width:`${store.progressFor(order.status)}%` }" />
               </div>
             </div>
           </div>
@@ -291,10 +271,7 @@ onBeforeUnmount(() => {
           <div class="order-card__summary">
             <div class="order-card__meta">
               <span class="order-card__number">{{ order.orderNumber }}</span>
-              <span
-                class="order-card__status"
-                :class="`order-card__status--${statusTone(order)}`"
-              >
+              <span class="order-card__status">
                 {{ status(order).upperStatusName }}
               </span>
             </div>

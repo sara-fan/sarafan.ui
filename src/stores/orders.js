@@ -5,7 +5,7 @@
 import { readonly, ref } from 'vue'
 
 import { isRfc3339DateTime } from '../api/validation.js'
-import { createInternalProblem, suppressProblem } from '../errors/problem.js'
+import { createInternalProblem } from '../errors/problem.js'
 
 const ROUTE_ALIAS_PATTERN = /^[a-z0-9]+(?:_[a-z0-9]+)*$/u
 const ORDER_NUMBER_PATTERN = /^[0-9]{8}-[1-9][0-9]*$/u
@@ -38,11 +38,14 @@ export function validateOrderOps(value) {
       || !Number.isInteger(item.upperStatusValue) || item.upperStatusValue < 0
       || !validText(item.upperStatusName, 200) || !validText(item.upperStatusRouteAlias, 100)
       || !ROUTE_ALIAS_PATTERN.test(item.upperStatusRouteAlias)
+      || typeof item.isTerminal !== 'boolean'
       || statusValues.has(item.value) || statusAliases.has(item.routeAlias)) protocolError()
     statusValues.add(item.value)
     statusAliases.add(item.routeAlias)
   }
-  if (value.statuses.some(item => !statusValues.has(item.upperStatusValue))) {
+  const statusByValue = new Map(value.statuses.map(item => [item.value, item]))
+  if (value.statuses.some(item => !statusValues.has(item.upperStatusValue)
+    || item.isTerminal !== statusByValue.get(item.upperStatusValue)?.isTerminal)) {
     protocolError()
   }
   const currencyValues = new Set()
@@ -105,15 +108,9 @@ export function createOrderStore(session) {
     loading.value = true
     try {
       let validatedOps
-      try {
-        validatedOps = validateOrderOps(await session.orderRequest('/api/v1/orders/ops'))
-      } catch (value) {
-        if (!isCurrent()) {
-          suppressProblem(value, { operation:'orders.load.stale' })
-          return false
-        }
-        throw value
-      }
+      await session.orderRequest('/api/v1/orders/ops', {}, isCurrent, value => {
+        validatedOps = validateOrderOps(value)
+      })
       if (!isCurrent()) return false
       let validatedOrders
       await session.orderRequest('/api/v1/orders', {}, isCurrent, value => {
@@ -130,7 +127,18 @@ export function createOrderStore(session) {
 
   function statusFor(value) { return ops.value?.statuses.find(item => item.value === value) }
   function currencyFor(value) { return ops.value?.currencies.find(item => item.value === value) }
-  function dispose() { generation++; loading.value = false; orders.value = []; ops.value = null }
+  function progressFor(value) {
+    const current = statusFor(value)
+    if (!current) return 0
+    if (current.isTerminal) return 100
+    const activeStatuses = ops.value.statuses.filter(item => !item.isTerminal)
+    const index = activeStatuses.findIndex(item => item.value === value)
+    if (index < 0) return 0
+    if (activeStatuses.length === 1) return 50
+    return Math.round(14 + 80 * index / (activeStatuses.length - 1))
+  }
+  function reset() { generation++; loading.value = false; orders.value = []; ops.value = null }
+  function dispose() { reset() }
 
   return {
     orders:readonly(orders),
@@ -139,6 +147,8 @@ export function createOrderStore(session) {
     load,
     statusFor,
     currencyFor,
+    progressFor,
+    reset,
     dispose
   }
 }

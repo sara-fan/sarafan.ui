@@ -274,7 +274,9 @@ async function consentRequest(path, options = {}, authorize = false, responseTyp
 }
 
 async function orderRequest(path, options = {}, isCurrent = () => true, validateResponse) {
-  if (path === `${API_BASE_PATH}/orders/ops`) return client.request(path, options)
+  if (path === `${API_BASE_PATH}/orders/ops`) {
+    return identityScopedRequest(path, options, {}, validateResponse, isCurrent, false)
+  }
   if (path !== `${API_BASE_PATH}/orders`) throw createInternalProblem('invalidInput')
   return authorizedRequest(path, options, {}, validateResponse, isCurrent)
 }
@@ -310,9 +312,9 @@ async function logout() {
   }
 }
 
-async function authorizedRequest(path, options = {}, policy = {}, validateResponse, isCurrent = () => true) {
+async function identityScopedRequest(path, options, policy, validateResponse, isCurrent, authorize) {
   try {
-    const result = await client.request(path, options, { ...policy, authorize:true })
+    const result = await client.request(path, options, authorize ? { ...policy, authorize:true } : policy)
     if (!isCurrent()) return null
     if (validateResponse) validateResponse(result)
     return result
@@ -328,6 +330,10 @@ async function authorizedRequest(path, options = {}, policy = {}, validateRespon
     }
     throw error
   }
+}
+
+async function authorizedRequest(path, options = {}, policy = {}, validateResponse, isCurrent = () => true) {
+  return identityScopedRequest(path, options, policy, validateResponse, isCurrent, true)
 }
 
 async function updateProfile(profile) {

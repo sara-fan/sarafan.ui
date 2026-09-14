@@ -65,8 +65,10 @@ describe('App routing and privacy gates', () => {
       orders:ref([{ id:17, orderNumber:'12345678-1', status:0, productName:'Nike Air Max 90 Essential', storeName:'nike.com', imageUrl:null, sellerPrice:null, quantity:1, createdAt:'2026-09-14T10:00:00Z' }]),
       loading:ref(false),
       load:vi.fn().mockResolvedValue(true),
+      reset:vi.fn(),
       dispose:vi.fn(),
-      statusFor:vi.fn(() => ({ name:'На проверке', routeAlias:'under_review', upperStatusName:'На проверке', upperStatusRouteAlias:'under_review' })),
+      statusFor:vi.fn(() => ({ name:'На проверке', routeAlias:'under_review', upperStatusName:'На проверке', upperStatusRouteAlias:'under_review', isTerminal:false })),
+      progressFor:vi.fn(() => 14),
       currencyFor:vi.fn()
     })
   })

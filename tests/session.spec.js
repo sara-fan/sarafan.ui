@@ -1093,7 +1093,9 @@ describe('session store', () => {
 
     const session = useSession()
     await session.verifyCode({ phone:customer.phone, code:'1111' })
-    await expect(session.orderRequest('/api/v1/orders/ops')).resolves.toEqual(orderOps)
+    const validateOrderOps = vi.fn()
+    await expect(session.orderRequest('/api/v1/orders/ops', {}, () => true, validateOrderOps)).resolves.toEqual(orderOps)
+    expect(validateOrderOps).toHaveBeenCalledWith(orderOps)
     const validateOrders = vi.fn()
     await expect(session.orderRequest('/api/v1/orders', {}, () => true, validateOrders)).resolves.toEqual([])
     expect(validateOrders).toHaveBeenCalledWith([])
@@ -1120,6 +1122,25 @@ describe('session store', () => {
     const session = useSession()
     await session.verifyCode({ phone:customer.phone, code:'1111' })
     await expect(session.orderRequest('/api/v1/orders', {}, () => true, () => {
+      throw createInternalProblem('protocolError')
+    })).rejects.toMatchObject({ type:INTERNAL_PROBLEM_TYPES.serviceUnavailable })
+    expect(session.customer.value).toBeNull()
+    expect(session.notice.value).toBe('Сервис недоступен. Пожалуйста, повторите позже.')
+  })
+
+  it('treats malformed current order Ops as identity-scoped service unavailability', async () => {
+    const customer = customerDto({ id:7, phone:'+79990000007', state:0, profile:{ phone:'+79990000007' } })
+    vi.stubGlobal('fetch', withOps(url => {
+      if (url === '/api/v1/auth/code/verify') return Promise.resolve(response(200, {
+        accessToken:'order-token', expiresAt:'2026-09-15T00:15:00Z', customer
+      }))
+      if (url === '/api/v1/orders/ops') return Promise.resolve(response(200, {}))
+      throw new Error(`Unexpected request: ${url}`)
+    }))
+
+    const session = useSession()
+    await session.verifyCode({ phone:customer.phone, code:'1111' })
+    await expect(session.orderRequest('/api/v1/orders/ops', {}, () => true, () => {
       throw createInternalProblem('protocolError')
     })).rejects.toMatchObject({ type:INTERNAL_PROBLEM_TYPES.serviceUnavailable })
     expect(session.customer.value).toBeNull()

@@ -180,7 +180,7 @@ a { color: var(--sarafan-secondary); }
 .order-card__summary { min-width: 0; }
 .order-card__meta { display: flex; align-items: center; gap: 9px; margin-bottom: 6px; }
 .order-card__number { color: var(--sarafan-muted); font-size: 10px; font-weight: 750; letter-spacing: 0.08em; }
-.order-card__status { padding: 5px 8px; border-radius: var(--sarafan-radius-full); font-size: 9px; font-weight: 800; }
+.order-card__status { padding: 5px 8px; border-radius: var(--sarafan-radius-full); background: #e8efff; color: #2854a0; font-size: 9px; font-weight: 800; }
 .order-card__status--review { background: #e0f3fb; color: #116f9e; }
 .order-card__status--payment { background: #e6edfb; color: #315a9d; }
 .order-card__status--warning { background: #fff1d9; color: #8a5a00; }

@@ -16,10 +16,10 @@ import { createAppRouter } from '../src/router.js'
 import OrdersView from '../src/views/OrdersView.vue'
 
 const statusItems = new Map([
-  [0, { value:0, name:'На проверке', routeAlias:'under_review', upperStatusName:'На проверке', upperStatusRouteAlias:'under_review' }],
-  [310, { value:310, name:'Выкупаем товар', routeAlias:'purchasing_item', upperStatusName:'Выполняется', upperStatusRouteAlias:'in_progress' }],
-  [400, { value:400, name:'Получен', routeAlias:'received', upperStatusName:'Завершён', upperStatusRouteAlias:'completed' }],
-  [500, { value:500, name:'Отменён', routeAlias:'cancelled', upperStatusName:'Отменён', upperStatusRouteAlias:'cancelled' }]
+  [0, { value:0, name:'На проверке', routeAlias:'under_review', upperStatusName:'На проверке', upperStatusRouteAlias:'under_review', isTerminal:false }],
+  [310, { value:310, name:'Выкупаем товар', routeAlias:'purchasing_item', upperStatusName:'Выполняется', upperStatusRouteAlias:'in_progress', isTerminal:false }],
+  [400, { value:400, name:'Получен', routeAlias:'received', upperStatusName:'Завершён', upperStatusRouteAlias:'completed', isTerminal:true }],
+  [500, { value:500, name:'Отменён', routeAlias:'cancelled', upperStatusName:'Отменён', upperStatusRouteAlias:'cancelled', isTerminal:true }]
 ])
 
 async function mountView() {
@@ -34,11 +34,13 @@ describe('OrdersView', () => {
     h.store.orders = ref([])
     h.store.loading = ref(false)
     h.store.load = vi.fn().mockResolvedValue(true)
+    h.store.reset = vi.fn(() => { h.store.orders.value = [] })
     h.store.dispose = vi.fn()
     h.store.statusFor = vi.fn(value => statusItems.get(value))
     h.store.currencyFor = vi.fn(value => value === 840
       ? { value:840, name:'Доллар США', routeAlias:'usd' }
       : { value, name:'Евро', routeAlias:'eur' })
+    h.store.progressFor = vi.fn(value => value === 400 || value === 500 ? 100 : 50)
   })
 
   it('shows the loading and empty states and navigates to product entry', async () => {
@@ -79,7 +81,7 @@ describe('OrdersView', () => {
     expect(wrapper.text()).toContain('Магазин уточняется · 11 товаров')
     expect(wrapper.text()).toContain('Срок доставки уточняется')
     expect(wrapper.text()).toContain('$ 85,00')
-    expect(wrapper.text()).toContain('10,00 Евро')
+    expect(wrapper.text()).toContain('€ 10,00')
     expect(wrapper.text()).toContain('14 сентября 2026')
     expect(wrapper.findAll('.order-card__progress-track')).toHaveLength(2)
     expect(wrapper.findAll('.order-card__progress-track')[0].attributes('aria-hidden')).toBe('true')
@@ -117,7 +119,7 @@ describe('OrdersView', () => {
   })
 
   it('uses safe presentation defaults for added statuses and Russian count boundaries', async () => {
-    statusItems.set(999, { value:999, name:'Новый этап', routeAlias:'new_stage', upperStatusName:'Новый этап', upperStatusRouteAlias:'new_group' })
+    statusItems.set(999, { value:999, name:'Новый этап', routeAlias:'renamed_stage', upperStatusName:'Новый этап', upperStatusRouteAlias:'renamed_group', isTerminal:false })
     h.store.orders.value = Array.from({ length:11 }, (_, index) => ({
       id:20 - index,
       orderNumber:`12345678-${20 - index}`,
@@ -130,14 +132,31 @@ describe('OrdersView', () => {
       createdAt:`2026-09-${String(20 - index).padStart(2, '0')}T10:00:00Z`
     }))
     h.store.currencyFor.mockReturnValue({ value:643, name:'Российский рубль', routeAlias:'rub' })
+    h.store.progressFor.mockReturnValue(63)
     const { wrapper } = await mountView()
     await flushPromises()
 
     expect(wrapper.text()).toContain('11 заказов')
-    expect(wrapper.get('.order-card__status').classes()).toContain('order-card__status--review')
-    expect(wrapper.get('.order-card__progress-track span').attributes('style')).toContain('width: 0%')
+    expect(wrapper.get('.order-card__status').classes()).toEqual(['order-card__status'])
+    expect(wrapper.get('.order-card__progress-track span').attributes('style')).toContain('width: 63%')
     expect(wrapper.text()).toContain('₽ 100,00')
     statusItems.delete(999)
+  })
+
+  it('clears prior cards and reloads when the customer identity changes', async () => {
+    h.store.orders.value = [
+      { id:1, orderNumber:'12345678-1', status:0, productName:'Старый заказ', storeName:null, imageUrl:null, sellerPrice:null, quantity:1, createdAt:'2026-09-14T10:00:00Z' }
+    ]
+    const { wrapper } = await mountView()
+    await flushPromises()
+    expect(wrapper.text()).toContain('Старый заказ')
+
+    h.session.customer.value = { id:8 }
+    expect(h.store.reset).toHaveBeenCalledOnce()
+    expect(h.store.orders.value).toEqual([])
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('Старый заказ')
+    expect(h.store.load).toHaveBeenCalledTimes(2)
   })
 
   it('does not present a late failure after unmount', async () => {

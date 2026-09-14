@@ -42,8 +42,8 @@ beforeEach(() => {
     ]
   })
   const orderStatuses = new Map([
-    [0, { value:0, name:'На проверке', routeAlias:'under_review', upperStatusName:'На проверке', upperStatusRouteAlias:'under_review' }],
-    [100, { value:100, name:'Расчёт готов', routeAlias:'quote_ready', upperStatusName:'Расчёт готов', upperStatusRouteAlias:'quote_ready' }]
+    [0, { value:0, name:'На проверке', routeAlias:'under_review', upperStatusName:'На проверке', upperStatusRouteAlias:'under_review', isTerminal:false }],
+    [100, { value:100, name:'Расчёт готов', routeAlias:'quote_ready', upperStatusName:'Расчёт готов', upperStatusRouteAlias:'quote_ready', isTerminal:false }]
   ])
   h.orderStore.orders = ref([
     { id:17, orderNumber:'12345678-2', status:0, sourceUrl:'https://nike.com/item', productName:'Nike Air Max 90 Essential', storeName:'nike.com', imageUrl:null, sellerPrice:null, quantity:1, createdAt:'2026-09-14T10:00:00Z' },
@@ -51,8 +51,10 @@ beforeEach(() => {
   ])
   h.orderStore.loading = ref(false)
   h.orderStore.load = vi.fn().mockResolvedValue(true)
+  h.orderStore.reset = vi.fn()
   h.orderStore.dispose = vi.fn()
   h.orderStore.statusFor = vi.fn(value => orderStatuses.get(value))
+  h.orderStore.progressFor = vi.fn(value => value === 0 ? 14 : 32)
   h.orderStore.currencyFor = vi.fn(() => ({ value:840, name:'Доллар США', routeAlias:'usd' }))
 })
 

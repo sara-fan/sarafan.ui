@@ -8,12 +8,12 @@ import { describe, expect, it, vi } from 'vitest'
 import { createOrderStore, validateCustomerOrders, validateOrderOps } from '../src/stores/orders.js'
 
 const statuses = [
-  { value:0, name:'На проверке', routeAlias:'under_review', upperStatusValue:0, upperStatusName:'На проверке', upperStatusRouteAlias:'under_review' },
-  { value:100, name:'Расчёт готов', routeAlias:'quote_ready', upperStatusValue:100, upperStatusName:'Расчёт готов', upperStatusRouteAlias:'quote_ready' },
-  { value:200, name:'Расчёт истёк', routeAlias:'quote_expired', upperStatusValue:200, upperStatusName:'Расчёт истёк', upperStatusRouteAlias:'quote_expired' },
-  { value:300, name:'Оплачен', routeAlias:'paid', upperStatusValue:300, upperStatusName:'Выполняется', upperStatusRouteAlias:'in_progress' },
-  { value:400, name:'Получен', routeAlias:'received', upperStatusValue:400, upperStatusName:'Завершён', upperStatusRouteAlias:'completed' },
-  { value:500, name:'Отменён', routeAlias:'cancelled', upperStatusValue:500, upperStatusName:'Отменён', upperStatusRouteAlias:'cancelled' }
+  { value:0, name:'На проверке', routeAlias:'under_review', upperStatusValue:0, upperStatusName:'На проверке', upperStatusRouteAlias:'under_review', isTerminal:false },
+  { value:100, name:'Расчёт готов', routeAlias:'quote_ready', upperStatusValue:100, upperStatusName:'Расчёт готов', upperStatusRouteAlias:'quote_ready', isTerminal:false },
+  { value:200, name:'Расчёт истёк', routeAlias:'quote_expired', upperStatusValue:200, upperStatusName:'Расчёт истёк', upperStatusRouteAlias:'quote_expired', isTerminal:false },
+  { value:300, name:'Оплачен', routeAlias:'paid', upperStatusValue:300, upperStatusName:'Выполняется', upperStatusRouteAlias:'in_progress', isTerminal:false },
+  { value:400, name:'Получен', routeAlias:'received', upperStatusValue:400, upperStatusName:'Завершён', upperStatusRouteAlias:'completed', isTerminal:true },
+  { value:500, name:'Отменён', routeAlias:'cancelled', upperStatusValue:500, upperStatusName:'Отменён', upperStatusRouteAlias:'cancelled', isTerminal:true }
 ]
 const currencies = [
   { value:643, name:'Российский рубль', routeAlias:'rub' },
@@ -43,7 +43,13 @@ describe('order store', () => {
 
     await expect(store.load()).resolves.toBe(true)
 
-    expect(session.orderRequest).toHaveBeenNthCalledWith(1, '/api/v1/orders/ops')
+    expect(session.orderRequest).toHaveBeenNthCalledWith(
+      1,
+      '/api/v1/orders/ops',
+      {},
+      expect.any(Function),
+      expect.any(Function)
+    )
     expect(session.orderRequest).toHaveBeenNthCalledWith(
       2,
       '/api/v1/orders',
@@ -57,6 +63,9 @@ describe('order store', () => {
     expect(store.orders.value[0].sellerPrice).not.toBe(orders[0].sellerPrice)
     expect(store.statusFor(100)?.routeAlias).toBe('quote_ready')
     expect(store.currencyFor(840)?.routeAlias).toBe('usd')
+    expect(store.progressFor(0)).toBe(14)
+    expect(store.progressFor(300)).toBe(94)
+    expect(store.progressFor(400)).toBe(100)
     expect(store.statusFor(999)).toBeUndefined()
     expect(store.currencyFor(999)).toBeUndefined()
   })
@@ -67,7 +76,7 @@ describe('order store', () => {
     const session = {
       customer:ref({ id:7 }),
       orderRequest:vi.fn((path, _options, isCurrent, validateResponse) => path.endsWith('/ops')
-        ? Promise.resolve(ops)
+        ? Promise.resolve(validateResponse(ops)).then(() => ops)
         : pendingOrders.then(value => {
             if (!isCurrent()) return null
             validateResponse(value)
@@ -93,7 +102,7 @@ describe('order store', () => {
     const session = {
       customer:ref({ id:7 }),
       orderRequest:vi.fn((path, _options, isCurrent, validateResponse) => {
-        if (path.endsWith('/ops')) return Promise.resolve(ops)
+        if (path.endsWith('/ops')) return Promise.resolve(validateResponse(ops)).then(() => ops)
         orderRequests++
         const result = orderRequests === 1
           ? new Promise(resolve => { resolveFirst = resolve })
@@ -107,7 +116,7 @@ describe('order store', () => {
     }
     const store = createOrderStore(session)
     const first = store.load()
-    await Promise.resolve()
+    await vi.waitFor(() => expect(orderRequests).toBe(1))
     const second = store.load()
     await expect(second).resolves.toBe(true)
     resolveFirst(orders)
@@ -119,8 +128,11 @@ describe('order store', () => {
     let rejectOps
     const session = {
       customer:ref({ id:7 }),
-      orderRequest:vi.fn(path => path.endsWith('/ops')
-        ? new Promise((_resolve, reject) => { rejectOps = reject })
+      orderRequest:vi.fn((path, _options, isCurrent) => path.endsWith('/ops')
+        ? new Promise((_resolve, reject) => { rejectOps = reject }).catch(value => {
+            if (!isCurrent()) return null
+            throw value
+          })
         : Promise.resolve(orders))
     }
     const store = createOrderStore(session)
@@ -136,8 +148,8 @@ describe('order store', () => {
     const failure = new Error('current refresh failed')
     const session = {
       customer:ref({ id:7 }),
-      orderRequest:vi.fn(path => {
-        if (path.endsWith('/ops')) return Promise.resolve(ops)
+      orderRequest:vi.fn((path, _options, _isCurrent, validateResponse) => {
+        if (path.endsWith('/ops')) return Promise.resolve(validateResponse(ops)).then(() => ops)
         session.customer.value = null
         return Promise.reject(failure)
       })
@@ -160,6 +172,8 @@ describe('order store', () => {
     { statuses:statuses.map((item, index) => index ? item : { ...item, routeAlias:7 }), currencies },
     { statuses:statuses.map((item, index) => index ? item : { ...item, upperStatusName:' ' }), currencies },
     { statuses:statuses.map((item, index) => index ? item : { ...item, upperStatusRouteAlias:7 }), currencies },
+    { statuses:statuses.map((item, index) => index ? item : { ...item, isTerminal:'false' }), currencies },
+    { statuses:statuses.map(item => item.value === 300 ? { ...item, upperStatusValue:400 } : item), currencies },
     { statuses, currencies:[...currencies, { ...currencies[0], value:999 }] },
     { statuses, currencies:[...currencies, { ...currencies[0], value:999, routeAlias:'rub' }] },
     { statuses, currencies:currencies.map((item, index) => index ? item : { ...item, name:' ' }) },
