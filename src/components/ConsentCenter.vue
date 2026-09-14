@@ -9,6 +9,7 @@ import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { LEGAL_DOCUMENT_KIND, CONSENT_STATUSES, documentNodes, isDocumentId, moscowTime } from '../consentFormatting.js'
 import {
   createInternalProblem,
+  asServiceUnavailableProblem,
   isServiceUnavailableProblem,
   normalizeProblem,
   presentProblem
@@ -31,6 +32,10 @@ const props = defineProps({
     type: String,
     default: 'auto',
     validator: value => ['auto', 'personal'].includes(value)
+  },
+  noticeSuppressed: {
+    type: Boolean,
+    default: false
   }
 })
 const session = useSession()
@@ -65,11 +70,9 @@ const authenticated = computed(() => Boolean(session.customer.value))
 const personalPage = computed(() => props.mode === 'consents' && authenticated.value)
 const consentPageTitle = computed(() => store.kindName(LEGAL_DOCUMENT_KIND.PERSONAL_DATA_CONSENT)
   || 'Загрузка юридического документа')
-const consentPageCopy = 'Здесь можно проверить актуальность согласия, историю документов и состояние обращения.'
 const status = computed(() => mine.value?.statuses.find(item => item.kind === LEGAL_DOCUMENT_KIND.PERSONAL_DATA_CONSENT))
-const latestPersonalGrant = computed(() => (mine.value?.history || [])
-  .filter(item => item.kind === LEGAL_DOCUMENT_KIND.PERSONAL_DATA_CONSENT && item.decision === 'grant')
-  .sort((left, right) => Date.parse(right.at) - Date.parse(left.at))[0] || null)
+const historyNewestFirst = computed(() => [...(mine.value?.history || [])]
+  .sort((left, right) => Date.parse(right.at) - Date.parse(left.at)))
 const withdrawalPending = computed(() => mine.value?.withdrawalRequest?.processed === false)
 const legalDocumentHasH1 = computed(() => {
   if (!document.value) return false
@@ -89,6 +92,8 @@ const message = computed(() => activeProblem.value ? presentProblem(activeProble
 const serviceUnavailable = computed(() => props.mode !== 'notice'
   && isServiceUnavailableProblem(activeProblem.value))
 const label = value => CONSENT_STATUSES[value] || value
+const serviceUnavailableMessage = computed(() => activeProblem.value
+  ? presentProblem(asServiceUnavailableProblem(activeProblem.value)) : '')
 function requireDocument(value, detail) {
   if (!value) throw createInternalProblem('invalidInput', { detail })
   if (!Number.isFinite(Date.parse(value.effectiveAt))) throw createInternalProblem('protocolError')
@@ -410,24 +415,22 @@ onUnmounted(() => {
   <ServiceUnavailablePage
     v-if="serviceUnavailable"
     :busy="busy"
+    :message="serviceUnavailableMessage"
     @retry="retry"
   />
 
   <section
-    v-else-if="mode === 'notice' && activeProblem"
+    v-else-if="mode === 'notice' && activeProblem && !noticeSuppressed"
     class="consent-recovery-notice"
     role="region"
     aria-labelledby="consent-recovery-title"
   >
-    <h2 id="consent-recovery-title">
-      Не удалось обновить согласия
-    </h2>
-    <UiAlert
-      :title="activeProblem.title"
-      class="consent-page__alert"
+    <h2
+      id="consent-recovery-title"
+      class="consent-recovery-notice__message"
     >
       {{ message }}
-    </UiAlert>
+    </h2>
     <div class="consent-recovery-notice__actions">
       <UiButton
         variant="primary"
@@ -443,14 +446,8 @@ onUnmounted(() => {
     v-else-if="mode === 'consents'"
     class="page-container consent-page"
   >
-    <header class="page-heading consent-page__heading">
-      <div>
-        <p class="page-kicker">
-          КОНФИДЕНЦИАЛЬНОСТЬ
-        </p>
-        <h1>{{ consentPageTitle }}</h1>
-        <p>{{ consentPageCopy }}</p>
-      </div>
+    <header class="page-heading consent-page__heading consent-page__heading--personal">
+      <h1>{{ consentPageTitle }}</h1>
       <UiButton
         variant="secondary"
         @click="router.push({ name: 'home' })"
@@ -472,57 +469,42 @@ onUnmounted(() => {
       v-if="personalPage"
       class="consent-page__panel consent-page__panel--personal"
     >
-      <section class="consent-section consent-section--soft">
-        <h2>
-          Состояние согласия
-        </h2>
-        <dl class="consent-summary">
-          <dt>Статус</dt>
-          <dd><span class="consent-status">{{ label(status?.status || 'unavailable') }}</span></dd>
-          <dt>Принятая версия</dt>
-          <dd>{{ latestPersonalGrant?.displayVersion || '—' }}</dd>
-          <dt>Дата принятия</dt>
-          <dd>{{ moscowTime(latestPersonalGrant?.at) }}</dd>
-          <dt>Актуальная версия</dt>
-          <dd>{{ personalDocument?.displayVersion || '—' }}</dd>
-        </dl>
-      </section>
       <section
         v-if="personalDocument"
-        class="consent-section"
+        class="consent-section consent-section--document"
       >
         <h2>
-          Актуальный документ
+          Действующий документ
         </h2>
         <LegalDocumentReader :document="personalDocument" />
-      </section>
-      <section
-        v-if="status?.status !== 'current' && personalDocument"
-        class="consent-section"
-      >
-        <h2>
-          Подтверждение согласия
-        </h2>
-        <UiSelectionControl
-          :model-value="accepted"
-          :disabled="busy"
-          @update:model-value="accepted = $event"
+        <div
+          v-if="status?.status !== 'current'"
+          class="consent-renewal"
         >
-          Я даю отдельное согласие на хранение и обработку персональных данных по этому документу
-        </UiSelectionControl>
+          <UiSelectionControl
+            :model-value="accepted"
+            :disabled="busy"
+            @update:model-value="accepted = $event"
+          >
+            Я даю отдельное согласие на хранение и обработку персональных данных по этому документу
+          </UiSelectionControl>
+          <UiButton
+            variant="primary"
+            :disabled="busy || !accepted"
+            @click="grant"
+          >
+            Дать согласие
+          </UiButton>
+        </div>
       </section>
-      <section class="consent-section">
-        <h2>
-          Прекращение использования системы
-        </h2>
-        <p>Запрос будет записан для ручной обработки сотрудниками. Его отправка сама по себе не отключает учётную запись, не удаляет данные и не изменяет состояние согласия.</p>
+      <section class="consent-section consent-section--withdrawal">
         <UiButton
           variant="danger"
           block
           :disabled="busy || withdrawalPending"
           @click="requestWithdrawal"
         >
-          Прекратить использовать систему и отозвать согласие на обработку персональных данных
+          Прекратить использовать систему и отозвать согласие на хранение и обработку персональных данных
         </UiButton>
         <p
           v-if="mine?.withdrawalRequest"
@@ -533,16 +515,14 @@ onUnmounted(() => {
           {{ mine.withdrawalRequest.processed ? 'Обработан' : 'Ожидает ручной обработки' }}
         </p>
       </section>
-      <section class="consent-section">
-        <h2>
-          История
-        </h2>
-        <ol
-          v-if="mine?.history?.length"
+      <details class="consent-history-section">
+        <summary>История</summary>
+        <ul
+          v-if="historyNewestFirst.length"
           class="consent-history"
         >
           <li
-            v-for="event in mine.history"
+            v-for="event in historyNewestFirst"
             :key="event.id"
           >
             {{ store.kindName(event.kind) }} · {{ label(event.decision) }} · {{ moscowTime(event.at) }}
@@ -550,28 +530,11 @@ onUnmounted(() => {
               Версия {{ event.displayVersion }}
             </RouterLink>
           </li>
-        </ol>
+        </ul>
         <p v-else>
           Записей пока нет.
         </p>
-      </section>
-      <div class="consent-page__actions">
-        <UiButton
-          v-if="status?.status !== 'current'"
-          variant="primary"
-          :disabled="busy || !personalDocument || !accepted"
-          @click="grant"
-        >
-          Дать согласие
-        </UiButton>
-        <UiButton
-          variant="quiet"
-          :disabled="busy"
-          @click="openPersonal"
-        >
-          Обновить
-        </UiButton>
-      </div>
+      </details>
     </div>
   </main>
 

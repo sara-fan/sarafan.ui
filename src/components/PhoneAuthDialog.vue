@@ -62,6 +62,8 @@ const dialogTitle = computed(() => ({
 })[step.value])
 const error = computed(() => problem.value ? presentProblem(problem.value) : session.notice.value)
 const phoneErrors = computed(() => problemFieldErrors(problem.value, 'phone'))
+const errorTitle = computed(() => problem.value && !isServiceUnavailableProblem(problem.value)
+  ? problem.value.title : '')
 const codeErrors = computed(() => problemFieldErrors(problem.value, 'code'))
 const termsErrors = computed(() => problemFieldErrors(problem.value, 'termsAccepted'))
 const personalDataErrors = computed(() => [...new Set(Object.keys(problem.value?.errors ?? {})
@@ -409,7 +411,7 @@ async function submitCode() {
       <UiAlert
         v-if="error"
         class="form-error"
-        :title="problem?.title"
+        :title="errorTitle"
       >
         {{ error }}
       </UiAlert>
@@ -504,7 +506,7 @@ async function submitCode() {
       <UiAlert
         v-if="error"
         class="form-error"
-        :title="problem?.title"
+        :title="errorTitle"
       >
         {{ error }}
       </UiAlert>
@@ -538,7 +540,7 @@ async function submitCode() {
       <UiAlert
         v-if="error"
         class="form-error"
-        :title="problem?.title"
+        :title="errorTitle"
       >
         {{ error }}
       </UiAlert>

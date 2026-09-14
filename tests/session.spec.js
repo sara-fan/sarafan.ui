@@ -108,7 +108,7 @@ describe('session store', () => {
 
     expect(session.customer.value).toBeNull()
     expect(session.restoreProblem.value).toMatchObject({ type:INTERNAL_PROBLEM_TYPES.sessionRestoreUnavailable })
-    expect(session.notice.value).toBe('Сервис недоступен. Пожалуйста, повторите позже.')
+    expect(session.notice.value).toBe('Сервис временно недоступен. Пожалуйста, повторите позже')
   })
 
   it.each([
@@ -133,7 +133,7 @@ describe('session store', () => {
       type:INTERNAL_PROBLEM_TYPES.serviceUnavailable
     })
     expect(session.customer.value).toBeNull()
-    expect(session.notice.value).toBe('Сервис недоступен. Пожалуйста, повторите позже.')
+    expect(session.notice.value).toBe('Сервис временно недоступен. Пожалуйста, повторите позже')
   })
 
   it('clears an existing session when verification returns an invalid customer state', async () => {
@@ -159,7 +159,7 @@ describe('session store', () => {
     })
 
     expect(session.customer.value).toBeNull()
-    expect(session.notice.value).toBe('Сервис недоступен. Пожалуйста, повторите позже.')
+    expect(session.notice.value).toBe('Сервис временно недоступен. Пожалуйста, повторите позже')
   })
 
   it('does not clear the current session for an aborted stale verification', async () => {
@@ -236,7 +236,7 @@ describe('session store', () => {
     await session.restoreSession()
 
     expect(session.customer.value).toBeNull()
-    expect(session.notice.value).toBe('Сервис недоступен. Пожалуйста, повторите позже.')
+    expect(session.notice.value).toBe('Сервис временно недоступен. Пожалуйста, повторите позже')
     expect(session.restoreProblem.value).toMatchObject({ type:INTERNAL_PROBLEM_TYPES.sessionRestoreUnavailable })
   })
 
@@ -481,7 +481,7 @@ describe('session store', () => {
           : session.updateProfile({ firstName:'Анна' })).rejects.toMatchObject({ type:INTERNAL_PROBLEM_TYPES.serviceUnavailable })
       }
       expect(session.customer.value).toBeNull()
-      expect(session.notice.value).toBe('Сервис недоступен. Пожалуйста, повторите позже.')
+      expect(session.notice.value).toBe('Сервис временно недоступен. Пожалуйста, повторите позже')
       await session.getPhoto()
       expect(fetch.mock.calls.at(-1)[1].headers.has('Authorization')).toBe(false)
     })
@@ -582,7 +582,7 @@ describe('session store', () => {
     await session.verifyCode({ phone:original.phone, code:'1111' })
     await expect(session.updateProfile({ firstName:'Анна' })).rejects.toMatchObject({ type:INTERNAL_PROBLEM_TYPES.serviceUnavailable })
     expect(session.customer.value).toBeNull()
-    expect(session.notice.value).toBe('Сервис недоступен. Пожалуйста, повторите позже.')
+    expect(session.notice.value).toBe('Сервис временно недоступен. Пожалуйста, повторите позже')
   })
 
   it('propagates one shared refresh failure to every concurrent authorized caller', async () => {
@@ -713,7 +713,7 @@ describe('session store', () => {
       type: INTERNAL_PROBLEM_TYPES.serviceUnavailable
     })
     expect(session.customer.value).toBeNull()
-    expect(session.notice.value).toBe('Сервис недоступен. Пожалуйста, повторите позже.')
+    expect(session.notice.value).toBe('Сервис временно недоступен. Пожалуйста, повторите позже')
   })
 
   it('refreshes once and retries an authorized request after a 401', async () => {
@@ -823,7 +823,7 @@ describe('session store', () => {
     await expect(session.requestCode('+79990000004')).rejects.toMatchObject({
       type: INTERNAL_PROBLEM_TYPES.serviceUnavailable,
       code: 'ui_service_unavailable',
-      detail: 'Сервис недоступен. Пожалуйста, повторите позже.'
+      detail: 'Сервис временно недоступен. Пожалуйста, повторите позже'
     })
   })
 
@@ -834,7 +834,7 @@ describe('session store', () => {
     await expect(session.requestCode('+79990000004')).rejects.toMatchObject({
       type: INTERNAL_PROBLEM_TYPES.serviceUnavailable,
       code: 'ui_service_unavailable',
-      detail: 'Сервис недоступен. Пожалуйста, повторите позже.'
+      detail: 'Сервис временно недоступен. Пожалуйста, повторите позже'
     })
   })
 
@@ -904,10 +904,10 @@ describe('session store', () => {
     await session.verifyCode({ phone: customer.phone, code: '1111' })
     await expect(session.updateProfile({ firstName:'Анна' })).rejects.toMatchObject({
       code: 'ui_service_unavailable',
-      detail: 'Сервис недоступен. Пожалуйста, повторите позже.'
+      detail: 'Сервис временно недоступен. Пожалуйста, повторите позже'
     })
     expect(session.customer.value).toBeNull()
-    expect(session.notice.value).toBe('Сервис недоступен. Пожалуйста, повторите позже.')
+    expect(session.notice.value).toBe('Сервис временно недоступен. Пожалуйста, повторите позже')
   })
 
 
@@ -1052,7 +1052,9 @@ describe('session store', () => {
 
     expect(session.customer.value).toBeNull()
     expect(session.restoreProblem.value).toMatchObject({
-      type: INTERNAL_PROBLEM_TYPES.sessionRestoreUnavailable
+      type: INTERNAL_PROBLEM_TYPES.sessionRestoreUnavailable,
+      title: 'Сервис временно недоступен',
+      detail: 'Сервис временно недоступен. Пожалуйста, повторите позже'
     })
     expect(session.restoreProblem.value).not.toHaveProperty('status')
   })
@@ -1068,7 +1070,7 @@ describe('session store', () => {
     expect(session.restoreProblem.value).toMatchObject({
       type: INTERNAL_PROBLEM_TYPES.sessionRestoreUnavailable
     })
-    expect(session.notice.value).toBe('Сервис недоступен. Пожалуйста, повторите позже.')
+    expect(session.notice.value).toBe('Сервис временно недоступен. Пожалуйста, повторите позже')
     expect(loggerMocks.log.mock.calls.filter(([event]) => event === EVENTS.sessionRestoreFailed)).toHaveLength(1)
     expect(loggerMocks.log.mock.calls.some(([event, attributes, context]) =>
       event === EVENTS.apiRequestFailed
@@ -1125,7 +1127,7 @@ describe('session store', () => {
       throw createInternalProblem('protocolError')
     })).rejects.toMatchObject({ type:INTERNAL_PROBLEM_TYPES.serviceUnavailable })
     expect(session.customer.value).toBeNull()
-    expect(session.notice.value).toBe('Сервис недоступен. Пожалуйста, повторите позже.')
+    expect(session.notice.value).toBe('Сервис временно недоступен. Пожалуйста, повторите позже')
   })
 
   it('treats malformed current order Ops as identity-scoped service unavailability', async () => {
@@ -1144,6 +1146,6 @@ describe('session store', () => {
       throw createInternalProblem('protocolError')
     })).rejects.toMatchObject({ type:INTERNAL_PROBLEM_TYPES.serviceUnavailable })
     expect(session.customer.value).toBeNull()
-    expect(session.notice.value).toBe('Сервис недоступен. Пожалуйста, повторите позже.')
+    expect(session.notice.value).toBe('Сервис временно недоступен. Пожалуйста, повторите позже')
   })
 })

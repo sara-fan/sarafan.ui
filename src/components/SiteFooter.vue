@@ -9,6 +9,13 @@ import { RouterLink } from 'vue-router'
 import { useConsents } from '../stores/consents.js'
 import BrandLockup from './BrandLockup.vue'
 
+defineProps({
+  authenticated: {
+    type: Boolean,
+    default: false
+  }
+})
+
 const { ops } = useConsents()
 const documents = computed(() => ops.value?.kinds || [])
 </script>
@@ -31,7 +38,10 @@ const documents = computed(() => ops.value?.kinds || [])
         >
           {{ document.name }}
         </RouterLink>
-        <RouterLink :to="{ name: 'consents' }">
+        <RouterLink
+          v-if="authenticated"
+          :to="{ name: 'consents' }"
+        >
           Согласия
         </RouterLink>
       </nav>

@@ -168,9 +168,12 @@ describe('shared application chrome and controls', () => {
     expect(wrapper.emitted('authenticate')).toHaveLength(1)
   })
 
-  it('uses server-provided legal aliases and the required partner attribution', async () => {
+  it('uses server-provided legal aliases, gates the consent shortcut, and shows partner attribution', async () => {
     const router = await routerAt()
-    const wrapper = mount(SiteFooter, { global: { plugins: [router] } })
+    const wrapper = mount(SiteFooter, {
+      props: { authenticated: true },
+      global: { plugins: [router] }
+    })
     expect(wrapper.findAll('.site-footer__links a')).toHaveLength(3)
     expect(wrapper.get('a[href="/legal/privacy-policy"]').exists()).toBe(true)
     expect(wrapper.get('a[href="/consents"]').text()).toBe('Согласия')
@@ -179,6 +182,9 @@ describe('shared application chrome and controls', () => {
     h.store.ops.value = null
     await flushPromises()
     expect(wrapper.findAll('.site-footer__links a')).toHaveLength(1)
+    await wrapper.setProps({ authenticated: false })
+    expect(wrapper.find('a[href="/consents"]').exists()).toBe(false)
+    expect(wrapper.findAll('.site-footer__links a')).toHaveLength(0)
   })
 
   it('covers button, alert, field, selection, and dialog states', async () => {

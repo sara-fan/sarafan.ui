@@ -85,9 +85,7 @@ it('loads legal footer links on a fresh anonymous public visit', async () => {
   try {
     expect(h.store.loadOps).toHaveBeenCalledTimes(1)
     expect(h.store.loadMine).not.toHaveBeenCalled()
-    expect(footer.findAll('nav a').map(link => link.attributes('href'))).toEqual([
-      ...kinds.map(kind => `/legal/${kind.routeAlias}`), '/consents'
-    ])
+    expect(footer.findAll('nav a').map(link => link.attributes('href'))).toEqual(kinds.map(kind => `/legal/${kind.routeAlias}`))
   } finally { footer.unmount() }
 })
 it.each(['/consents', '/consents/personal-data'])(
@@ -100,9 +98,7 @@ it.each(['/consents', '/consents/personal-data'])(
     try {
       expect(h.store.loadOps).toHaveBeenCalledTimes(1)
       expect(h.store.loadMine).not.toHaveBeenCalled()
-      expect(footer.findAll('nav a').map(link => link.attributes('href'))).toEqual([
-        ...kinds.map(kind => `/legal/${kind.routeAlias}`), '/consents'
-      ])
+      expect(footer.findAll('nav a').map(link => link.attributes('href'))).toEqual(kinds.map(kind => `/legal/${kind.routeAlias}`))
     } finally { footer.unmount() }
   }
 )
@@ -131,6 +127,24 @@ it('recovers a stale catalogue failure and retries a new failure without a custo
   expect(h.store.loadMine).not.toHaveBeenCalled()
   expect(wrapper.find('.consent-recovery-notice').exists()).toBe(false)
 })
+it('presents malformed HTTP responses with one simple retry message', async () => {
+  h.store.opsProblem.value = createInternalProblem('protocolError')
+  await mountCenter(); await flushPromises()
+
+  const notice = wrapper.get('.consent-recovery-notice')
+  expect(notice.text()).toContain('Сервис временно недоступен. Пожалуйста, повторите позже')
+  expect(notice.text().split('Сервис временно недоступен. Пожалуйста, повторите позже')).toHaveLength(2)
+  expect(notice.get('.consent-recovery-notice__message').text()).toBe('Сервис временно недоступен. Пожалуйста, повторите позже')
+  expect(notice.find('.ui-alert').exists()).toBe(false)
+  expect(notice.text()).not.toContain('Не удалось обновить согласия')
+  expect(notice.text()).not.toContain('Некорректный ответ сервиса')
+  expect(notice.text()).not.toContain('неподдерживаемом формате')
+  await wrapper.setProps({ noticeSuppressed:true })
+  expect(wrapper.find('.consent-recovery-notice').exists()).toBe(false)
+  await wrapper.setProps({ noticeSuppressed:false })
+  expect(wrapper.find('.consent-recovery-notice').exists()).toBe(true)
+})
+
 it('does not load customer history after catalogue loading outlives the notice', async () => {
   h.session.customer.value = { id:7 }
   const pending = deferred()
@@ -171,18 +185,20 @@ it('renews personal consent and shows the latest manual request', async () => {
   }
   await mountCenter('/consents'); await flushPromises()
   expect(wrapper.get('h1').text()).toBe('Серверное название согласия')
-  expect(wrapper.text()).toContain('Требуется новое согласие')
-  expect(wrapper.text()).toContain('Принятая версия1')
-  expect(wrapper.text()).toContain('Актуальная версия2')
+  expect(wrapper.find('.page-kicker').exists()).toBe(false)
+  expect(wrapper.text()).not.toContain('Здесь можно проверить актуальность согласия')
+  expect(wrapper.text()).not.toContain('Состояние согласия')
+  expect(wrapper.text()).toContain('Действующий документ')
+  expect(wrapper.get('.consent-history-section').attributes('open')).toBeUndefined()
   expect(wrapper.findAll('.consent-history a').map(link => link.attributes('href'))).toEqual([`/legal/${id}`])
   expect(wrapper.text()).toContain('Обработан')
-  expect(wrapper.text()).toContain('не отключает учётную запись')
+  expect(wrapper.text()).not.toContain('не отключает учётную запись')
   await state().grant(); expect(h.store.grant).not.toHaveBeenCalled()
   await wrapper.find('.consent-page__panel--personal input[type=checkbox]').setValue(true)
   await click('Дать согласие'); expect(h.store.grant).toHaveBeenCalledWith(document, expect.any(String))
-  await click('Прекратить использовать систему и отозвать согласие на обработку персональных данных')
+  await click('Прекратить использовать систему и отозвать согласие на хранение и обработку персональных данных')
   expect(h.store.requestWithdrawal).toHaveBeenCalledWith()
-  await click('Обновить')
+  await state().openPersonal(); await flushPromises()
   expect(wrapper.findComponent(LegalDocumentReader).exists()).toBe(true)
   h.store.loadMine.mockClear()
   vi.spyOn(globalThis.document, 'visibilityState', 'get').mockReturnValue('visible')
@@ -193,6 +209,36 @@ it('renews personal consent and shows the latest manual request', async () => {
   h.session.customer.value = null; await flushPromises()
   expect(wrapper.text()).not.toContain('Покупатель')
   expect(h.store.resetCustomer).toHaveBeenCalledTimes(2)
+})
+it('shows consent history newest first without ordinal markers', async () => {
+  h.session.customer.value = { id:7 }
+  h.store.mine.value = {
+    statuses:[],
+    history:[
+      { id:'oldest', kind:1, decision:'grant', at:'2026-09-09T10:00:00Z', documentId:id, displayVersion:'1' },
+      { id:'newest', kind:2, decision:'grant', at:'2026-09-14T20:14:00Z', documentId:id, displayVersion:'3' },
+      { id:'middle', kind:3, decision:'grant', at:'2026-09-14T16:05:00Z', documentId:id, displayVersion:'2' }
+    ],
+    withdrawalRequest:null
+  }
+  h.store.current.mockResolvedValue({
+    document:{
+      ...document,
+      html:'<h1>Согласие на хранение и обработку персональных данных</h1><p>Текст.</p>'
+    }
+  })
+
+  await mountCenter('/consents'); await flushPromises()
+
+  const list = wrapper.get('.consent-history')
+  expect(list.element.tagName).toBe('UL')
+  expect(list.findAll('li').map(item => item.get('a').text())).toEqual([
+    'Версия 3',
+    'Версия 2',
+    'Версия 1'
+  ])
+  expect(wrapper.get('.consent-section--document .legal-document__body h1').text())
+    .toBe('Согласие на хранение и обработку персональных данных')
 })
 it('uses a generic consent-page heading while legal operations are loading', async () => {
   h.session.customer.value = { id:7 }
@@ -208,21 +254,21 @@ it('uses a generic consent-page heading while legal operations are loading', asy
 it('shows personal-data and withdrawal failures without losing consent choices or identity', async () => {
   h.session.customer.value = { id:7 }
   h.store.loadMine.mockRejectedValueOnce(denied())
-  await mountCenter('/consents'); await flushPromises(); expect(wrapper.text()).toContain('Сервис недоступен')
+  await mountCenter('/consents'); await flushPromises(); expect(wrapper.text()).toContain('Сервис временно недоступен. Пожалуйста, повторите позже')
   await click('Повторить')
   expect(h.store.current).toHaveBeenCalledWith(LEGAL_DOCUMENT_KIND.PERSONAL_DATA_CONSENT)
-  h.store.loadMine.mockRejectedValueOnce(denied()); await click('Обновить')
-  expect(wrapper.text()).toContain('Сервис недоступен')
+  h.store.loadMine.mockRejectedValueOnce(denied()); await state().openPersonal(); await flushPromises()
+  expect(wrapper.text()).toContain('Сервис временно недоступен. Пожалуйста, повторите позже')
   await click('Повторить')
   await wrapper.find('.consent-page__panel--personal input[type=checkbox]').setValue(true)
   h.store.grant.mockRejectedValueOnce(denied()); await click('Дать согласие')
   expect(state().accepted).toBe(true)
   await click('Повторить')
   h.store.requestWithdrawal.mockRejectedValueOnce(denied())
-  await click('Прекратить использовать систему и отозвать согласие на обработку персональных данных')
+  await click('Прекратить использовать систему и отозвать согласие на хранение и обработку персональных данных')
   expect(h.session.customer.value.id).toBe(7)
   await click('Повторить')
-  h.store.current.mockResolvedValue({ document:null }); await click('Обновить')
+  h.store.current.mockResolvedValue({ document:null }); await state().openPersonal(); await flushPromises()
   expect(wrapper.find('.consent-page__panel--personal').findComponent(LegalDocumentReader).exists()).toBe(false)
   expect(wrapper.text()).toContain('Документ о согласии на обработку персональных данных пока не действует.')
 })
@@ -250,7 +296,9 @@ it('makes immutable and current legal links available without login as routed pa
   await click('Повторить')
   expect(wrapper.findComponent(LegalDocumentReader).exists()).toBe(true)
   h.store.current.mockRejectedValueOnce(denied()); await router.push('/legal/user-agreement'); await flushPromises()
-  expect(wrapper.text()).toContain('Сервис недоступен. Пожалуйста, повторите позже.')
+  expect(wrapper.get('.service-unavailable-page h1').text())
+    .toBe('Сервис временно недоступен. Пожалуйста, повторите позже')
+  expect(wrapper.find('.service-unavailable-page .ui-alert').exists()).toBe(false)
   expect(wrapper.find('.service-unavailable-page').exists()).toBe(true)
 })
 it('uses the canonical document heading without adding a competing page h1', async () => {
@@ -758,7 +806,7 @@ it('reuses idempotent consent keys but only refreshes status after a withdrawal 
   expect(h.store.grant.mock.calls[1][1]).toBe(h.store.grant.mock.calls[0][1])
   h.store.loadMine.mockClear()
   h.store.requestWithdrawal.mockRejectedValue(denied())
-  await click('Прекратить использовать систему и отозвать согласие на обработку персональных данных')
+  await click('Прекратить использовать систему и отозвать согласие на хранение и обработку персональных данных')
   await click('Повторить')
   expect(h.store.requestWithdrawal).toHaveBeenCalledTimes(1)
   expect(h.store.loadMine).toHaveBeenCalledTimes(1)
@@ -784,7 +832,7 @@ it('disables repeat submission while the latest request is pending and enables i
   h.session.customer.value = { id:7 }
   h.store.mine.value = { statuses:[], history:[], withdrawalRequest:{ customerId:7, requestedAt:'2026-09-01T10:00:00Z', processed:false } }
   await mountCenter('/consents/personal-data'); await flushPromises()
-  const action = button('Прекратить использовать систему и отозвать согласие на обработку персональных данных')
+  const action = button('Прекратить использовать систему и отозвать согласие на хранение и обработку персональных данных')
   expect(action.attributes('disabled')).toBeDefined()
   expect(wrapper.text()).toContain('Ожидает ручной обработки')
   h.store.mine.value.withdrawalRequest.processed = true; await nextTick()
@@ -804,7 +852,7 @@ it('reloads changed versions and resets affirmation without accepting the replac
   h.store.grant.mockRejectedValueOnce(changed); h.store.current.mockRejectedValueOnce(denied())
   await click('Дать согласие')
   expect(wrapper.findComponent(LegalDocumentReader).exists()).toBe(false)
-  expect(wrapper.text()).toContain('Сервис недоступен')
+  expect(wrapper.text()).toContain('Сервис временно недоступен. Пожалуйста, повторите позже')
   await click('Повторить')
   expect(wrapper.findComponent(LegalDocumentReader).exists()).toBe(true)
   expect(h.store.grant).toHaveBeenCalledTimes(2)

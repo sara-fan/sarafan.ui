@@ -119,6 +119,15 @@ describe('shared problem model', () => {
     expect(isServiceUnavailableProblem(createInternalProblem('networkUnavailable'))).toBe(true)
     expect(isServiceUnavailableProblem(createInternalProblem('protocolError'))).toBe(true)
     expect(isServiceUnavailableProblem(createInternalProblem('serviceUnavailable'))).toBe(true)
+    expect(createInternalProblem('protocolError')).toMatchObject({
+      title:'Сервис временно недоступен',
+      detail:'Сервис временно недоступен. Пожалуйста, повторите позже'
+    })
+    expect(createInternalProblem('sessionRestoreUnavailable')).toMatchObject({
+      title:'Сервис временно недоступен',
+      detail:'Сервис временно недоступен. Пожалуйста, повторите позже'
+    })
+
     expect(isServiceUnavailableProblem(server)).toBe(true)
     expect(isServiceUnavailableProblem({ status:503 })).toBe(false)
     expect(isServiceUnavailableProblem({ status:409 })).toBe(false)
@@ -132,9 +141,16 @@ describe('shared problem model', () => {
 
     expect(converted).toMatchObject({
       type:INTERNAL_PROBLEM_TYPES.serviceUnavailable,
-      detail:'Сервис недоступен. Пожалуйста, повторите позже.'
+      detail:'Сервис временно недоступен. Пожалуйста, повторите позже'
     })
     expect(converted.cause).toBe(network)
     expect(asServiceUnavailableProblem(existing)).toBe(existing)
+    const protocol = createInternalProblem('protocolError')
+    expect(asServiceUnavailableProblem(protocol)).toMatchObject({
+      type:INTERNAL_PROBLEM_TYPES.serviceUnavailable,
+      detail:'Сервис временно недоступен. Пожалуйста, повторите позже',
+      cause:protocol
+    })
+
   })
 })

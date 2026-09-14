@@ -12,7 +12,7 @@ import PhoneAuthDialog from './components/PhoneAuthDialog.vue'
 import SiteFooter from './components/SiteFooter.vue'
 import UiAlert from './components/ui/UiAlert.vue'
 import UiButton from './components/ui/UiButton.vue'
-import { presentProblem, suppressProblem } from './errors/problem.js'
+import { SERVICE_UNAVAILABLE_MESSAGE, suppressProblem } from './errors/problem.js'
 import { ACCESS } from './router.js'
 import { useSession } from './stores/session.js'
 
@@ -24,7 +24,7 @@ const authOpen = ref(false)
 
 const customerRoute = computed(() => route.meta.access === ACCESS.CUSTOMER)
 const consentRoute = computed(() => route.meta.access === ACCESS.LIMITED)
-const restoreMessage = computed(() => restoreProblem.value ? presentProblem(restoreProblem.value) : '')
+const restoreMessage = SERVICE_UNAVAILABLE_MESSAGE
 
 async function startSession(force = false) {
   if (sessionStarted && !force) return
@@ -71,15 +71,16 @@ onMounted(async () => {
     <div class="app-content">
       <ConsentCenter
         v-if="!consentRoute"
+        :notice-suppressed="Boolean(restoreProblem) || authOpen"
       />
       <div
         class="app-route-content"
       >
         <div
-          v-if="restoreProblem && !customerRoute && !consentRoute"
+          v-if="restoreProblem && !authOpen && !customerRoute && !consentRoute"
           class="session-notice page-container"
         >
-          <UiAlert :title="restoreProblem.title">
+          <UiAlert>
             <p>{{ restoreMessage }}</p>
             <UiButton
               variant="secondary"
@@ -94,39 +95,33 @@ onMounted(async () => {
           <main
             v-if="restoring"
             class="page-container route-gate"
-            aria-label="Восстановление сессии"
+            aria-label="Загрузка"
           >
             <span
               class="route-gate__spinner"
               aria-hidden="true"
             />
-            <h1>Восстанавливаем сессию</h1>
+            <h1>Загрузка</h1>
           </main>
           <main
             v-else-if="restoreProblem"
             class="page-container route-gate"
           >
-            <p class="page-kicker">
-              СЕССИЯ
-            </p>
-            <h1>Не удалось открыть раздел</h1>
-            <UiAlert :title="restoreProblem.title">
-              <p>{{ restoreMessage }}</p>
-              <div class="route-gate__actions">
-                <UiButton
-                  variant="primary"
-                  @click="startSession(true)"
-                >
-                  Повторить
-                </UiButton>
-                <UiButton
-                  variant="secondary"
-                  @click="router.push({ name: 'home' })"
-                >
-                  На главную
-                </UiButton>
-              </div>
-            </UiAlert>
+            <h1>{{ restoreMessage }}</h1>
+            <div class="route-gate__actions">
+              <UiButton
+                variant="primary"
+                @click="startSession(true)"
+              >
+                Повторить
+              </UiButton>
+              <UiButton
+                variant="secondary"
+                @click="router.push({ name: 'home' })"
+              >
+                На главную
+              </UiButton>
+            </div>
           </main>
           <RouterView v-else-if="customer" />
         </template>
@@ -134,7 +129,7 @@ onMounted(async () => {
       </div>
     </div>
 
-    <SiteFooter />
+    <SiteFooter :authenticated="Boolean(customer)" />
 
     <PhoneAuthDialog v-model="authOpen" />
   </v-app>

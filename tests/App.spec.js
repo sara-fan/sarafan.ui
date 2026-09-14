@@ -32,6 +32,7 @@ async function mountApp(path = '/') {
       stubs: {
         ConsentCenter: {
           name: 'ConsentCenter',
+          props: ['noticeSuppressed'],
           template: '<section class="consent-notice-stub" />'
         },
         PhoneAuthDialog: {
@@ -77,6 +78,7 @@ describe('App routing and privacy gates', () => {
     expect(wrapper.text()).toContain('Закажите товар — остальное сделаем мы')
     expect(wrapper.find('.route-gate').exists()).toBe(false)
     expect(wrapper.findAll('.site-footer')).toHaveLength(1)
+    expect(wrapper.find('.site-footer a[href="/consents"]').exists()).toBe(false)
     expect(h.session.restoreSession).toHaveBeenCalledOnce()
     expect(wrapper.get('.app-header__login').attributes('disabled')).toBeUndefined()
     wrapper.findComponent(AppHeader).vm.$emit('authenticate')
@@ -98,19 +100,21 @@ describe('App routing and privacy gates', () => {
     h.session.restoring.value = true
     const { wrapper } = await mountApp('/orders')
     await flushPromises()
-    expect(wrapper.text()).toContain('Восстанавливаем сессию')
+    expect(wrapper.text()).toContain('Загрузка')
     expect(wrapper.text()).not.toContain('Nike Air Max 90 Essential')
     expect(wrapper.findAll('.site-footer')).toHaveLength(1)
 
     h.session.restoring.value = true
     await flushPromises()
-    expect(wrapper.text()).toContain('Восстанавливаем сессию')
+    expect(wrapper.text()).toContain('Загрузка')
+    expect(wrapper.text()).not.toContain('сесси')
     expect(wrapper.text()).not.toContain('Nike Air Max 90 Essential')
 
     h.session.restoring.value = false
     h.session.restoreProblem.value = createInternalProblem('sessionRestoreUnavailable')
     await flushPromises()
-    expect(wrapper.text()).toContain('Не удалось открыть раздел')
+    expect(wrapper.text()).toContain('Сервис временно недоступен. Пожалуйста, повторите позже')
+    expect(wrapper.text()).not.toContain('сеанс')
     await wrapper.findAll('button').find(item => item.text() === 'Повторить').trigger('click')
     expect(h.session.restoreSession).toHaveBeenCalled()
 
@@ -145,9 +149,16 @@ describe('App routing and privacy gates', () => {
     const { router, wrapper } = await mountApp()
     await flushPromises()
     expect(wrapper.text()).toContain('Закажите товар — остальное сделаем мы')
-    expect(wrapper.text()).toContain('Не удалось восстановить сеанс')
+    expect(wrapper.text()).toContain('Сервис временно недоступен. Пожалуйста, повторите позже')
+    expect(wrapper.text()).not.toContain('сеанс')
+    expect(wrapper.findAll('.session-notice')).toHaveLength(1)
+    expect(wrapper.findComponent({ name:'ConsentCenter' }).props('noticeSuppressed')).toBe(true)
     await wrapper.findAll('button').find(item => item.text() === 'Повторить').trigger('click')
     expect(h.session.restoreSession).toHaveBeenCalled()
+    await wrapper.get('.app-header__login').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.session-notice').exists()).toBe(false)
+    expect(wrapper.find('.phone-auth-stub').exists()).toBe(true)
     await router.push('/legal/privacy-policy')
     await flushPromises()
     expect(wrapper.find('.session-notice').exists()).toBe(false)
@@ -157,6 +168,7 @@ describe('App routing and privacy gates', () => {
     const { router, wrapper } = await mountApp()
     await flushPromises()
     expect(wrapper.text()).toContain('Закажите товар — остальное сделаем мы')
+    expect(wrapper.find('.site-footer a[href="/consents"]').exists()).toBe(false)
     const productLink = wrapper.get('input')
     await productLink.setValue('https://shop.example/product')
     expect(wrapper.find('.consent-notice-stub').exists()).toBe(true)
@@ -168,6 +180,7 @@ describe('App routing and privacy gates', () => {
     await flushPromises()
     expect(wrapper.text()).toContain('Nike Air Max 90 Essential')
     expect(wrapper.find('.consent-notice-stub').exists()).toBe(true)
+    expect(wrapper.get('.site-footer a[href="/consents"]').text()).toBe('Согласия')
     expect(wrapper.get('.app-route-content').attributes('style') || '').not.toContain('display: none')
 
     await router.push('/consents/cookies'); await flushPromises()

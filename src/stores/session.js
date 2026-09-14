@@ -12,6 +12,7 @@ import {
   INTERNAL_PROBLEM_TYPES,
   ProblemError,
   asServiceUnavailableProblem,
+  SERVICE_UNAVAILABLE_MESSAGE,
   createInternalProblem,
   isServiceUnavailableProblem,
   suppressProblem
@@ -34,7 +35,6 @@ let refreshAbortController = null
 let opsPromise = null
 const authenticationOps = ref(null)
 const customerOps = ref(null)
-const SERVICE_UNAVAILABLE_MESSAGE = 'Сервис недоступен. Пожалуйста, повторите позже.'
 const REQUIRED_AUTHENTICATION_ALIASES = ['code', 'agreement', 'registration']
 const REQUIRED_CUSTOMER_ALIASES = ['preliminary', 'complete', 'disabled']
 

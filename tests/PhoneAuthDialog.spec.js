@@ -160,8 +160,8 @@ describe('PhoneAuthDialog', () => {
       await wrapper.get('.auth-form').trigger('submit')
       await flushPromises()
     }
-    expect(wrapper.get('.form-error').text()).toContain('Сервис недоступен. Пожалуйста, повторите позже.')
-    expect(session.notice.value).toBe('Сервис недоступен. Пожалуйста, повторите позже.')
+    expect(wrapper.get('.form-error').text()).toBe('Сервис временно недоступен. Пожалуйста, повторите позже')
+    expect(session.notice.value).toBe('Сервис временно недоступен. Пожалуйста, повторите позже')
     const requestCount = fetch.mock.calls.length
 
     await wrapper.setProps({ modelValue:false })
@@ -187,8 +187,8 @@ describe('PhoneAuthDialog', () => {
     await useSession().restoreSession()
     await wrapper.setProps({ modelValue:true })
     await flushPromises()
-    expect(wrapper.get('.form-error').text()).toContain('Сервис недоступен. Пожалуйста, повторите позже.')
-    expect(useSession().notice.value).toBe('Сервис недоступен. Пожалуйста, повторите позже.')
+    expect(wrapper.get('.form-error').text()).toBe('Сервис временно недоступен. Пожалуйста, повторите позже')
+    expect(useSession().notice.value).toBe('Сервис временно недоступен. Пожалуйста, повторите позже')
 
     await wrapper.setProps({ modelValue:false })
     await wrapper.setProps({ modelValue:true })
@@ -652,16 +652,19 @@ describe('PhoneAuthDialog', () => {
   it.each([
     {
       title:'network',
+      message:'Сервис временно недоступен. Пожалуйста, повторите позже',
       legalResponse:() => Promise.reject(new TypeError('private network failure'))
     },
     {
       title:'protocol',
+      message:'Сервис временно недоступен. Пожалуйста, повторите позже',
       legalResponse:() => Promise.resolve(response(200, {
         serverNow:'2026-09-11T12:00:00Z', nextChangeAt:null, document:{ id:'bad' }
       }))
     },
     {
       title:'server',
+      message:'Сервис временно недоступен. Пожалуйста, повторите позже',
       legalResponse:() => Promise.resolve(problemResponse(503, 'service-unavailable', {
         detail:'Внутренняя ошибка Core.'
       }))
@@ -683,7 +686,7 @@ describe('PhoneAuthDialog', () => {
     await wrapper.get('.auth-form').trigger('submit')
     await flushPromises()
 
-    expect(wrapper.get('.form-error').text()).toContain('Сервис недоступен. Пожалуйста, повторите позже.')
+    expect(wrapper.get('.form-error').text()).toBe(scenario.message)
     expect(wrapper.get('.form-error').text()).not.toContain('неподдерживаемом формате')
     expect(wrapper.get('input[name="phone"]').element.value).toBe('+79991234567')
   })
@@ -1080,7 +1083,7 @@ describe('PhoneAuthDialog', () => {
 
     expect(wrapper.get('input[name="phone"]').element.value).toBe('+79991234567')
     expect(wrapper.find('input[name="code"]').exists()).toBe(false)
-    expect(wrapper.get('.form-error').text()).toContain('Сервис недоступен')
+    expect(wrapper.get('.form-error').text()).toBe('Сервис временно недоступен. Пожалуйста, повторите позже')
   })
 
   it('presents a legal-document protocol failure during requirements restart as service unavailability', async () => {
@@ -1116,7 +1119,7 @@ describe('PhoneAuthDialog', () => {
     await flushPromises()
 
     expect(wrapper.get('input[name="phone"]').element.value).toBe('+79991234567')
-    expect(wrapper.get('.form-error').text()).toContain('Сервис недоступен. Пожалуйста, повторите позже.')
+    expect(wrapper.get('.form-error').text()).toContain('Сервис временно недоступен. Пожалуйста, повторите позже')
     expect(wrapper.get('.form-error').text()).not.toContain('неподдерживаемом формате')
   })
 
@@ -1144,7 +1147,7 @@ describe('PhoneAuthDialog', () => {
 
     expect(wrapper.find('input[name="code"]').exists()).toBe(false)
     expect(wrapper.findAll('input[type="checkbox"]').every(item => item.element.checked)).toBe(true)
-    expect(wrapper.get('.form-error').text()).toContain('Сервис недоступен. Пожалуйста, повторите позже.')
+    expect(wrapper.get('.form-error').text()).toContain('Сервис временно недоступен. Пожалуйста, повторите позже')
   })
 
   it('keeps code validation and a recoverable verification failure on the current form', async () => {
