@@ -8,12 +8,12 @@ import { describe, expect, it, vi } from 'vitest'
 import { createOrderStore, validateCustomerOrders, validateOrderOps } from '../src/stores/orders.js'
 
 const statuses = [
-  { value:0, name:'На проверке', routeAlias:'under_review', upperStatusValue:0, upperStatusName:'На проверке', upperStatusRouteAlias:'under_review', isTerminal:false },
-  { value:100, name:'Расчёт готов', routeAlias:'quote_ready', upperStatusValue:100, upperStatusName:'Расчёт готов', upperStatusRouteAlias:'quote_ready', isTerminal:false },
-  { value:200, name:'Расчёт истёк', routeAlias:'quote_expired', upperStatusValue:200, upperStatusName:'Расчёт истёк', upperStatusRouteAlias:'quote_expired', isTerminal:false },
-  { value:300, name:'Оплачен', routeAlias:'paid', upperStatusValue:300, upperStatusName:'Выполняется', upperStatusRouteAlias:'in_progress', isTerminal:false },
-  { value:400, name:'Получен', routeAlias:'received', upperStatusValue:400, upperStatusName:'Завершён', upperStatusRouteAlias:'completed', isTerminal:true },
-  { value:500, name:'Отменён', routeAlias:'cancelled', upperStatusValue:500, upperStatusName:'Отменён', upperStatusRouteAlias:'cancelled', isTerminal:true }
+  { value:0, name:'На проверке', routeAlias:'under_review', upperStatusValue:0, upperStatusName:'На проверке', upperStatusRouteAlias:'under_review', isTerminal:false, progressPercent:14 },
+  { value:100, name:'Расчёт готов', routeAlias:'quote_ready', upperStatusValue:100, upperStatusName:'Расчёт готов', upperStatusRouteAlias:'quote_ready', isTerminal:false, progressPercent:32 },
+  { value:200, name:'Расчёт истёк', routeAlias:'quote_expired', upperStatusValue:200, upperStatusName:'Расчёт истёк', upperStatusRouteAlias:'quote_expired', isTerminal:false, progressPercent:32 },
+  { value:300, name:'Оплачен', routeAlias:'paid', upperStatusValue:300, upperStatusName:'Выполняется', upperStatusRouteAlias:'in_progress', isTerminal:false, progressPercent:48 },
+  { value:400, name:'Получен', routeAlias:'received', upperStatusValue:400, upperStatusName:'Завершён', upperStatusRouteAlias:'completed', isTerminal:true, progressPercent:100 },
+  { value:500, name:'Отменён', routeAlias:'cancelled', upperStatusValue:500, upperStatusName:'Отменён', upperStatusRouteAlias:'cancelled', isTerminal:true, progressPercent:100 }
 ]
 const currencies = [
   { value:643, name:'Российский рубль', routeAlias:'rub' },
@@ -64,8 +64,9 @@ describe('order store', () => {
     expect(store.statusFor(100)?.routeAlias).toBe('quote_ready')
     expect(store.currencyFor(840)?.routeAlias).toBe('usd')
     expect(store.progressFor(0)).toBe(14)
-    expect(store.progressFor(300)).toBe(94)
+    expect(store.progressFor(300)).toBe(48)
     expect(store.progressFor(400)).toBe(100)
+    expect(store.progressFor(999)).toBeUndefined()
     expect(store.statusFor(999)).toBeUndefined()
     expect(store.currencyFor(999)).toBeUndefined()
   })
@@ -173,6 +174,9 @@ describe('order store', () => {
     { statuses:statuses.map((item, index) => index ? item : { ...item, upperStatusName:' ' }), currencies },
     { statuses:statuses.map((item, index) => index ? item : { ...item, upperStatusRouteAlias:7 }), currencies },
     { statuses:statuses.map((item, index) => index ? item : { ...item, isTerminal:'false' }), currencies },
+    { statuses:statuses.map((item, index) => index ? item : { ...item, progressPercent:1.5 }), currencies },
+    { statuses:statuses.map((item, index) => index ? item : { ...item, progressPercent:101 }), currencies },
+    { statuses:statuses.map(item => item.value === 400 ? { ...item, progressPercent:99 } : item), currencies },
     { statuses:statuses.map(item => item.value === 300 ? { ...item, upperStatusValue:400 } : item), currencies },
     { statuses, currencies:[...currencies, { ...currencies[0], value:999 }] },
     { statuses, currencies:[...currencies, { ...currencies[0], value:999, routeAlias:'rub' }] },
@@ -187,7 +191,7 @@ describe('order store', () => {
     {},
     [{ ...orders[0], id:0 }],
     [{ ...orders[0], id:1.5 }],
-    [{ ...orders[0], orderNumber:'bad' }],
+    [{ ...orders[0], orderNumber:' ' }],
     [{ ...orders[0], status:999 }],
     [{ ...orders[0], sourceUrl:'ftp://shop.example/item' }],
     [{ ...orders[0], imageUrl:'invalid' }],
@@ -200,5 +204,11 @@ describe('order store', () => {
     [orders[0], { ...orders[1], orderNumber:orders[0].orderNumber }]
   ])('rejects malformed or unsorted orders %#', value => {
     protocolFailure(() => validateCustomerOrders(value, validateOrderOps(ops)))
+  })
+
+  it('accepts opaque unique Core-owned order numbers', () => {
+    const value = orders.map((order, index) => ({ ...order, orderNumber:`Заказ / ${index + 1}` }))
+    expect(validateCustomerOrders(value, validateOrderOps(ops)).map(order => order.orderNumber))
+      .toEqual(['Заказ / 1', 'Заказ / 2'])
   })
 })

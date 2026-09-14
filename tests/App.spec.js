@@ -67,7 +67,7 @@ describe('App routing and privacy gates', () => {
       load:vi.fn().mockResolvedValue(true),
       reset:vi.fn(),
       dispose:vi.fn(),
-      statusFor:vi.fn(() => ({ name:'На проверке', routeAlias:'under_review', upperStatusName:'На проверке', upperStatusRouteAlias:'under_review', isTerminal:false })),
+      statusFor:vi.fn(() => ({ name:'На проверке', routeAlias:'under_review', upperStatusName:'На проверке', upperStatusRouteAlias:'under_review', isTerminal:false, progressPercent:14 })),
       progressFor:vi.fn(() => 14),
       currencyFor:vi.fn()
     })

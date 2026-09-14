@@ -8,7 +8,6 @@ import { isRfc3339DateTime } from '../api/validation.js'
 import { createInternalProblem } from '../errors/problem.js'
 
 const ROUTE_ALIAS_PATTERN = /^[a-z0-9]+(?:_[a-z0-9]+)*$/u
-const ORDER_NUMBER_PATTERN = /^[0-9]{8}-[1-9][0-9]*$/u
 
 function protocolError() { throw createInternalProblem('protocolError') }
 function validText(value, maximum) {
@@ -39,6 +38,8 @@ export function validateOrderOps(value) {
       || !validText(item.upperStatusName, 200) || !validText(item.upperStatusRouteAlias, 100)
       || !ROUTE_ALIAS_PATTERN.test(item.upperStatusRouteAlias)
       || typeof item.isTerminal !== 'boolean'
+      || !Number.isInteger(item.progressPercent) || item.progressPercent < 0 || item.progressPercent > 100
+      || item.isTerminal && item.progressPercent !== 100
       || statusValues.has(item.value) || statusAliases.has(item.routeAlias)) protocolError()
     statusValues.add(item.value)
     statusAliases.add(item.routeAlias)
@@ -78,8 +79,8 @@ export function validateCustomerOrders(value, ops) {
   let previous = null
   for (const item of value) {
     if (!item || !Number.isSafeInteger(item.id) || item.id <= 0 || ids.has(item.id)
-      || !validText(item.orderNumber, 64) || !ORDER_NUMBER_PATTERN.test(item.orderNumber)
-      || orderNumbers.has(item.orderNumber) || !Number.isInteger(item.status) || !statusValues.has(item.status)
+      || !validText(item.orderNumber, 64) || orderNumbers.has(item.orderNumber)
+      || !Number.isInteger(item.status) || !statusValues.has(item.status)
       || !validHttpUrl(item.sourceUrl) || !validNullableText(item.productName, 500)
       || !validNullableText(item.storeName, 200)
       || item.imageUrl !== null && !validHttpUrl(item.imageUrl)
@@ -127,16 +128,7 @@ export function createOrderStore(session) {
 
   function statusFor(value) { return ops.value?.statuses.find(item => item.value === value) }
   function currencyFor(value) { return ops.value?.currencies.find(item => item.value === value) }
-  function progressFor(value) {
-    const current = statusFor(value)
-    if (!current) return 0
-    if (current.isTerminal) return 100
-    const activeStatuses = ops.value.statuses.filter(item => !item.isTerminal)
-    const index = activeStatuses.findIndex(item => item.value === value)
-    if (index < 0) return 0
-    if (activeStatuses.length === 1) return 50
-    return Math.round(14 + 80 * index / (activeStatuses.length - 1))
-  }
+  function progressFor(value) { return statusFor(value)?.progressPercent }
   function reset() { generation++; loading.value = false; orders.value = []; ops.value = null }
   function dispose() { reset() }
 

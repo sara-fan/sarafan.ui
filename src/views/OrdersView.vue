@@ -212,7 +212,11 @@ onBeforeUnmount(() => {
               </div>
               <div
                 class="order-card__progress-track"
-                aria-hidden="true"
+                role="progressbar"
+                aria-valuemin="0"
+                aria-valuemax="100"
+                :aria-valuenow="store.progressFor(order.status)"
+                :aria-label="`Выполнение заказа ${order.orderNumber}`"
               >
                 <span :style="{ width:`${store.progressFor(order.status)}%` }" />
               </div>

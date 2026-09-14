@@ -16,10 +16,10 @@ import { createAppRouter } from '../src/router.js'
 import OrdersView from '../src/views/OrdersView.vue'
 
 const statusItems = new Map([
-  [0, { value:0, name:'На проверке', routeAlias:'under_review', upperStatusName:'На проверке', upperStatusRouteAlias:'under_review', isTerminal:false }],
-  [310, { value:310, name:'Выкупаем товар', routeAlias:'purchasing_item', upperStatusName:'Выполняется', upperStatusRouteAlias:'in_progress', isTerminal:false }],
-  [400, { value:400, name:'Получен', routeAlias:'received', upperStatusName:'Завершён', upperStatusRouteAlias:'completed', isTerminal:true }],
-  [500, { value:500, name:'Отменён', routeAlias:'cancelled', upperStatusName:'Отменён', upperStatusRouteAlias:'cancelled', isTerminal:true }]
+  [0, { value:0, name:'На проверке', routeAlias:'under_review', upperStatusName:'На проверке', upperStatusRouteAlias:'under_review', isTerminal:false, progressPercent:14 }],
+  [310, { value:310, name:'Выкупаем товар', routeAlias:'purchasing_item', upperStatusName:'Выполняется', upperStatusRouteAlias:'in_progress', isTerminal:false, progressPercent:56 }],
+  [400, { value:400, name:'Получен', routeAlias:'received', upperStatusName:'Завершён', upperStatusRouteAlias:'completed', isTerminal:true, progressPercent:100 }],
+  [500, { value:500, name:'Отменён', routeAlias:'cancelled', upperStatusName:'Отменён', upperStatusRouteAlias:'cancelled', isTerminal:true, progressPercent:100 }]
 ])
 
 async function mountView() {
@@ -40,7 +40,7 @@ describe('OrdersView', () => {
     h.store.currencyFor = vi.fn(value => value === 840
       ? { value:840, name:'Доллар США', routeAlias:'usd' }
       : { value, name:'Евро', routeAlias:'eur' })
-    h.store.progressFor = vi.fn(value => value === 400 || value === 500 ? 100 : 50)
+    h.store.progressFor = vi.fn(value => statusItems.get(value)?.progressPercent)
   })
 
   it('shows the loading and empty states and navigates to product entry', async () => {
@@ -83,8 +83,14 @@ describe('OrdersView', () => {
     expect(wrapper.text()).toContain('$ 85,00')
     expect(wrapper.text()).toContain('€ 10,00')
     expect(wrapper.text()).toContain('14 сентября 2026')
-    expect(wrapper.findAll('.order-card__progress-track')).toHaveLength(2)
-    expect(wrapper.findAll('.order-card__progress-track')[0].attributes('aria-hidden')).toBe('true')
+    const progress = wrapper.findAll('[role="progressbar"]')
+    expect(progress).toHaveLength(2)
+    expect(progress[0].attributes()).toMatchObject({
+      'aria-valuemin':'0',
+      'aria-valuemax':'100',
+      'aria-valuenow':'56',
+      'aria-label':'Выполнение заказа 12345678-4'
+    })
 
     const images = wrapper.findAll('.order-card__visual img')
     expect(images).toHaveLength(2)
@@ -119,7 +125,7 @@ describe('OrdersView', () => {
   })
 
   it('uses safe presentation defaults for added statuses and Russian count boundaries', async () => {
-    statusItems.set(999, { value:999, name:'Новый этап', routeAlias:'renamed_stage', upperStatusName:'Новый этап', upperStatusRouteAlias:'renamed_group', isTerminal:false })
+    statusItems.set(999, { value:999, name:'Новый этап', routeAlias:'renamed_stage', upperStatusName:'Новый этап', upperStatusRouteAlias:'renamed_group', isTerminal:false, progressPercent:63 })
     h.store.orders.value = Array.from({ length:11 }, (_, index) => ({
       id:20 - index,
       orderNumber:`12345678-${20 - index}`,
