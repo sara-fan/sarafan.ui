@@ -112,13 +112,13 @@ describe('OrdersView', () => {
     showOrderCreated('12345678-9')
     const first = await mountView()
     await flushPromises()
-    expect(first.wrapper.text()).toContain('Заказ 12345678-9 появился в списке.')
+    expect(first.wrapper.text()).toContain('Номер заказа 12345678-9.')
     expect(h.store.load).toHaveBeenCalledOnce()
     first.wrapper.unmount()
 
     const second = await mountView()
     await flushPromises()
-    expect(second.wrapper.text()).not.toContain('12345678-9 появился в списке')
+    expect(second.wrapper.text()).not.toContain('Номер заказа 12345678-9.')
   })
 
   it('gives a list-load failure precedence over the creation notice', async () => {
@@ -128,7 +128,7 @@ describe('OrdersView', () => {
     await flushPromises()
     expect(wrapper.findAll('[role="alert"]')).toHaveLength(1)
     expect(wrapper.get('[role="alert"]').text()).toContain('Не удалось загрузить заказы')
-    expect(wrapper.text()).not.toContain('12345678-9 появился в списке')
+    expect(wrapper.text()).not.toContain('Номер заказа 12345678-9.')
   })
 
   it('presents load failures once and retries successfully', async () => {

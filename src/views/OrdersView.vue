@@ -108,7 +108,7 @@ onBeforeUnmount(() => {
       tone="success"
       class="orders-created-notice"
     >
-      Заказ {{ createdOrderNumber }} появился в списке.
+      Номер заказа {{ createdOrderNumber }}.
     </UiAlert>
 
     <UiAlert
