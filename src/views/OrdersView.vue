@@ -246,7 +246,7 @@ onBeforeUnmount(() => {
             ИСТОРИЯ
           </p>
           <h2 id="history-orders-title">
-            Завершённые заказы
+            Завершённые и отменённые заказы
           </h2>
         </div>
         <span class="orders-panel__count">{{ pluralizeOrders(historyOrders.length) }}</span>
