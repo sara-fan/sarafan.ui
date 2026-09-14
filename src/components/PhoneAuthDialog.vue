@@ -25,7 +25,7 @@ import UiField from './ui/UiField.vue'
 import UiSelectionControl from './ui/UiSelectionControl.vue'
 
 const props = defineProps({ modelValue: { type: Boolean, default: true } })
-const emit = defineEmits(['update:modelValue'])
+const emit = defineEmits(['update:modelValue', 'authenticated'])
 const session = useSession()
 const consentStore = useConsents()
 const step = ref('phone')
@@ -357,6 +357,7 @@ async function submitCode() {
       controller.signal
     )
     if (!verifiedCustomer) return
+    emit('authenticated', verifiedCustomer)
     emit('update:modelValue', false)
   } catch (value) {
     if (!currentOperation(operation)) return

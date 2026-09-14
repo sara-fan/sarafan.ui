@@ -17,6 +17,7 @@ import UiField from '../src/components/ui/UiField.vue'
 import UiSelectionControl from '../src/components/ui/UiSelectionControl.vue'
 import { createSarafanVuetify } from '../src/plugins/vuetify.js'
 import { ACCESS, createAppRouter, routes } from '../src/router.js'
+import { resetProductDraftForTests, useProductDraft } from '../src/stores/productDraft.js'
 import HomeView from '../src/views/HomeView.vue'
 import ConsentsView from '../src/views/ConsentsView.vue'
 import LegalDocumentView from '../src/views/LegalDocumentView.vue'
@@ -35,6 +36,7 @@ async function routerAt(path = '/') {
 }
 
 beforeEach(() => {
+  resetProductDraftForTests()
   h.store.ops = ref({
     kinds: [
       { value: 2, name: 'Пользовательское соглашение', routeAlias: 'user-agreement' },
@@ -95,15 +97,30 @@ describe('router and page shells', () => {
     expect(legal.getComponent({ name:'ConsentCenter' }).props('mode')).toBe('legal')
   })
 
-  it('submits the public product URL through Vue Router state', async () => {
+  it('submits a protocol-free product address without putting it in router state', async () => {
     const router = await routerAt()
     const wrapper = mount(HomeView, { global: { plugins: [router] } })
-    await wrapper.get('input[type="url"]').setValue('https://store.example/item')
+    await wrapper.get('input[inputmode="url"]').setValue('store.example/item')
     await wrapper.get('form').trigger('submit')
     await flushPromises()
     expect(router.currentRoute.value.name).toBe('product')
-    expect(router.options.history.state.sourceUrl).toBe('https://store.example/item')
+    expect(router.currentRoute.value.query).toEqual({})
+    expect(router.options.history.state.sourceUrl).toBeUndefined()
+    expect(useProductDraft().draft.value.sourceUrl).toBe('https://store.example/item')
     expect(wrapper.findComponent(PublicInfoBlock).exists()).toBe(true)
+  })
+
+  it('keeps empty and invalid product addresses on Home with exact SCN-03 copy', async () => {
+    const router = await routerAt()
+    const wrapper = mount(HomeView, { global:{ plugins:[router] } })
+    await wrapper.get('form').trigger('submit')
+    expect(wrapper.get('[role="alert"]').text()).toBe('Вставьте ссылку на товар')
+    expect(router.currentRoute.value.name).toBe('home')
+
+    await wrapper.get('input[inputmode="url"]').setValue('javascript:alert(1)')
+    await wrapper.get('form').trigger('submit')
+    expect(wrapper.get('[role="alert"]').text()).toBe('Проверьте ссылку на товар и попробуйте ещё раз')
+    expect(router.currentRoute.value.name).toBe('home')
   })
 
   it('navigates home from pending and not-found views', async () => {
@@ -134,7 +151,7 @@ describe('router and page shells', () => {
     expect(wrapper.text()).toContain('На проверке')
     expect(wrapper.text()).toContain('Расчёт готов')
     expect(wrapper.text()).toContain('Цена продавца')
-    expect(wrapper.text()).toContain('Уточняется')
+    expect(wrapper.findAll('.order-card__price small')).toHaveLength(1)
     expect(wrapper.findAll('[role="progressbar"]')).toHaveLength(2)
     expect(h.orderStore.load).toHaveBeenCalledOnce()
 

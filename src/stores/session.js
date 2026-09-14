@@ -282,6 +282,35 @@ async function orderRequest(path, options = {}, isCurrent = () => true, validate
   return authorizedRequest(path, options, {}, validateResponse, isCurrent)
 }
 
+async function previewOrder(sourceUrl, isCurrent = () => true, validateResponse) {
+  if (!isCurrent()) return null
+  try {
+    const result = await client.request(
+      `${API_BASE_PATH}/orders/preview`,
+      jsonOptions('POST', { sourceUrl })
+    )
+    if (!isCurrent()) return null
+    if (validateResponse) validateResponse(result)
+    return result
+  } catch (error) {
+    if (!isCurrent()) return null
+    throw error
+  }
+}
+
+async function createOrder(payload, idempotencyKey, isCurrent = () => true, validateResponse) {
+  return authorizedRequest(
+    `${API_BASE_PATH}/orders`,
+    {
+      ...jsonOptions('POST', payload),
+      headers: { 'Content-Type':'application/json', 'Idempotency-Key':idempotencyKey }
+    },
+    {},
+    validateResponse,
+    isCurrent
+  )
+}
+
 async function verifyCode(payload, isCurrent = () => true, signal) {
   notice.value = ''
   try {
@@ -407,6 +436,8 @@ export function useSession() {
     getStatus,
     consentRequest,
     orderRequest,
+    previewOrder,
+    createOrder,
     ensureOps,
     flowValue,
     resolvePhone,

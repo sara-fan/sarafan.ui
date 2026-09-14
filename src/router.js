@@ -11,6 +11,7 @@ import NotFoundView from './views/NotFoundView.vue'
 import OrdersView from './views/OrdersView.vue'
 import PendingView from './views/PendingView.vue'
 import ProfileView from './views/ProfileView.vue'
+import ProductView from './views/ProductView.vue'
 
 export const ACCESS = Object.freeze({
   PUBLIC: 'public',
@@ -20,7 +21,7 @@ export const ACCESS = Object.freeze({
 
 export const routes = [
   { path: '/', name: 'home', component: HomeView, meta: { access: ACCESS.PUBLIC, navigationSection: 'home' } },
-  { path: '/product', name: 'product', component: PendingView, props: { title: 'Товар', copy: 'Распознавание товара и прогноз стоимости появятся в следующем этапе MVP.' }, meta: { access: ACCESS.PUBLIC, navigationSection: 'product' } },
+  { path: '/product', name: 'product', component: ProductView, meta: { access: ACCESS.PUBLIC, navigationSection: 'product' } },
   { path: '/orders', name: 'orders', component: OrdersView, meta: { access: ACCESS.CUSTOMER, navigationSection: 'orders' } },
   { path: '/orders/:orderId', name: 'order-details', component: PendingView, props: route => ({ title: 'Заказ', copy: `Детали заказа ${route.params.orderId} будут подключены отдельной задачей MVP.` }), meta: { access: ACCESS.CUSTOMER, navigationSection: 'orders' } },
   { path: '/orders/:orderId/checkout', name: 'checkout', component: PendingView, props: { title: 'Оформление заказа', copy: 'Оформление заказа будет подключено отдельной задачей MVP.' }, meta: { access: ACCESS.CUSTOMER, navigationSection: 'orders' } },

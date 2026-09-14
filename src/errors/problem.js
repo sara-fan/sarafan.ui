@@ -17,6 +17,7 @@ export const CORE_PROBLEM_TYPES = Object.freeze({
   invalidRefreshToken: `${PROBLEM_TYPE_ROOT}invalid-refresh-token`,
   loginFailed: `${PROBLEM_TYPE_ROOT}login-failed`,
   onboardingConsentExpired: `${PROBLEM_TYPE_ROOT}onboarding-consent-expired`,
+  personalDataConsentRequired: `${PROBLEM_TYPE_ROOT}personal-data-consent-required`,
   validationFailed: `${PROBLEM_TYPE_ROOT}validation-failed`
 })
 
@@ -49,6 +50,12 @@ export const { INTERNAL_PROBLEM_TYPES, createInternalProblem, normalizeProblem, 
       code: 'ui_operation_cancelled',
       title: 'Операция отменена',
       detail: 'Операция отменена.'
+    },
+    identityChanged: {
+      suffix: 'identity-changed',
+      code: 'ui_identity_changed',
+      title: 'Пользователь изменился',
+      detail: 'Проверьте данные заказа и отправьте его ещё раз.'
     },
     photoPreviewUnavailable: {
       suffix: 'photo-preview-unavailable',

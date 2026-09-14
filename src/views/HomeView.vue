@@ -3,18 +3,33 @@
 // All rights reserved.
 // This file is a part of the Sarafan application
 
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
 import PublicInfoBlock from '../components/PublicInfoBlock.vue'
 import UiButton from '../components/ui/UiButton.vue'
 import UiField from '../components/ui/UiField.vue'
+import { normalizeProductAddress } from '../productAddress.js'
+import { useProductDraft } from '../stores/productDraft.js'
 
 const router = useRouter()
+const draftStore = useProductDraft()
 const sourceUrl = ref('')
+const sourceProblem = ref('')
+const sourceErrors = computed(() => sourceProblem.value ? [sourceProblem.value] : [])
 
 function begin() {
-  router.push({ name: 'product', state: { sourceUrl: sourceUrl.value } })
+  sourceProblem.value = ''
+  if (!sourceUrl.value.trim()) {
+    sourceProblem.value = 'Вставьте ссылку на товар'
+    return
+  }
+  const normalized = normalizeProductAddress(sourceUrl.value)
+  if (!normalized || !draftStore.start(normalized)) {
+    sourceProblem.value = 'Проверьте ссылку на товар и попробуйте ещё раз'
+    return
+  }
+  router.push({ name: 'product' })
 }
 </script>
 
@@ -37,15 +52,19 @@ function begin() {
       </div>
       <form
         class="product-entry"
+        novalidate
         @submit.prevent="begin"
       >
         <UiField
           v-model="sourceUrl"
           label="Ссылка на товар"
-          type="url"
+          type="text"
           placeholder="https://store.com/product"
           autocomplete="url"
+          inputmode="url"
           required
+          :errors="sourceErrors"
+          @update:model-value="sourceProblem = ''"
         />
         <UiButton
           type="submit"

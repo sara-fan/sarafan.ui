@@ -39,6 +39,7 @@ const props = defineProps({
     default: false
   }
 })
+const emit = defineEmits(['personal-consent-granted'])
 const session = useSession()
 const store = useConsents()
 const route = useRoute()
@@ -252,7 +253,7 @@ async function openPersonal(isCurrent = alwaysCurrent, preserveChoice = false) {
 
 async function grant() {
   if (!accepted.value || !personalDocument.value || !session.customer.value) return
-  await perform(async ownsOperation => {
+  const succeeded = await perform(async ownsOperation => {
     const signature = JSON.stringify([session.customer.value.id, personalDocument.value.id, personalDocument.value.contentHash])
     if (personalSignature !== signature) personalKey = globalThis.crypto.randomUUID()
     personalSignature = signature
@@ -273,6 +274,7 @@ async function grant() {
     if (!ownsOperation()) return
     personalDocument.value = result
   })
+  if (succeeded) emit('personal-consent-granted')
 }
 
 async function requestWithdrawal() {

@@ -125,6 +125,10 @@ export function createConsentStore(session) {
       throw createInternalProblem('invalidInput', { detail:'Откройте «Согласия» и дайте актуальное согласие. Введённые данные сохранены в форме.' })
     }
   }
+  async function hasCurrentPersonalData() {
+    await loadMine()
+    return mine.value?.statuses.find(x => x.kind === LEGAL_DOCUMENT_KIND.PERSONAL_DATA_CONSENT)?.status === 'current'
+  }
   async function grant(document, key = globalThis.crypto.randomUUID()) {
     await session.consentRequest('/api/v1/consents/me/personal-data', json('POST', {
       documentId:document.id, contentHash:document.contentHash, decision:'grant', idempotencyKey:key
@@ -138,7 +142,8 @@ export function createConsentStore(session) {
   function dispose() { resetCustomer() }
   return { mine:readonly(mine), ops:readonly(ops), opsProblem:readonly(opsProblem),
     personalProblem:readonly(personalProblem), current, read, source, loadOps, ensureOps,
-    kindByAlias, kindName, routeAlias, loadMine, requirePersonalData, grant, requestWithdrawal, resetCustomer, dispose }
+    kindByAlias, kindName, routeAlias, loadMine, requirePersonalData, hasCurrentPersonalData,
+    grant, requestWithdrawal, resetCustomer, dispose }
 }
 let store
 export function useConsents() { return store ??= createConsentStore(useSession()) }

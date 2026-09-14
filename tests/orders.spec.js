@@ -5,7 +5,13 @@
 import { ref } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
 
-import { createOrderStore, validateCustomerOrders, validateOrderOps } from '../src/stores/orders.js'
+import {
+  createOrderStore,
+  validateCreatedOrder,
+  validateCustomerOrders,
+  validateOrderOps,
+  validateProductPreview
+} from '../src/stores/orders.js'
 
 const statuses = [
   { value:0, name:'На проверке', routeAlias:'under_review', upperStatusValue:0, upperStatusName:'На проверке', upperStatusRouteAlias:'under_review', isTerminal:false, progressPercent:14 },
@@ -30,6 +36,84 @@ function protocolFailure(action) {
 }
 
 describe('order store', () => {
+  it('validates the manual-review preview contract', () => {
+    expect(validateProductPreview({ sourceUrl:'https://shop.example/item', outcome:'manual_review' }))
+      .toEqual({ sourceUrl:'https://shop.example/item', outcome:'manual_review' })
+    for (const value of [
+      null,
+      {},
+      { sourceUrl:'https://shop.example/item', outcome:'recognized' },
+      { sourceUrl:7, outcome:'manual_review' },
+      { sourceUrl:'shop.example/item', outcome:'manual_review' }
+    ]) protocolFailure(() => validateProductPreview(value))
+  })
+
+  it('validates a complete created order against the submitted payload', () => {
+    const value = {
+      id:3,
+      orderNumber:'12345678-3',
+      status:0,
+      sourceUrl:'https://shop.example/item',
+      productName:null,
+      storeName:null,
+      imageUrl:null,
+      sellerPrice:null,
+      dimensions:{ lengthCm:1, widthCm:2, heightCm:3 },
+      characteristics:{ color:'blue' },
+      quantity:2,
+      comment:'note',
+      appliedExchangeRate:{
+        id:5,
+        provider:'Банк России',
+        baseCurrency:840,
+        quoteCurrency:643,
+        nominal:1,
+        officialRate:82.5,
+        sourceEffectiveDate:'2026-09-15'
+      }
+    }
+    const validated = validateCreatedOrder(value, validateOrderOps(ops), {
+      sourceUrl:value.sourceUrl,
+      quantity:2,
+      comment:' note '
+    })
+    expect(validated).toEqual(value)
+    expect(validated.dimensions).not.toBe(value.dimensions)
+    expect(validated.characteristics).not.toBe(value.characteristics)
+    expect(validated.appliedExchangeRate).not.toBe(value.appliedExchangeRate)
+  })
+
+  it.each([
+    value => ({ ...value, comment:'x'.repeat(2001) }),
+    value => ({ ...value, dimensions:{} }),
+    value => ({ ...value, dimensions:{ lengthCm:0, widthCm:2, heightCm:3 } }),
+    value => ({ ...value, characteristics:[] }),
+    value => ({ ...value, characteristics:{ '': 'blue' } }),
+    value => ({ ...value, characteristics:{ color:3 } }),
+    value => ({ ...value, appliedExchangeRate:{} }),
+    value => ({ ...value, appliedExchangeRate:{ id:0, provider:'bank', baseCurrency:840, quoteCurrency:643, nominal:1, officialRate:1, sourceEffectiveDate:'2026-09-15' } }),
+    value => ({ ...value, appliedExchangeRate:{ id:5, provider:' ', baseCurrency:840, quoteCurrency:643, nominal:1, officialRate:1, sourceEffectiveDate:'2026-09-15' } }),
+    value => ({ ...value, appliedExchangeRate:{ id:5, provider:'bank', baseCurrency:999, quoteCurrency:643, nominal:1, officialRate:1, sourceEffectiveDate:'2026-09-15' } }),
+    value => ({ ...value, appliedExchangeRate:{ id:5, provider:'bank', baseCurrency:840, quoteCurrency:840, nominal:1, officialRate:1, sourceEffectiveDate:'2026-09-15' } }),
+    value => ({ ...value, appliedExchangeRate:{ id:5, provider:'bank', baseCurrency:840, quoteCurrency:643, nominal:0, officialRate:1, sourceEffectiveDate:'2026-09-15' } }),
+    value => ({ ...value, appliedExchangeRate:{ id:5, provider:'bank', baseCurrency:840, quoteCurrency:643, nominal:1, officialRate:0, sourceEffectiveDate:'2026-09-15' } }),
+    value => ({ ...value, appliedExchangeRate:{ id:5, provider:'bank', baseCurrency:840, quoteCurrency:643, nominal:1, officialRate:1, sourceEffectiveDate:'2026-02-30' } }),
+    value => ({ ...value, sourceUrl:'https://other.example/item' }),
+    value => ({ ...value, quantity:3 }),
+    value => ({ ...value, comment:'other' })
+  ])('rejects a malformed or mismatched created order %#', mutate => {
+    const value = {
+      id:3, orderNumber:'12345678-3', status:0, sourceUrl:'https://shop.example/item',
+      productName:null, storeName:null, imageUrl:null, sellerPrice:null,
+      dimensions:null, characteristics:null, quantity:2, comment:'note', appliedExchangeRate:null
+    }
+    protocolFailure(() => validateCreatedOrder(mutate(value), validateOrderOps(ops), {
+      sourceUrl:value.sourceUrl,
+      quantity:2,
+      comment:'note'
+    }))
+  })
+
   it('loads, validates, clones, and resolves Core-owned metadata', async () => {
     const session = {
       customer:ref({ id:7 }),
