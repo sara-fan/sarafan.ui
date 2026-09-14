@@ -60,7 +60,7 @@ beforeEach(() => {
 
 describe('router and page shells', () => {
   it('declares public, limited, customer, detail, and fallback routes', async () => {
-    expect(new Set(routes.map(route => route.meta.access))).toEqual(new Set(Object.values(ACCESS)))
+    expect(new Set(routes.filter(route => !route.redirect).map(route => route.meta.access))).toEqual(new Set(Object.values(ACCESS)))
     const detail = routes.find(route => route.name === 'order-details')
     expect(routes.find(route => route.name === 'orders').component).toBe(OrdersView)
     expect(detail.props({ params: { orderId: 'A-17' } })).toEqual({
@@ -72,21 +72,23 @@ describe('router and page shells', () => {
     expect(createAppRouter().hasRoute('home')).toBe(true)
     expect(routes.find(route => route.name === 'consents').component).toBe(ConsentsView)
     expect(routes.find(route => route.name === 'legal-document').component).toBe(LegalDocumentView)
-    expect(routes.find(route => route.name === 'cookie-consents').props).toEqual({ section:'cookies' })
+    expect(routes.find(route => route.path === '/consents/cookies').redirect).toBe('/consents')
+    await router.push('/consents/cookies')
+    expect(router.currentRoute.value.name).toBe('consents')
     expect(routes.find(route => route.name === 'personal-consents').props).toEqual({ section:'personal' })
   })
 
   it('renders the consent and legal route wrappers without dialog overlays', async () => {
     const consent = shallowMount(ConsentsView, {
-      props:{ section:'personal' },
+      props:{ section:'auto' },
       global:{ stubs:{ ConsentCenter:true } }
     })
     const initialCenter = consent.getComponent({ name:'ConsentCenter' })
-    expect(initialCenter.props()).toMatchObject({ mode:'consents', section:'personal' })
+    expect(initialCenter.props()).toMatchObject({ mode:'consents', section:'auto' })
     const initialUid = initialCenter.vm.$.uid
-    await consent.setProps({ section:'cookies' })
+    await consent.setProps({ section:'personal' })
     const replacementCenter = consent.getComponent({ name:'ConsentCenter' })
-    expect(replacementCenter.props()).toMatchObject({ mode:'consents', section:'cookies' })
+    expect(replacementCenter.props()).toMatchObject({ mode:'consents', section:'personal' })
     expect(replacementCenter.vm.$.uid).not.toBe(initialUid)
 
     const legal = shallowMount(LegalDocumentView, { global:{ stubs:{ ConsentCenter:true } } })
@@ -166,9 +168,12 @@ describe('shared application chrome and controls', () => {
     expect(wrapper.emitted('authenticate')).toHaveLength(1)
   })
 
-  it('uses server-provided legal aliases and the required partner attribution', async () => {
+  it('uses server-provided legal aliases, gates the consent shortcut, and shows partner attribution', async () => {
     const router = await routerAt()
-    const wrapper = mount(SiteFooter, { global: { plugins: [router] } })
+    const wrapper = mount(SiteFooter, {
+      props: { authenticated: true },
+      global: { plugins: [router] }
+    })
     expect(wrapper.findAll('.site-footer__links a')).toHaveLength(3)
     expect(wrapper.get('a[href="/legal/privacy-policy"]').exists()).toBe(true)
     expect(wrapper.get('a[href="/consents"]').text()).toBe('Согласия')
@@ -177,6 +182,9 @@ describe('shared application chrome and controls', () => {
     h.store.ops.value = null
     await flushPromises()
     expect(wrapper.findAll('.site-footer__links a')).toHaveLength(1)
+    await wrapper.setProps({ authenticated: false })
+    expect(wrapper.find('a[href="/consents"]').exists()).toBe(false)
+    expect(wrapper.findAll('.site-footer__links a')).toHaveLength(0)
   })
 
   it('covers button, alert, field, selection, and dialog states', async () => {

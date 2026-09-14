@@ -32,14 +32,15 @@ async function mountApp(path = '/') {
       stubs: {
         ConsentCenter: {
           name: 'ConsentCenter',
-          emits: ['service-unavailable'],
-          template: '<button class="consent-unavailable-stub" hidden @click="$emit(\'service-unavailable\', true)" />'
+          props: ['noticeSuppressed'],
+          template: '<section class="consent-notice-stub" />'
         },
         PhoneAuthDialog: {
           name: 'PhoneAuthDialog',
           props: ['modelValue'],
           emits: ['update:modelValue'],
-          template: '<section v-if="modelValue" class="phone-auth-stub">Вход</section>'
+          setup: () => ({ notice:h.session.notice }),
+          template: '<section v-if="modelValue" class="phone-auth-stub">Вход<p class="phone-auth-notice">{{ notice }}</p></section>'
         }
       }
     }
@@ -52,14 +53,13 @@ describe('App routing and privacy gates', () => {
     Object.assign(h.session, {
       customer: ref(null),
       logout: vi.fn().mockResolvedValue(),
+      notice: ref(''),
       restoreProblem: ref(null),
       restoring: ref(false),
       restoreSession: vi.fn().mockResolvedValue()
     })
     Object.assign(h.consents, {
-      serviceAllowed: ref(false),
-      ops: ref({ kinds: legalKinds }),
-      loadCookies: vi.fn().mockResolvedValue()
+      ops: ref({ kinds: legalKinds })
     })
     Object.assign(h.orders, {
       orders:ref([{ id:17, orderNumber:'12345678-1', status:0, productName:'Nike Air Max 90 Essential', storeName:'nike.com', imageUrl:null, sellerPrice:null, quantity:1, createdAt:'2026-09-14T10:00:00Z' }]),
@@ -80,44 +80,44 @@ describe('App routing and privacy gates', () => {
     expect(wrapper.text()).toContain('Закажите товар — остальное сделаем мы')
     expect(wrapper.find('.route-gate').exists()).toBe(false)
     expect(wrapper.findAll('.site-footer')).toHaveLength(1)
-    expect(h.session.restoreSession).not.toHaveBeenCalled()
-    expect(wrapper.get('.app-header__login').attributes('disabled')).toBeDefined()
+    expect(wrapper.find('.site-footer a[href="/consents"]').exists()).toBe(false)
+    expect(h.session.restoreSession).toHaveBeenCalledOnce()
+    expect(wrapper.findComponent({ name:'ConsentCenter' }).props('noticeSuppressed')).toBe(true)
+    expect(wrapper.get('.app-header__login').attributes('disabled')).toBeUndefined()
     wrapper.findComponent(AppHeader).vm.$emit('authenticate')
     await flushPromises()
-    expect(wrapper.find('.phone-auth-stub').exists()).toBe(false)
+    expect(wrapper.find('.phone-auth-stub').exists()).toBe(true)
   })
 
-  it('leaves initial cookie loading to the consent controller before restoring a ready session', async () => {
+  it('restores the session without legacy consent gating', async () => {
     const order = []
-    h.consents.serviceAllowed.value = true
-    h.consents.loadCookies.mockImplementation(async () => { order.push('cookies') })
     h.session.restoreSession.mockImplementation(async () => { order.push('session') })
     await mountApp()
     await flushPromises()
     expect(order).toEqual(['session'])
-    expect(h.consents.loadCookies).not.toHaveBeenCalled()
-    h.consents.serviceAllowed.value = false
-    await flushPromises()
-    expect(order).toEqual(['session'])
+    expect(h.consents).not.toHaveProperty('serviceAllowed')
+    expect(h.consents).not.toHaveProperty('loadCookies')
   })
 
-  it('does not mount a protected route until cookie and session gates pass', async () => {
+  it('does not mount a protected route until its session is restored', async () => {
+    h.session.restoring.value = true
     const { wrapper } = await mountApp('/orders')
     await flushPromises()
-    expect(wrapper.text()).toContain('Настройте обязательные куки')
+    expect(wrapper.text()).toContain('Загрузка')
     expect(wrapper.text()).not.toContain('Nike Air Max 90 Essential')
     expect(wrapper.findAll('.site-footer')).toHaveLength(1)
 
-    h.consents.serviceAllowed.value = true
     h.session.restoring.value = true
     await flushPromises()
-    expect(wrapper.text()).toContain('Восстанавливаем сессию')
+    expect(wrapper.text()).toContain('Загрузка')
+    expect(wrapper.text()).not.toContain('сесси')
     expect(wrapper.text()).not.toContain('Nike Air Max 90 Essential')
 
     h.session.restoring.value = false
     h.session.restoreProblem.value = createInternalProblem('sessionRestoreUnavailable')
     await flushPromises()
-    expect(wrapper.text()).toContain('Не удалось открыть раздел')
+    expect(wrapper.text()).toContain('Сервис временно недоступен. Пожалуйста, повторите позже')
+    expect(wrapper.text()).not.toContain('сеанс')
     await wrapper.findAll('button').find(item => item.text() === 'Повторить').trigger('click')
     expect(h.session.restoreSession).toHaveBeenCalled()
 
@@ -128,15 +128,14 @@ describe('App routing and privacy gates', () => {
   })
 
   it('redirects an unauthenticated protected bookmark to the public home route', async () => {
-    h.consents.serviceAllowed.value = true
     const { router, wrapper } = await mountApp('/profile')
     await vi.waitFor(() => expect(router.currentRoute.value.name).toBe('home'))
     expect(wrapper.text()).toContain('Закажите товар — остальное сделаем мы')
   })
 
   it('returns home from a protected restore failure and closes authentication via v-model', async () => {
-    h.consents.serviceAllowed.value = true
     h.session.restoreProblem.value = createInternalProblem('sessionRestoreUnavailable')
+    h.session.notice.value = 'Сервис временно недоступен. Пожалуйста, повторите позже'
     const { router, wrapper } = await mountApp('/orders')
     await flushPromises()
     await wrapper.findAll('button').find(item => item.text() === 'На главную').trigger('click')
@@ -144,42 +143,64 @@ describe('App routing and privacy gates', () => {
     expect(router.currentRoute.value.name).toBe('home')
     await wrapper.get('.app-header__login').trigger('click')
     expect(wrapper.find('.phone-auth-stub').exists()).toBe(true)
+    expect(wrapper.get('.phone-auth-notice').text())
+      .toBe('Сервис временно недоступен. Пожалуйста, повторите позже')
     wrapper.findComponent({ name: 'PhoneAuthDialog' }).vm.$emit('update:modelValue', false)
     await flushPromises()
     expect(wrapper.find('.phone-auth-stub').exists()).toBe(false)
   })
 
   it('keeps recoverable restore failures non-blocking on public routes', async () => {
-    h.consents.serviceAllowed.value = true
     h.session.restoreProblem.value = createInternalProblem('sessionRestoreUnavailable')
     const { router, wrapper } = await mountApp()
     await flushPromises()
     expect(wrapper.text()).toContain('Закажите товар — остальное сделаем мы')
-    expect(wrapper.text()).toContain('Не удалось восстановить сеанс')
+    expect(wrapper.text()).toContain('Сервис временно недоступен. Пожалуйста, повторите позже')
+    expect(wrapper.text()).not.toContain('сеанс')
+    expect(wrapper.findAll('.session-notice')).toHaveLength(1)
+    expect(wrapper.findComponent({ name:'ConsentCenter' }).props('noticeSuppressed')).toBe(true)
     await wrapper.findAll('button').find(item => item.text() === 'Повторить').trigger('click')
     expect(h.session.restoreSession).toHaveBeenCalled()
+    h.session.restoreProblem.value = null
+    h.session.restoring.value = true
+    await flushPromises()
+    expect(wrapper.find('.session-notice').exists()).toBe(false)
+    expect(wrapper.findComponent({ name:'ConsentCenter' }).props('noticeSuppressed')).toBe(true)
+    h.session.restoring.value = false
+    h.session.restoreProblem.value = createInternalProblem('sessionRestoreUnavailable')
+    h.session.notice.value = 'Сервис временно недоступен. Пожалуйста, повторите позже'
+    await wrapper.get('.app-header__login').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.session-notice').exists()).toBe(false)
+    expect(wrapper.find('.phone-auth-stub').exists()).toBe(true)
+    expect(wrapper.get('.phone-auth-notice').text())
+      .toBe('Сервис временно недоступен. Пожалуйста, повторите позже')
     await router.push('/legal/privacy-policy')
     await flushPromises()
     expect(wrapper.find('.session-notice').exists()).toBe(false)
   })
 
-  it('lets the consent controller replace ordinary content with its outage page', async () => {
+  it('keeps public and customer route content independent of the notice controller', async () => {
     const { router, wrapper } = await mountApp()
     await flushPromises()
     expect(wrapper.text()).toContain('Закажите товар — остальное сделаем мы')
+    expect(wrapper.find('.site-footer a[href="/consents"]').exists()).toBe(false)
     const productLink = wrapper.get('input')
     await productLink.setValue('https://shop.example/product')
-    await wrapper.get('.consent-unavailable-stub').trigger('click')
-    expect(wrapper.get('.app-route-content').attributes('style')).toContain('display: none')
-    expect(wrapper.text()).toContain('Закажите товар — остальное сделаем мы')
-    expect(productLink.element.value).toBe('https://shop.example/product')
-    wrapper.findComponent({ name:'ConsentCenter' }).vm.$emit('service-unavailable', false)
-    await flushPromises()
+    expect(wrapper.find('.consent-notice-stub').exists()).toBe(true)
     expect(wrapper.get('.app-route-content').attributes('style') || '').not.toContain('display: none')
     expect(productLink.element.value).toBe('https://shop.example/product')
+
+    h.session.customer.value = { id:7, phone:'+79990000007', hasPhoto:false, profile:{} }
+    await router.push('/orders')
+    await flushPromises()
+    expect(wrapper.text()).toContain('Nike Air Max 90 Essential')
+    expect(wrapper.find('.consent-notice-stub').exists()).toBe(true)
+    expect(wrapper.get('.site-footer a[href="/consents"]').text()).toBe('Согласия')
+    expect(wrapper.get('.app-route-content').attributes('style') || '').not.toContain('display: none')
+
     await router.push('/consents/cookies'); await flushPromises()
-    expect(router.currentRoute.value.name).toBe('cookie-consents')
-    expect(wrapper.find('.consent-unavailable-stub').exists()).toBe(true)
+    expect(router.currentRoute.value.name).toBe('consents')
     for (const [path, name] of [
       ['/consents', 'consents'],
       ['/consents/personal-data', 'personal-consents'],
@@ -193,7 +214,6 @@ describe('App routing and privacy gates', () => {
   })
 
   it('opens reusable phone authentication and exposes one inert Support entry', async () => {
-    h.consents.serviceAllowed.value = true
     const { wrapper } = await mountApp()
     await flushPromises()
     expect(wrapper.findAll('.global-support')).toHaveLength(1)
@@ -205,7 +225,6 @@ describe('App routing and privacy gates', () => {
   })
 
   it('logs out from the shared header and returns home even when server logout fails', async () => {
-    h.consents.serviceAllowed.value = true
     h.session.customer.value = { id: 8, phone: '+79990000008', hasPhoto: false, profile: {} }
     h.session.logout.mockRejectedValueOnce(createInternalProblem('invalidInput'))
     const { router, wrapper } = await mountApp('/profile')

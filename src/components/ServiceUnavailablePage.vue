@@ -3,10 +3,13 @@
 // All rights reserved.
 // This file is a part of the Sarafan application
 
-import UiAlert from './ui/UiAlert.vue'
+import { SERVICE_UNAVAILABLE_MESSAGE } from '../errors/problem.js'
 import UiButton from './ui/UiButton.vue'
 
-defineProps({ busy: { type: Boolean, default: false } })
+defineProps({
+  busy: { type: Boolean, default: false },
+  message: { type: String, default: SERVICE_UNAVAILABLE_MESSAGE }
+})
 defineEmits(['retry'])
 </script>
 
@@ -15,10 +18,7 @@ defineEmits(['retry'])
     <p class="page-kicker">
       САРАФАН
     </p>
-    <h1>Сервис недоступен</h1>
-    <UiAlert>
-      <p>Сервис недоступен. Пожалуйста, повторите позже.</p>
-    </UiAlert>
+    <h1>{{ message }}</h1>
     <UiButton
       variant="primary"
       :loading="busy"

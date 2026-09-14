@@ -20,15 +20,29 @@ export const CORE_PROBLEM_TYPES = Object.freeze({
   validationFailed: `${PROBLEM_TYPE_ROOT}validation-failed`
 })
 
+export const SERVICE_UNAVAILABLE_MESSAGE = 'Сервис временно недоступен. Пожалуйста, повторите позже'
+
 export const { INTERNAL_PROBLEM_TYPES, createInternalProblem, normalizeProblem, presentProblem, problemFieldErrors, suppressProblem } = createProblemTools({
   logger: uiLogger,
   suppressedEvent: EVENTS.operationSuppressed,
   additions: {
+    sessionRestoreUnavailable: {
+      suffix: 'session-restore-unavailable',
+      code: 'ui_session_restore_unavailable',
+      title: 'Сервис временно недоступен',
+      detail: SERVICE_UNAVAILABLE_MESSAGE
+    },
+    protocolError: {
+      suffix: 'protocol-error',
+      code: 'ui_protocol_error',
+      title: 'Сервис временно недоступен',
+      detail: SERVICE_UNAVAILABLE_MESSAGE
+    },
     serviceUnavailable: {
       suffix: 'service-unavailable',
       code: 'ui_service_unavailable',
-      title: 'Сервис недоступен',
-      detail: 'Сервис недоступен. Пожалуйста, повторите позже.'
+      title: 'Сервис временно недоступен',
+      detail: SERVICE_UNAVAILABLE_MESSAGE
     },
     operationCancelled: {
       suffix: 'operation-cancelled',
@@ -58,4 +72,10 @@ export function asServiceUnavailableProblem(value) {
   return problem.type === INTERNAL_PROBLEM_TYPES.serviceUnavailable
     ? problem
     : createInternalProblem('serviceUnavailable', { cause:problem })
+}
+
+export function presentProblemTitle(value) {
+  if (!value) return ''
+  const problem = normalizeProblem(value)
+  return isServiceUnavailableProblem(problem) ? '' : problem.title
 }

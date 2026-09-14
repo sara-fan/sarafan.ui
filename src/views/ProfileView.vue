@@ -9,6 +9,7 @@ import {
   createInternalProblem,
   normalizeProblem,
   presentProblem,
+  presentProblemTitle,
   problemFieldErrors
 } from '../errors/problem.js'
 import { useConsents } from '../stores/consents.js'
@@ -34,6 +35,7 @@ let photoLoadVersion = 0
 
 const profile = computed(() => customer.value?.profile || {})
 const error = computed(() => problem.value ? presentProblem(problem.value) : '')
+const errorTitle = computed(() => presentProblemTitle(problem.value))
 const initials = computed(() => {
   const value = `${profile.value.firstName?.[0] || ''}${profile.value.lastName?.[0] || ''}`.trim()
   return value || 'С'
@@ -179,7 +181,7 @@ onBeforeUnmount(releasePhoto)
 
     <UiAlert
       v-if="error"
-      :title="problem?.title"
+      :title="errorTitle"
     >
       {{ error }}
     </UiAlert>

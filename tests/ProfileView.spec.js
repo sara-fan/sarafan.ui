@@ -187,6 +187,25 @@ describe('ProfileView', () => {
     expect(fetch.mock.calls.filter(([url]) => url === '/api/v1/auth/code/verify')).toHaveLength(1)
   })
 
+  it('presents a consent service failure once while keeping the profile form mounted', async () => {
+    const customer = customerDto({ id:18, phone:'+79990000018', state:0, hasPhoto:false, profile:{ firstName:'Мария' } })
+    vi.stubGlobal('fetch', vi.fn(url => Promise.resolve(opsResponse(url) || sessionResponse(customer))))
+    await useSession().verifyCode({ phone:customer.phone, code:'0018' })
+    const wrapper = mountView()
+    await startEditing(wrapper)
+    consent.requirePersonalData.mockRejectedValue(createInternalProblem('protocolError'))
+
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+
+    const alert = wrapper.get('.ui-alert')
+    const message = 'Сервис временно недоступен. Пожалуйста, повторите позже'
+    expect(alert.text()).toBe(message)
+    expect(alert.find('strong').exists()).toBe(false)
+    expect(wrapper.text().split(message)).toHaveLength(2)
+    expect(wrapper.find('form').exists()).toBe(true)
+  })
+
   it('does not present an abandoned profile save as successful for a new identity', async () => {
     const original = customerDto({ id:16 })
     const replacement = customerDto({ id:17, profile:{ firstName:'Новая' } })
