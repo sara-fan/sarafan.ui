@@ -12,7 +12,8 @@ import {
   asServiceUnavailableProblem,
   isServiceUnavailableProblem,
   normalizeProblem,
-  presentProblem
+  presentProblem,
+  presentProblemTitle
 } from '../errors/problem.js'
 import { useConsents } from '../stores/consents.js'
 import { useSession } from '../stores/session.js'
@@ -88,12 +89,13 @@ const activeProblem = computed(() => {
   if (props.mode === 'notice') return prioritizedProblem([problem.value, opsProblem.value])
   return prioritizedProblem([problem.value, personalProblem.value, opsProblem.value])
 })
-const message = computed(() => activeProblem.value ? presentProblem(activeProblem.value) : '')
-const serviceUnavailable = computed(() => props.mode !== 'notice'
+const presentationProblem = computed(() => activeProblem.value && isServiceUnavailableProblem(activeProblem.value)
+  ? asServiceUnavailableProblem(activeProblem.value) : activeProblem.value)
+const message = computed(() => presentationProblem.value ? presentProblem(presentationProblem.value) : '')
+const errorTitle = computed(() => presentProblemTitle(presentationProblem.value))
+const serviceUnavailable = computed(() => props.mode === 'legal'
   && isServiceUnavailableProblem(activeProblem.value))
 const label = value => CONSENT_STATUSES[value] || value
-const serviceUnavailableMessage = computed(() => activeProblem.value
-  ? presentProblem(asServiceUnavailableProblem(activeProblem.value)) : '')
 function requireDocument(value, detail) {
   if (!value) throw createInternalProblem('invalidInput', { detail })
   if (!Number.isFinite(Date.parse(value.effectiveAt))) throw createInternalProblem('protocolError')
@@ -416,7 +418,7 @@ onUnmounted(() => {
   <ServiceUnavailablePage
     v-if="serviceUnavailable"
     :busy="busy"
-    :message="serviceUnavailableMessage"
+    :message="message"
     @retry="retry"
   />
 
@@ -424,6 +426,7 @@ onUnmounted(() => {
     v-else-if="mode === 'notice' && activeProblem && !noticeSuppressed"
     class="consent-recovery-notice"
     role="region"
+    aria-live="polite"
     aria-labelledby="consent-recovery-title"
   >
     <h2
@@ -458,11 +461,23 @@ onUnmounted(() => {
     </header>
     <UiAlert
       v-if="message"
-      :title="activeProblem.title"
+      :title="errorTitle"
       class="consent-page__alert"
     >
       {{ message }}
     </UiAlert>
+    <div
+      v-if="message"
+      class="consent-page__actions"
+    >
+      <UiButton
+        variant="primary"
+        :loading="busy"
+        @click="retry"
+      >
+        Повторить
+      </UiButton>
+    </div>
     <p v-if="!authenticated">
       Войдите в аккаунт, чтобы просмотреть согласие и историю.
     </p>
@@ -564,7 +579,7 @@ onUnmounted(() => {
     </header>
     <UiAlert
       v-if="message"
-      :title="activeProblem.title"
+      :title="errorTitle"
       class="consent-page__alert"
     >
       {{ message }}

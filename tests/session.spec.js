@@ -1080,6 +1080,26 @@ describe('session store', () => {
     )).toBe(true)
   })
 
+  it('preserves the safe restore message for authentication after an unexpected Core problem', async () => {
+    vi.stubGlobal('fetch', withOps(url => {
+      if (url === '/api/v1/auth/refresh') {
+        return Promise.resolve(problemResponse(409, 'unexpected-refresh-state', {
+          detail:'Внутренняя причина восстановления'
+        }))
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    }))
+
+    const session = useSession()
+    await session.restoreSession()
+
+    expect(session.restoreProblem.value).toMatchObject({
+      type:INTERNAL_PROBLEM_TYPES.sessionRestoreUnavailable
+    })
+    expect(session.notice.value).toBe('Сервис временно недоступен. Пожалуйста, повторите позже')
+    expect(session.notice.value).not.toContain('Внутренняя причина восстановления')
+  })
+
   it('allows only the public Ops and authorized customer order-list requests', async () => {
     const customer = customerDto({ id:7, phone:'+79990000007', state:0, profile:{ phone:'+79990000007' } })
     const orderOps = { statuses:[], currencies:[] }

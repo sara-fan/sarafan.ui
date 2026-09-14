@@ -41,7 +41,7 @@ export const { INTERNAL_PROBLEM_TYPES, createInternalProblem, normalizeProblem, 
     serviceUnavailable: {
       suffix: 'service-unavailable',
       code: 'ui_service_unavailable',
-      title: 'Сервис недоступен',
+      title: 'Сервис временно недоступен',
       detail: SERVICE_UNAVAILABLE_MESSAGE
     },
     operationCancelled: {
@@ -72,4 +72,10 @@ export function asServiceUnavailableProblem(value) {
   return problem.type === INTERNAL_PROBLEM_TYPES.serviceUnavailable
     ? problem
     : createInternalProblem('serviceUnavailable', { cause:problem })
+}
+
+export function presentProblemTitle(value) {
+  if (!value) return ''
+  const problem = normalizeProblem(value)
+  return isServiceUnavailableProblem(problem) ? '' : problem.title
 }

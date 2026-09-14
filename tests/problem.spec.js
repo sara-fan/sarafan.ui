@@ -12,6 +12,7 @@ import {
   isServiceUnavailableProblem,
   normalizeProblem,
   presentProblem,
+  presentProblemTitle,
   problemFieldErrors,
   suppressProblem
 } from '../src/errors/problem.js'
@@ -127,11 +128,18 @@ describe('shared problem model', () => {
       title:'Сервис временно недоступен',
       detail:'Сервис временно недоступен. Пожалуйста, повторите позже'
     })
+    expect(createInternalProblem('serviceUnavailable')).toMatchObject({
+      title:'Сервис временно недоступен',
+      detail:'Сервис временно недоступен. Пожалуйста, повторите позже'
+    })
 
     expect(isServiceUnavailableProblem(server)).toBe(true)
     expect(isServiceUnavailableProblem({ status:503 })).toBe(false)
     expect(isServiceUnavailableProblem({ status:409 })).toBe(false)
     expect(isServiceUnavailableProblem(null)).toBe(false)
+    expect(presentProblemTitle(server)).toBe('')
+    expect(presentProblemTitle(createInternalProblem('invalidInput'))).not.toBe('')
+    expect(presentProblemTitle(null)).toBe('')
   })
 
   it('converts service failures through the shared safe authentication problem', () => {

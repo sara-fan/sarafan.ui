@@ -108,11 +108,15 @@ it('presents and retries a legal catalogue failure on an anonymous consent page'
     h.store.opsProblem.value = null
   })
   await mountCenter('/consents'); await flushPromises()
-  expect(wrapper.find('.service-unavailable-page').exists()).toBe(true)
+  expect(wrapper.find('.service-unavailable-page').exists()).toBe(false)
+  expect(wrapper.find('.consent-page').exists()).toBe(true)
+  expect(wrapper.get('.consent-page__alert').text())
+    .toBe('Сервис временно недоступен. Пожалуйста, повторите позже')
+  expect(wrapper.find('.consent-page__alert strong').exists()).toBe(false)
   await click('Повторить')
   expect(h.store.loadOps).toHaveBeenCalledTimes(2)
   expect(h.store.loadMine).not.toHaveBeenCalled()
-  expect(wrapper.find('.service-unavailable-page').exists()).toBe(false)
+  expect(wrapper.find('.consent-page__alert').exists()).toBe(false)
 })
 it('recovers a stale catalogue failure and retries a new failure without a customer', async () => {
   h.store.opsProblem.value = denied()
@@ -132,6 +136,7 @@ it('presents malformed HTTP responses with one simple retry message', async () =
   await mountCenter(); await flushPromises()
 
   const notice = wrapper.get('.consent-recovery-notice')
+  expect(notice.attributes('aria-live')).toBe('polite')
   expect(notice.text()).toContain('Сервис временно недоступен. Пожалуйста, повторите позже')
   expect(notice.text().split('Сервис временно недоступен. Пожалуйста, повторите позже')).toHaveLength(2)
   expect(notice.get('.consent-recovery-notice__message').text()).toBe('Сервис временно недоступен. Пожалуйста, повторите позже')
@@ -143,6 +148,18 @@ it('presents malformed HTTP responses with one simple retry message', async () =
   expect(wrapper.find('.consent-recovery-notice').exists()).toBe(false)
   await wrapper.setProps({ noticeSuppressed:false })
   expect(wrapper.find('.consent-recovery-notice').exists()).toBe(true)
+})
+it('replaces a Core server detail with the safe notice message', async () => {
+  const serverProblem = new ProblemError(coreProblem(503, 'core-failed', {
+    title:'Ошибка внутреннего сервиса', detail:'Внутренняя диагностическая информация'
+  }))
+  h.store.opsProblem.value = serverProblem
+  h.store.loadOps.mockRejectedValueOnce(serverProblem)
+  await mountCenter(); await flushPromises()
+
+  expect(wrapper.get('.consent-recovery-notice__message').text())
+    .toBe('Сервис временно недоступен. Пожалуйста, повторите позже')
+  expect(wrapper.text()).not.toContain('Внутренняя диагностическая информация')
 })
 
 it('does not load customer history after catalogue loading outlives the notice', async () => {
@@ -275,7 +292,11 @@ it('uses a generic consent-page heading while legal operations are loading', asy
 it('shows personal-data and withdrawal failures without losing consent choices or identity', async () => {
   h.session.customer.value = { id:7 }
   h.store.loadMine.mockRejectedValueOnce(denied())
-  await mountCenter('/consents'); await flushPromises(); expect(wrapper.text()).toContain('Сервис временно недоступен. Пожалуйста, повторите позже')
+  await mountCenter('/consents'); await flushPromises()
+  expect(wrapper.find('.service-unavailable-page').exists()).toBe(false)
+  expect(wrapper.get('.consent-page h1').text()).toBe('Согласие на обработку персональных данных')
+  expect(wrapper.get('.consent-page__alert').text())
+    .toBe('Сервис временно недоступен. Пожалуйста, повторите позже')
   await click('Повторить')
   expect(h.store.current).toHaveBeenCalledWith(LEGAL_DOCUMENT_KIND.PERSONAL_DATA_CONSENT)
   h.store.loadMine.mockRejectedValueOnce(denied()); await state().openPersonal(); await flushPromises()
@@ -569,7 +590,7 @@ it('ignores consent work completed for a previous customer identity', async () =
   expect(wrapper.find('.service-unavailable-page').exists()).toBe(false)
   expect(wrapper.get('h1').text()).toBe('Согласие на обработку персональных данных')
   expect(h.store.current).toHaveBeenCalledWith(LEGAL_DOCUMENT_KIND.PERSONAL_DATA_CONSENT)
-  expect(h.store.current).toHaveBeenCalledWith(LEGAL_DOCUMENT_KIND.PERSONAL_DATA_CONSENT)
+  expect(h.store.current).toHaveBeenCalledTimes(1)
 })
 
 it('ignores a stale personal-data load after the customer changes', async () => {
@@ -636,7 +657,8 @@ it('reloads a failed cached catalogue before refreshing an explicit consent sect
   h.store.opsProblem.value = denied()
   h.store.loadOps.mockImplementation(async () => { h.store.opsProblem.value = null })
   await nextTick()
-  expect(wrapper.find('.service-unavailable-page').exists()).toBe(true)
+  expect(wrapper.find('.service-unavailable-page').exists()).toBe(false)
+  expect(wrapper.find('.consent-page__alert').exists()).toBe(true)
   await click('Повторить')
   expect(h.store.loadOps).toHaveBeenCalledTimes(1)
   expect(wrapper.find('.service-unavailable-page').exists()).toBe(false)

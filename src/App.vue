@@ -71,7 +71,7 @@ onMounted(async () => {
     <div class="app-content">
       <ConsentCenter
         v-if="!consentRoute"
-        :notice-suppressed="Boolean(restoreProblem) || authOpen"
+        :notice-suppressed="restoring || Boolean(restoreProblem) || authOpen"
       />
       <div
         class="app-route-content"

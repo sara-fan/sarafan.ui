@@ -39,7 +39,8 @@ async function mountApp(path = '/') {
           name: 'PhoneAuthDialog',
           props: ['modelValue'],
           emits: ['update:modelValue'],
-          template: '<section v-if="modelValue" class="phone-auth-stub">Вход</section>'
+          setup: () => ({ notice:h.session.notice }),
+          template: '<section v-if="modelValue" class="phone-auth-stub">Вход<p class="phone-auth-notice">{{ notice }}</p></section>'
         }
       }
     }
@@ -52,6 +53,7 @@ describe('App routing and privacy gates', () => {
     Object.assign(h.session, {
       customer: ref(null),
       logout: vi.fn().mockResolvedValue(),
+      notice: ref(''),
       restoreProblem: ref(null),
       restoring: ref(false),
       restoreSession: vi.fn().mockResolvedValue()
@@ -80,6 +82,7 @@ describe('App routing and privacy gates', () => {
     expect(wrapper.findAll('.site-footer')).toHaveLength(1)
     expect(wrapper.find('.site-footer a[href="/consents"]').exists()).toBe(false)
     expect(h.session.restoreSession).toHaveBeenCalledOnce()
+    expect(wrapper.findComponent({ name:'ConsentCenter' }).props('noticeSuppressed')).toBe(true)
     expect(wrapper.get('.app-header__login').attributes('disabled')).toBeUndefined()
     wrapper.findComponent(AppHeader).vm.$emit('authenticate')
     await flushPromises()
@@ -132,6 +135,7 @@ describe('App routing and privacy gates', () => {
 
   it('returns home from a protected restore failure and closes authentication via v-model', async () => {
     h.session.restoreProblem.value = createInternalProblem('sessionRestoreUnavailable')
+    h.session.notice.value = 'Сервис временно недоступен. Пожалуйста, повторите позже'
     const { router, wrapper } = await mountApp('/orders')
     await flushPromises()
     await wrapper.findAll('button').find(item => item.text() === 'На главную').trigger('click')
@@ -139,6 +143,8 @@ describe('App routing and privacy gates', () => {
     expect(router.currentRoute.value.name).toBe('home')
     await wrapper.get('.app-header__login').trigger('click')
     expect(wrapper.find('.phone-auth-stub').exists()).toBe(true)
+    expect(wrapper.get('.phone-auth-notice').text())
+      .toBe('Сервис временно недоступен. Пожалуйста, повторите позже')
     wrapper.findComponent({ name: 'PhoneAuthDialog' }).vm.$emit('update:modelValue', false)
     await flushPromises()
     expect(wrapper.find('.phone-auth-stub').exists()).toBe(false)
@@ -155,10 +161,20 @@ describe('App routing and privacy gates', () => {
     expect(wrapper.findComponent({ name:'ConsentCenter' }).props('noticeSuppressed')).toBe(true)
     await wrapper.findAll('button').find(item => item.text() === 'Повторить').trigger('click')
     expect(h.session.restoreSession).toHaveBeenCalled()
+    h.session.restoreProblem.value = null
+    h.session.restoring.value = true
+    await flushPromises()
+    expect(wrapper.find('.session-notice').exists()).toBe(false)
+    expect(wrapper.findComponent({ name:'ConsentCenter' }).props('noticeSuppressed')).toBe(true)
+    h.session.restoring.value = false
+    h.session.restoreProblem.value = createInternalProblem('sessionRestoreUnavailable')
+    h.session.notice.value = 'Сервис временно недоступен. Пожалуйста, повторите позже'
     await wrapper.get('.app-header__login').trigger('click')
     await flushPromises()
     expect(wrapper.find('.session-notice').exists()).toBe(false)
     expect(wrapper.find('.phone-auth-stub').exists()).toBe(true)
+    expect(wrapper.get('.phone-auth-notice').text())
+      .toBe('Сервис временно недоступен. Пожалуйста, повторите позже')
     await router.push('/legal/privacy-policy')
     await flushPromises()
     expect(wrapper.find('.session-notice').exists()).toBe(false)
