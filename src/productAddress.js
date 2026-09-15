@@ -4,12 +4,25 @@
 
 const MAXIMUM_URL_LENGTH = 2048
 const EXPLICIT_SCHEME = /^[A-Za-z][A-Za-z0-9+.-]*:/u
-const HOST_WITH_PORT = /^(?:[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*|\[[0-9A-Fa-f:.]+\]):[0-9]+(?:[/?#]|$)/u
+const DOTTED_HOST_WITH_PORT = /^(?:[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+|\[[0-9A-Fa-f:.]+\]):[0-9]+(?:[/?#]|$)/u
+const DNS_LABEL = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/iu
 
-export function normalizeProductAddress(value) {
+function hasValidHostnameSyntax(hostname) {
+  const normalized = hostname.endsWith('.') ? hostname.slice(0, -1) : hostname
+  const labels = normalized.split('.')
+  return normalized.length <= 253 && labels.length > 1 && labels.every(label => DNS_LABEL.test(label))
+}
+
+function hasListedSuffix(hostname, topLevelDomains) {
+  const normalized = hostname.endsWith('.') ? hostname.slice(0, -1) : hostname
+  return topLevelDomains.includes(normalized.split('.').at(-1).toUpperCase())
+}
+
+export function normalizeProductAddress(value, productSourceUrlOps = null) {
   if (typeof value !== 'string') return null
   const trimmed = value.trim()
-  if (!trimmed || /\s/u.test(trimmed)) return null
+  const maximumLength = productSourceUrlOps?.maximumLength ?? MAXIMUM_URL_LENGTH
+  if (!trimmed || trimmed.length > maximumLength || /\s/u.test(trimmed)) return null
 
   let candidate
   if (trimmed.startsWith('//')) candidate = `https:${trimmed}`
@@ -18,13 +31,15 @@ export function normalizeProductAddress(value) {
     if (!authority || /^[/?#]/u.test(authority)) return null
     candidate = trimmed
   }
-  else if (EXPLICIT_SCHEME.test(trimmed) && !HOST_WITH_PORT.test(trimmed)) return null
+  else if (EXPLICIT_SCHEME.test(trimmed) && !DOTTED_HOST_WITH_PORT.test(trimmed)) return null
   else candidate = `https://${trimmed}`
 
   try {
     const url = new globalThis.URL(candidate)
-    if (!['http:', 'https:'].includes(url.protocol) || !url.hostname) return null
-    return url.href.length <= MAXIMUM_URL_LENGTH ? url.href : null
+    if (!['http:', 'https:'].includes(url.protocol) || !url.hostname
+      || !hasValidHostnameSyntax(url.hostname)
+      || productSourceUrlOps && !hasListedSuffix(url.hostname, productSourceUrlOps.topLevelDomains)) return null
+    return url.href.length <= maximumLength ? url.href : null
   } catch {
     return null
   }

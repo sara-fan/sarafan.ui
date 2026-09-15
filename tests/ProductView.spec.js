@@ -27,7 +27,12 @@ const ops = {
     isTerminal:false,
     progressPercent:14
   }],
-  currencies:[{ value:840, name:'Доллар США', routeAlias:'usd' }]
+  currencies:[{ value:840, name:'Доллар США', routeAlias:'usd' }],
+  productSourceUrl:{
+    maximumLength:2048,
+    topLevelDomainListVersion:'2026091400',
+    topLevelDomains:['COM', 'XN--P1AI']
+  }
 }
 
 function created(payload = {}) {
@@ -35,7 +40,7 @@ function created(payload = {}) {
     id:19,
     orderNumber:'12345678-19',
     status:0,
-    sourceUrl:'https://shop.example/item',
+    sourceUrl:'https://shop.example.com/item',
     productName:null,
     storeName:null,
     imageUrl:null,
@@ -51,7 +56,7 @@ function created(payload = {}) {
 
 function resetDraft(value = {}) {
   h.drafts.draft = ref({
-    sourceUrl:'https://shop.example/item',
+    sourceUrl:'https://shop.example.com/item',
     quantity:'1',
     comment:'',
     idempotencyKey:null,
@@ -134,6 +139,7 @@ describe('ProductView manual fallback', () => {
       return value
     })
     h.consents.hasCurrentPersonalData = vi.fn().mockResolvedValue(true)
+    h.consents.acquireNoticeSuppression = vi.fn(() => vi.fn())
   })
 
   it('shows loading, authoritative canonical URL, and exact manual fallback without quote fields', async () => {
@@ -148,11 +154,11 @@ describe('ProductView manual fallback', () => {
     await vi.waitFor(() => expect(resolvePreview).toBeTypeOf('function'))
     const { wrapper } = await mounting
     expect(wrapper.text()).toContain('Проверяем ссылку на товар')
-    resolvePreview({ sourceUrl:'https://shop.example/canonical', outcome:'manual_review' })
+    resolvePreview({ sourceUrl:'https://shop.example.com/canonical', outcome:'manual_review' })
     await flushPromises()
 
     expect(wrapper.text()).toContain('Не получилось получить данные о товаре автоматически. Проверим его по ссылке.')
-    expect(wrapper.get('.product-source a').attributes('href')).toBe('https://shop.example/canonical')
+    expect(wrapper.get('.product-source a').attributes('href')).toBe('https://shop.example.com/canonical')
     expect(wrapper.get('input[type="number"]').element.value).toBe('1')
     expect(wrapper.text()).not.toContain('Цена')
     expect(wrapper.text()).not.toContain('Прогноз')
@@ -162,7 +168,7 @@ describe('ProductView manual fallback', () => {
     h.session.previewOrder
       .mockRejectedValueOnce(createInternalProblem('networkUnavailable'))
       .mockImplementationOnce(async (_sourceUrl, isCurrent, validate) => {
-        const value = { sourceUrl:'https://shop.example/item', outcome:'manual_review' }
+        const value = { sourceUrl:'https://shop.example.com/item', outcome:'manual_review' }
         if (isCurrent()) validate(value)
         return value
       })
@@ -234,13 +240,23 @@ describe('ProductView manual fallback', () => {
     const { router } = await mountView()
     await vi.waitFor(() => expect(router.currentRoute.value.name).toBe('orders'))
     expect(h.session.createOrder).toHaveBeenCalledWith(
-      { sourceUrl:'https://shop.example/item', quantity:1, comment:'' },
+      { sourceUrl:'https://shop.example.com/item', quantity:1, comment:'' },
       '11111111-1111-4111-8111-111111111111',
       expect.any(Function),
       expect.any(Function)
     )
     expect(h.drafts.clear).toHaveBeenCalledOnce()
-    expect(h.showOrderCreated).toHaveBeenCalledWith('12345678-19')
+    expect(h.showOrderCreated).toHaveBeenCalledWith(7, '12345678-19')
+  })
+
+  it('trims the submitted comment while retaining the editable draft value', async () => {
+    resetDraft({ comment:'  синий цвет  ' })
+    h.session.customer.value = { id:7 }
+    const { router, wrapper } = await mountView()
+    await wrapper.get('form').trigger('submit')
+    await vi.waitFor(() => expect(router.currentRoute.value.name).toBe('orders'))
+
+    expect(h.session.createOrder.mock.calls[0][0]).toMatchObject({ comment:'синий цвет' })
   })
 
   it('handles a consent-renewal race reported by Core through the same return flow', async () => {
@@ -317,6 +333,65 @@ describe('ProductView manual fallback', () => {
     expect(h.session.createOrder).toHaveBeenCalledOnce()
   })
 
+  it('invalidates a pending consent check when the customer identity changes', async () => {
+    let resolveConsent
+    h.session.customer.value = { id:7 }
+    h.consents.hasCurrentPersonalData.mockReturnValue(new Promise(resolve => { resolveConsent = resolve }))
+    const { router, wrapper } = await mountView()
+    await wrapper.get('form').trigger('submit')
+
+    h.session.customer.value = { id:8 }
+    await flushPromises()
+    expect(wrapper.text()).toContain('Пользователь изменился')
+    expect(h.drafts.clearResume).toHaveBeenCalled()
+    resolveConsent(true)
+    await flushPromises()
+
+    expect(h.session.createOrder).not.toHaveBeenCalled()
+    expect(h.drafts.clear).not.toHaveBeenCalled()
+    expect(router.currentRoute.value.name).toBe('product')
+  })
+
+  it('discards a pending order completion after the customer identity changes', async () => {
+    let resolveCreation
+    h.session.customer.value = { id:7 }
+    h.session.createOrder.mockImplementation((payload, _key, isCurrent, validate) => new Promise(resolve => {
+      resolveCreation = () => {
+        const value = created({ sourceUrl:payload.sourceUrl, quantity:payload.quantity, comment:payload.comment || null })
+        if (isCurrent()) validate(value)
+        resolve(value)
+      }
+    }))
+    const { router, wrapper } = await mountView()
+    await wrapper.get('form').trigger('submit')
+    await vi.waitFor(() => expect(resolveCreation).toBeTypeOf('function'))
+
+    h.session.customer.value = { id:8 }
+    resolveCreation()
+    await flushPromises()
+
+    expect(h.showOrderCreated).not.toHaveBeenCalled()
+    expect(h.drafts.clear).not.toHaveBeenCalled()
+    expect(router.currentRoute.value.name).toBe('product')
+  })
+
+  it('retains consent notice ownership while presenting a consent-load failure', async () => {
+    const release = vi.fn()
+    h.session.customer.value = { id:7 }
+    h.consents.acquireNoticeSuppression.mockReturnValue(release)
+    h.consents.hasCurrentPersonalData.mockRejectedValue(createInternalProblem('networkUnavailable'))
+    const { wrapper } = await mountView()
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+
+    expect(wrapper.get('[role="alert"]').text()).toContain('Проверьте подключение к интернету')
+    expect(h.consents.acquireNoticeSuppression).toHaveBeenCalledOnce()
+    expect(release).not.toHaveBeenCalled()
+
+    wrapper.unmount()
+    expect(release).toHaveBeenCalledOnce()
+  })
+
   it('lets the customer abandon the draft and choose another product', async () => {
     const { router, wrapper } = await mountView()
     await wrapper.findAll('.product-actions button')[1].trigger('click')
@@ -327,7 +402,7 @@ describe('ProductView manual fallback', () => {
 
   it('rejects malformed canonical preview data and ignores a late preview after unmount', async () => {
     h.session.previewOrder.mockImplementationOnce(async (_sourceUrl, isCurrent, validate) => {
-      const value = { sourceUrl:'shop.example/item', outcome:'manual_review' }
+      const value = { sourceUrl:'shop.example.com/item', outcome:'manual_review' }
       if (isCurrent()) validate(value)
       return value
     })
@@ -345,7 +420,7 @@ describe('ProductView manual fallback', () => {
     }))
     const late = await mountView()
     late.wrapper.unmount()
-    resolvePreview({ sourceUrl:'https://shop.example/item', outcome:'manual_review' })
+    resolvePreview({ sourceUrl:'https://shop.example.com/item', outcome:'manual_review' })
     await flushPromises()
     expect(h.drafts.setCanonicalSourceUrl).not.toHaveBeenCalled()
   })

@@ -18,7 +18,7 @@ const router = useRouter()
 const store = createOrderStore(session)
 const problem = ref(null)
 const failedImages = ref(new Set())
-const createdOrderNumber = ref(consumeOrderCreated())
+const createdOrderNumber = ref(consumeOrderCreated(session.customer.value?.id))
 let mounted = true
 
 const activeOrders = computed(() => store.orders.value.filter(order => !store.statusFor(order.status)?.isTerminal))
@@ -81,6 +81,7 @@ const stopCustomerWatch = watch(() => session.customer.value?.id, (customerId, p
   if (customerId === previousCustomerId) return
   store.reset()
   problem.value = null
+  createdOrderNumber.value = consumeOrderCreated(customerId)
   failedImages.value = new Set()
   if (customerId) void load()
 }, { flush:'sync' })

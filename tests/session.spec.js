@@ -1133,7 +1133,7 @@ describe('session store', () => {
 
   it('previews anonymously and creates with the retained idempotency key', async () => {
     const customer = customerDto({ id:7, phone:'+79990000007', state:0, profile:{ phone:'+79990000007' } })
-    const preview = { sourceUrl:'https://shop.example/item', outcome:'manual_review' }
+    const preview = { sourceUrl:'https://shop.example.com/item', outcome:'manual_review' }
     const created = { id:19, orderNumber:'12345678-19' }
     const fetch = withOps(url => {
       if (url === '/api/v1/auth/code/verify') return Promise.resolve(response(200, {
@@ -1148,7 +1148,7 @@ describe('session store', () => {
     const session = useSession()
     await session.verifyCode({ phone:customer.phone, code:'1111' })
     const validatePreview = vi.fn()
-    await expect(session.previewOrder('shop.example/item', () => true, validatePreview)).resolves.toEqual(preview)
+    await expect(session.previewOrder('shop.example.com/item', () => true, validatePreview)).resolves.toEqual(preview)
     expect(validatePreview).toHaveBeenCalledWith(preview)
     const validateCreated = vi.fn()
     await expect(session.createOrder(
@@ -1161,7 +1161,7 @@ describe('session store', () => {
 
     const previewCall = fetch.mock.calls.find(([url]) => url === '/api/v1/orders/preview')
     expect(previewCall[1].headers.has('Authorization')).toBe(false)
-    expect(JSON.parse(previewCall[1].body)).toEqual({ sourceUrl:'shop.example/item' })
+    expect(JSON.parse(previewCall[1].body)).toEqual({ sourceUrl:'shop.example.com/item' })
     const createCall = fetch.mock.calls.find(([url]) => url === '/api/v1/orders')
     expect(createCall[1].headers.get('Authorization')).toBe('Bearer order-token')
     expect(createCall[1].headers.get('Idempotency-Key')).toBe('11111111-1111-4111-8111-111111111111')
@@ -1177,14 +1177,14 @@ describe('session store', () => {
     const validate = vi.fn()
 
     let current = true
-    const completed = useSession().previewOrder('shop.example/item', () => current, validate)
+    const completed = useSession().previewOrder('shop.example.com/item', () => current, validate)
     current = false
-    resolvePreview(response(200, { sourceUrl:'https://shop.example/item', outcome:'manual_review' }))
+    resolvePreview(response(200, { sourceUrl:'https://shop.example.com/item', outcome:'manual_review' }))
     await expect(completed).resolves.toBeNull()
     expect(validate).not.toHaveBeenCalled()
 
     current = true
-    const failed = useSession().previewOrder('shop.example/item', () => current, validate)
+    const failed = useSession().previewOrder('shop.example.com/item', () => current, validate)
     current = false
     rejectPreview(new TypeError('private network detail'))
     await expect(failed).resolves.toBeNull()
@@ -1193,7 +1193,7 @@ describe('session store', () => {
   it('skips preview transport when its operation is already stale', async () => {
     const fetch = vi.fn()
     vi.stubGlobal('fetch', fetch)
-    await expect(useSession().previewOrder('shop.example/item', () => false)).resolves.toBeNull()
+    await expect(useSession().previewOrder('shop.example.com/item', () => false)).resolves.toBeNull()
     expect(fetch).not.toHaveBeenCalled()
   })
 

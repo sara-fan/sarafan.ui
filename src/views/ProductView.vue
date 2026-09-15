@@ -35,8 +35,10 @@ const authOpen = ref(false)
 const quantityProblem = ref('')
 const commentProblem = ref('')
 let mounted = false
-let operation = 0
+let previewOperation = 0
+let submissionOperation = 0
 let resumeRunning = false
+let releaseConsentNoticeSuppression = null
 
 const draft = computed(() => drafts.draft.value)
 const sourceUrl = computed(() => draft.value?.sourceUrl || '')
@@ -58,8 +60,24 @@ const error = computed(() => problem.value ? presentProblem(problem.value) : '')
 const errorTitle = computed(() => presentProblemTitle(problem.value))
 const busy = computed(() => previewLoading.value || submitting.value)
 
-function current(value) {
-  return mounted && value === operation
+function currentPreview(value) {
+  return mounted && value === previewOperation
+}
+
+function currentSubmission(value, customerId) {
+  return mounted && value === submissionOperation && session.customer.value?.id === customerId
+}
+
+function acquireConsentProblemOwnership() {
+  const previousRelease = releaseConsentNoticeSuppression
+  releaseConsentNoticeSuppression = consents.acquireNoticeSuppression()
+  previousRelease?.()
+}
+
+function releaseConsentProblemOwnership() {
+  const release = releaseConsentNoticeSuppression
+  releaseConsentNoticeSuppression = null
+  release?.()
 }
 
 function values() {
@@ -72,7 +90,7 @@ function values() {
   }
   if (comment.value.length > 2000) commentProblem.value = 'Комментарий не должен превышать 2000 символов'
   if (quantityProblem.value || commentProblem.value || !draft.value) return null
-  return { sourceUrl:sourceUrl.value, quantity:parsedQuantity, comment:comment.value }
+  return { sourceUrl:sourceUrl.value, quantity:parsedQuantity, comment:comment.value.trim() }
 }
 
 async function loadPreview() {
@@ -80,22 +98,22 @@ async function loadPreview() {
     await router.replace({ name:'home' })
     return
   }
-  const ownOperation = ++operation
+  const ownOperation = ++previewOperation
   previewLoading.value = true
   previewReady.value = false
   problem.value = null
   try {
     let validated
-    await session.previewOrder(sourceUrl.value, () => current(ownOperation), value => {
+    await session.previewOrder(sourceUrl.value, () => currentPreview(ownOperation), value => {
       validated = validateProductPreview(value)
     })
-    if (!current(ownOperation) || !validated) return
+    if (!currentPreview(ownOperation) || !validated) return
     if (!drafts.setCanonicalSourceUrl(validated.sourceUrl)) throw createInternalProblem('protocolError')
     previewReady.value = true
   } catch (value) {
-    if (current(ownOperation)) problem.value = normalizeProblem(value)
+    if (currentPreview(ownOperation)) problem.value = normalizeProblem(value)
   } finally {
-    if (current(ownOperation)) previewLoading.value = false
+    if (currentPreview(ownOperation)) previewLoading.value = false
   }
 }
 
@@ -130,43 +148,48 @@ async function submitAuthenticated() {
     return
   }
 
-  const ownOperation = ++operation
+  const ownOperation = ++submissionOperation
+  const isCurrent = () => currentSubmission(ownOperation, customerId)
   submitting.value = true
   problem.value = null
+  acquireConsentProblemOwnership()
   try {
     const consentCurrent = await consents.hasCurrentPersonalData()
-    if (!current(ownOperation)) return
+    if (!isCurrent()) return
     if (!consentCurrent) {
+      releaseConsentProblemOwnership()
       await requireConsent(customerId)
       return
     }
+    releaseConsentProblemOwnership()
     drafts.clearResume()
 
     let ops
-    await session.orderRequest('/api/v1/orders/ops', {}, () => current(ownOperation), value => {
+    await session.orderRequest('/api/v1/orders/ops', {}, isCurrent, value => {
       ops = validateOrderOps(value)
     })
-    if (!current(ownOperation) || !ops) return
+    if (!isCurrent() || !ops) return
     const idempotencyKey = drafts.ensureIdempotencyKey()
     if (!idempotencyKey) return
     let order
-    await session.createOrder(payload, idempotencyKey, () => current(ownOperation), value => {
+    await session.createOrder(payload, idempotencyKey, isCurrent, value => {
       order = validateCreatedOrder(value, ops, payload)
     })
-    if (!current(ownOperation) || !order) return
+    if (!isCurrent() || !order) return
     drafts.clear()
-    showOrderCreated(order.orderNumber)
+    showOrderCreated(customerId, order.orderNumber)
     await router.replace({ name:'orders' })
   } catch (value) {
-    if (!current(ownOperation)) return
+    if (!isCurrent()) return
     const normalized = normalizeProblem(value)
     if (normalized.type === CORE_PROBLEM_TYPES.personalDataConsentRequired) {
+      releaseConsentProblemOwnership()
       await requireConsent(customerId)
     } else {
       problem.value = normalized
     }
   } finally {
-    if (current(ownOperation)) submitting.value = false
+    if (isCurrent()) submitting.value = false
   }
 }
 
@@ -181,7 +204,9 @@ async function submit() {
 }
 
 async function changeProduct() {
-  ++operation
+  ++previewOperation
+  ++submissionOperation
+  releaseConsentProblemOwnership()
   drafts.clear()
   await router.push({ name:'home' })
 }
@@ -206,6 +231,15 @@ async function resume() {
   }
 }
 
+watch(() => session.customer.value?.id, (customerId, previousCustomerId) => {
+  if (customerId === previousCustomerId || !submitting.value) return
+  ++submissionOperation
+  submitting.value = false
+  releaseConsentProblemOwnership()
+  drafts.clearResume()
+  problem.value = createInternalProblem('identityChanged')
+}, { flush:'sync' })
+
 watch([previewReady, session.restoring, () => session.customer.value?.id], resume)
 
 onMounted(async () => {
@@ -216,7 +250,9 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   mounted = false
-  operation++
+  previewOperation++
+  submissionOperation++
+  releaseConsentProblemOwnership()
 })
 </script>
 

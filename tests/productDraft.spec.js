@@ -25,12 +25,12 @@ describe('same-tab product draft', () => {
 
   it('persists and restores a versioned canonical draft', () => {
     const drafts = useProductDraft()
-    expect(drafts.start(' shop.example/item ')).toBe(true)
+    expect(drafts.start(' shop.example.com/item ')).toBe(true)
     drafts.update({ quantity:'3', comment:'цвет синий' })
 
     expect(JSON.parse(globalThis.sessionStorage.getItem(PRODUCT_DRAFT_STORAGE_KEY))).toMatchObject({
       version:1,
-      sourceUrl:'https://shop.example/item',
+      sourceUrl:'https://shop.example.com/item',
       quantity:'3',
       comment:'цвет синий',
       idempotencyKey:null,
@@ -41,14 +41,33 @@ describe('same-tab product draft', () => {
     resetProductDraftForTests()
     globalThis.sessionStorage.setItem(PRODUCT_DRAFT_STORAGE_KEY, JSON.stringify({
       version:1,
-      sourceUrl:'https://shop.example/item',
+      sourceUrl:'https://shop.example.com/item',
       quantity:'3',
       comment:'цвет синий',
       idempotencyKey:null,
       resumeMode:'none',
       boundCustomerId:null
     }))
-    expect(useProductDraft().draft.value.sourceUrl).toBe('https://shop.example/item')
+    expect(useProductDraft().draft.value.sourceUrl).toBe('https://shop.example.com/item')
+  })
+
+  it('drops unknown stored properties instead of persisting them again', () => {
+    globalThis.sessionStorage.setItem(PRODUCT_DRAFT_STORAGE_KEY, JSON.stringify({
+      version:1,
+      sourceUrl:'https://shop.example.com/item',
+      quantity:'1',
+      comment:'',
+      idempotencyKey:null,
+      resumeMode:'none',
+      boundCustomerId:null,
+      unexpectedPersonalData:'must not survive'
+    }))
+
+    const drafts = useProductDraft()
+    expect(drafts.draft.value).not.toHaveProperty('unexpectedPersonalData')
+    drafts.update({ quantity:'2' })
+    expect(JSON.parse(globalThis.sessionStorage.getItem(PRODUCT_DRAFT_STORAGE_KEY)))
+      .not.toHaveProperty('unexpectedPersonalData')
   })
 
   it.each([
@@ -56,8 +75,8 @@ describe('same-tab product draft', () => {
     '{}',
     JSON.stringify({ version:2 }),
     JSON.stringify({ version:1, sourceUrl:'ftp://bad', quantity:'1', comment:'', idempotencyKey:null, resumeMode:'none', boundCustomerId:null }),
-    JSON.stringify({ version:1, sourceUrl:'https://shop.example', quantity:'1', comment:'', idempotencyKey:'bad', resumeMode:'none', boundCustomerId:null }),
-    JSON.stringify({ version:1, sourceUrl:'https://shop.example', quantity:'1', comment:'', idempotencyKey:null, resumeMode:'consent', boundCustomerId:null })
+    JSON.stringify({ version:1, sourceUrl:'https://shop.example.com', quantity:'1', comment:'', idempotencyKey:'bad', resumeMode:'none', boundCustomerId:null }),
+    JSON.stringify({ version:1, sourceUrl:'https://shop.example.com', quantity:'1', comment:'', idempotencyKey:null, resumeMode:'consent', boundCustomerId:null })
   ])('discards corrupted storage %#', serialized => {
     globalThis.sessionStorage.setItem(PRODUCT_DRAFT_STORAGE_KEY, serialized)
     expect(useProductDraft().draft.value).toBeNull()
@@ -69,11 +88,11 @@ describe('same-tab product draft', () => {
       .mockReturnValueOnce(FIRST_KEY)
       .mockReturnValueOnce(SECOND_KEY)
     const drafts = useProductDraft()
-    drafts.start('shop.example/item')
+    drafts.start('shop.example.com/item')
     expect(drafts.ensureIdempotencyKey()).toBe(FIRST_KEY)
     expect(drafts.ensureIdempotencyKey()).toBe(FIRST_KEY)
 
-    drafts.update({ sourceUrl:'https://shop.example/item', quantity:'01', comment:'  ' })
+    drafts.update({ sourceUrl:'https://shop.example.com/item', quantity:'01', comment:'  ' })
     expect(drafts.draft.value.idempotencyKey).toBe(FIRST_KEY)
     drafts.update({ comment:'blue' })
     expect(drafts.draft.value.idempotencyKey).toBeNull()
@@ -83,7 +102,7 @@ describe('same-tab product draft', () => {
 
   it('binds consent resume to one customer and clears resume on editing or cancellation', () => {
     const drafts = useProductDraft()
-    drafts.start('shop.example/item')
+    drafts.start('shop.example.com/item')
     drafts.markAuthenticationResume()
     expect(drafts.draft.value).toMatchObject({ resumeMode:'authentication', boundCustomerId:null })
     drafts.markConsentResume(7)
@@ -97,7 +116,7 @@ describe('same-tab product draft', () => {
     expect(drafts.draft.value.resumeMode).toBe('none')
     drafts.clear()
     expect(drafts.draft.value).toBeNull()
-    expect(drafts.start('ftp://shop.example/item')).toBe(false)
+    expect(drafts.start('ftp://shop.example.com/item')).toBe(false)
     expect(drafts.update({ quantity:'2' })).toBe(false)
     expect(drafts.setCanonicalSourceUrl('javascript:alert(1)')).toBe(false)
     expect(drafts.ensureIdempotencyKey()).toBeNull()
@@ -109,7 +128,7 @@ describe('same-tab product draft', () => {
 
   it('rejects an invalid draft update without replacing the current draft', () => {
     const drafts = useProductDraft()
-    drafts.start('shop.example/item')
+    drafts.start('shop.example.com/item')
     expect(drafts.update({ comment:'x'.repeat(2001) })).toBe(false)
     expect(drafts.draft.value.comment).toBe('')
   })
@@ -122,7 +141,7 @@ describe('same-tab product draft', () => {
     })
     resetProductDraftForTests()
     const drafts = useProductDraft()
-    expect(drafts.start('shop.example/item')).toBe(true)
-    expect(drafts.draft.value.sourceUrl).toBe('https://shop.example/item')
+    expect(drafts.start('shop.example.com/item')).toBe(true)
+    expect(drafts.draft.value.sourceUrl).toBe('https://shop.example.com/item')
   })
 })

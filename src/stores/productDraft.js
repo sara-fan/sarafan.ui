@@ -33,7 +33,15 @@ function validate(value) {
   if (!sourceUrl) return null
   if (value.resumeMode === 'consent' && value.boundCustomerId === null
     || value.resumeMode !== 'consent' && value.boundCustomerId !== null) return null
-  return { ...value, sourceUrl }
+  return {
+    version:VERSION,
+    sourceUrl,
+    quantity:value.quantity,
+    comment:value.comment,
+    idempotencyKey:value.idempotencyKey,
+    resumeMode:value.resumeMode,
+    boundCustomerId:value.boundCustomerId
+  }
 }
 
 function readStored() {

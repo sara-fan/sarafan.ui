@@ -3,34 +3,77 @@
 // All rights reserved.
 // This file is a part of the Sarafan application
 
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
 import PublicInfoBlock from '../components/PublicInfoBlock.vue'
+import UiAlert from '../components/ui/UiAlert.vue'
 import UiButton from '../components/ui/UiButton.vue'
 import UiField from '../components/ui/UiField.vue'
+import { normalizeProblem, presentProblem } from '../errors/problem.js'
 import { normalizeProductAddress } from '../productAddress.js'
+import { validateOrderOps } from '../stores/orders.js'
 import { useProductDraft } from '../stores/productDraft.js'
+import { useSession } from '../stores/session.js'
 
 const router = useRouter()
+const session = useSession()
 const draftStore = useProductDraft()
 const sourceUrl = ref('')
 const sourceProblem = ref('')
+const problem = ref(null)
+const loading = ref(false)
+let operations = null
+let mounted = true
+let operation = 0
 const sourceErrors = computed(() => sourceProblem.value ? [sourceProblem.value] : [])
+const error = computed(() => problem.value ? presentProblem(problem.value) : '')
 
-function begin() {
+async function loadOperations(ownOperation) {
+  if (operations) return operations
+  let validated
+  await session.orderRequest('/api/v1/orders/ops', {}, () => mounted && operation === ownOperation, value => {
+    validated = validateOrderOps(value)
+  })
+  if (!mounted || operation !== ownOperation) return null
+  operations = validated
+  return operations
+}
+
+async function begin() {
+  if (loading.value) return
   sourceProblem.value = ''
+  problem.value = null
   if (!sourceUrl.value.trim()) {
     sourceProblem.value = 'Вставьте ссылку на товар'
     return
   }
-  const normalized = normalizeProductAddress(sourceUrl.value)
-  if (!normalized || !draftStore.start(normalized)) {
+  if (!normalizeProductAddress(sourceUrl.value)) {
     sourceProblem.value = 'Проверьте ссылку на товар и попробуйте ещё раз'
     return
   }
-  router.push({ name: 'product' })
+  const ownOperation = ++operation
+  loading.value = true
+  try {
+    const loadedOperations = await loadOperations(ownOperation)
+    if (!loadedOperations) return
+    const normalized = normalizeProductAddress(sourceUrl.value, loadedOperations.productSourceUrl)
+    if (!normalized || !draftStore.start(normalized)) {
+      sourceProblem.value = 'Проверьте ссылку на товар и попробуйте ещё раз'
+      return
+    }
+    await router.push({ name: 'product' })
+  } catch (value) {
+    if (mounted && operation === ownOperation) problem.value = normalizeProblem(value)
+  } finally {
+    if (mounted && operation === ownOperation) loading.value = false
+  }
 }
+
+onBeforeUnmount(() => {
+  mounted = false
+  ++operation
+})
 </script>
 
 <template>
@@ -55,6 +98,12 @@ function begin() {
         novalidate
         @submit.prevent="begin"
       >
+        <UiAlert
+          v-if="problem"
+          title="Не удалось проверить ссылку"
+        >
+          {{ error }}
+        </UiAlert>
         <UiField
           v-model="sourceUrl"
           label="Ссылка на товар"
@@ -63,12 +112,14 @@ function begin() {
           autocomplete="url"
           inputmode="url"
           required
+          :disabled="loading"
           :errors="sourceErrors"
-          @update:model-value="sourceProblem = ''"
+          @update:model-value="sourceProblem = ''; problem = null"
         />
         <UiButton
           type="submit"
           variant="primary"
+          :loading="loading"
         >
           Рассчитать стоимость
         </UiButton>

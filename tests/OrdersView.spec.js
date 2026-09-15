@@ -109,7 +109,7 @@ describe('OrdersView', () => {
   })
 
   it('shows a created-order notice once and reloads the owner-scoped list', async () => {
-    showOrderCreated('12345678-9')
+    showOrderCreated(7, '12345678-9')
     const first = await mountView()
     await flushPromises()
     expect(first.wrapper.text()).toContain('Номер заказа 12345678-9.')
@@ -122,7 +122,7 @@ describe('OrdersView', () => {
   })
 
   it('gives a list-load failure precedence over the creation notice', async () => {
-    showOrderCreated('12345678-9')
+    showOrderCreated(7, '12345678-9')
     h.store.load.mockRejectedValue(createInternalProblem('networkUnavailable'))
     const { wrapper } = await mountView()
     await flushPromises()
@@ -190,6 +190,23 @@ describe('OrdersView', () => {
     await flushPromises()
     expect(wrapper.text()).not.toContain('Старый заказ')
     expect(h.store.load).toHaveBeenCalledTimes(2)
+  })
+
+  it('never presents an order notice to a different customer or after identity replacement', async () => {
+    showOrderCreated(8, '87654321-8')
+    const otherCustomer = await mountView()
+    await flushPromises()
+    expect(otherCustomer.wrapper.text()).not.toContain('87654321-8')
+    otherCustomer.wrapper.unmount()
+
+    showOrderCreated(7, '12345678-7')
+    const { wrapper } = await mountView()
+    await flushPromises()
+    expect(wrapper.text()).toContain('Номер заказа 12345678-7.')
+
+    h.session.customer.value = { id:8 }
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('12345678-7')
   })
 
   it('does not present a late failure after unmount', async () => {

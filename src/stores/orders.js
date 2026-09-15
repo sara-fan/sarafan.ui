@@ -9,6 +9,8 @@ import { createInternalProblem } from '../errors/problem.js'
 import { normalizeProductAddress } from '../productAddress.js'
 
 const ROUTE_ALIAS_PATTERN = /^[a-z0-9]+(?:_[a-z0-9]+)*$/u
+const TOP_LEVEL_DOMAIN_PATTERN = /^[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?$/u
+const TOP_LEVEL_DOMAIN_VERSION_PATTERN = /^\d{10}$/u
 
 function protocolError() { throw createInternalProblem('protocolError') }
 function validText(value, maximum) {
@@ -29,7 +31,14 @@ function validHttpUrl(value) {
 
 export function validateOrderOps(value) {
   if (!value || !Array.isArray(value.statuses) || value.statuses.length === 0
-    || !Array.isArray(value.currencies) || value.currencies.length === 0) protocolError()
+    || !Array.isArray(value.currencies) || value.currencies.length === 0
+    || !value.productSourceUrl
+    || !Number.isInteger(value.productSourceUrl.maximumLength)
+    || value.productSourceUrl.maximumLength <= 0 || value.productSourceUrl.maximumLength > 65535
+    || typeof value.productSourceUrl.topLevelDomainListVersion !== 'string'
+    || !TOP_LEVEL_DOMAIN_VERSION_PATTERN.test(value.productSourceUrl.topLevelDomainListVersion)
+    || !Array.isArray(value.productSourceUrl.topLevelDomains)
+    || value.productSourceUrl.topLevelDomains.length === 0) protocolError()
   const statusValues = new Set()
   const statusAliases = new Set()
   for (const item of value.statuses) {
@@ -59,9 +68,21 @@ export function validateOrderOps(value) {
     currencyValues.add(item.value)
     currencyAliases.add(item.routeAlias)
   }
+  const topLevelDomains = new Set()
+  let previousTopLevelDomain = null
+  for (const item of value.productSourceUrl.topLevelDomains) {
+    if (typeof item !== 'string' || !TOP_LEVEL_DOMAIN_PATTERN.test(item)
+      || topLevelDomains.has(item) || previousTopLevelDomain !== null && item < previousTopLevelDomain) protocolError()
+    topLevelDomains.add(item)
+    previousTopLevelDomain = item
+  }
   return {
     statuses:value.statuses.map(item => ({ ...item })),
-    currencies:value.currencies.map(item => ({ ...item }))
+    currencies:value.currencies.map(item => ({ ...item })),
+    productSourceUrl:{
+      ...value.productSourceUrl,
+      topLevelDomains:[...value.productSourceUrl.topLevelDomains]
+    }
   }
 }
 
