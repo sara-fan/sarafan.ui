@@ -234,6 +234,7 @@ it('renews personal consent and shows the latest manual request', async () => {
   await state().grant(); expect(h.store.grant).not.toHaveBeenCalled()
   await wrapper.find('.consent-page__panel--personal input[type=checkbox]').setValue(true)
   await click('Дать согласие'); expect(h.store.grant).toHaveBeenCalledWith(document, expect.any(String))
+  expect(wrapper.emitted('personal-consent-granted')).toHaveLength(1)
   await click('Прекратить использовать систему и отозвать согласие на хранение и обработку персональных данных')
   expect(h.store.requestWithdrawal).toHaveBeenCalledWith()
   await state().openPersonal(); await flushPromises()

@@ -59,7 +59,8 @@ describe('App routing and privacy gates', () => {
       restoreSession: vi.fn().mockResolvedValue()
     })
     Object.assign(h.consents, {
-      ops: ref({ kinds: legalKinds })
+      ops: ref({ kinds: legalKinds }),
+      noticeSuppressed:ref(false)
     })
     Object.assign(h.orders, {
       orders:ref([{ id:17, orderNumber:'12345678-1', status:0, productName:'Nike Air Max 90 Essential', storeName:'nike.com', imageUrl:null, sellerPrice:null, quantity:1, createdAt:'2026-09-14T10:00:00Z' }]),
@@ -87,6 +88,17 @@ describe('App routing and privacy gates', () => {
     wrapper.findComponent(AppHeader).vm.$emit('authenticate')
     await flushPromises()
     expect(wrapper.find('.phone-auth-stub').exists()).toBe(true)
+  })
+
+  it('suppresses the shell consent notice while a foreground flow owns its failure', async () => {
+    const { wrapper } = await mountApp()
+    await flushPromises()
+    const consentCenter = wrapper.findComponent({ name:'ConsentCenter' })
+    expect(consentCenter.props('noticeSuppressed')).toBe(false)
+
+    h.consents.noticeSuppressed.value = true
+    await flushPromises()
+    expect(consentCenter.props('noticeSuppressed')).toBe(true)
   })
 
   it('restores the session without legacy consent gating', async () => {
@@ -186,10 +198,10 @@ describe('App routing and privacy gates', () => {
     expect(wrapper.text()).toContain('Закажите товар — остальное сделаем мы')
     expect(wrapper.find('.site-footer a[href="/consents"]').exists()).toBe(false)
     const productLink = wrapper.get('input')
-    await productLink.setValue('https://shop.example/product')
+    await productLink.setValue('https://shop.example.com/product')
     expect(wrapper.find('.consent-notice-stub').exists()).toBe(true)
     expect(wrapper.get('.app-route-content').attributes('style') || '').not.toContain('display: none')
-    expect(productLink.element.value).toBe('https://shop.example/product')
+    expect(productLink.element.value).toBe('https://shop.example.com/product')
 
     h.session.customer.value = { id:7, phone:'+79990000007', hasPhoto:false, profile:{} }
     await router.push('/orders')

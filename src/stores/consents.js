@@ -16,6 +16,8 @@ export function createConsentStore(session) {
   const ops = ref(null)
   const opsProblem = ref(null)
   const personalProblem = ref(null)
+  const noticeSuppressed = ref(false)
+  const noticeSuppressions = new Set()
   let personalTimer = null
   let generation = 0
   let mineGeneration = 0
@@ -125,6 +127,19 @@ export function createConsentStore(session) {
       throw createInternalProblem('invalidInput', { detail:'Откройте «Согласия» и дайте актуальное согласие. Введённые данные сохранены в форме.' })
     }
   }
+  async function hasCurrentPersonalData() {
+    await loadMine()
+    return mine.value?.statuses.find(x => x.kind === LEGAL_DOCUMENT_KIND.PERSONAL_DATA_CONSENT)?.status === 'current'
+  }
+  function acquireNoticeSuppression() {
+    const token = Symbol('consent-notice-suppression')
+    noticeSuppressions.add(token)
+    noticeSuppressed.value = true
+    return () => {
+      noticeSuppressions.delete(token)
+      noticeSuppressed.value = noticeSuppressions.size > 0
+    }
+  }
   async function grant(document, key = globalThis.crypto.randomUUID()) {
     await session.consentRequest('/api/v1/consents/me/personal-data', json('POST', {
       documentId:document.id, contentHash:document.contentHash, decision:'grant', idempotencyKey:key
@@ -135,10 +150,16 @@ export function createConsentStore(session) {
     await session.consentRequest('/api/v1/consents/me/withdrawal-request', { method:'POST' }, true)
     await loadMine()
   }
-  function dispose() { resetCustomer() }
+  function dispose() {
+    resetCustomer()
+    noticeSuppressions.clear()
+    noticeSuppressed.value = false
+  }
   return { mine:readonly(mine), ops:readonly(ops), opsProblem:readonly(opsProblem),
-    personalProblem:readonly(personalProblem), current, read, source, loadOps, ensureOps,
-    kindByAlias, kindName, routeAlias, loadMine, requirePersonalData, grant, requestWithdrawal, resetCustomer, dispose }
+    personalProblem:readonly(personalProblem), noticeSuppressed:readonly(noticeSuppressed),
+    current, read, source, loadOps, ensureOps,
+    kindByAlias, kindName, routeAlias, loadMine, requirePersonalData, hasCurrentPersonalData,
+    acquireNoticeSuppression, grant, requestWithdrawal, resetCustomer, dispose }
 }
 let store
 export function useConsents() { return store ??= createConsentStore(useSession()) }

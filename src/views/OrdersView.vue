@@ -10,6 +10,7 @@ import UiAlert from '../components/ui/UiAlert.vue'
 import UiButton from '../components/ui/UiButton.vue'
 import { normalizeProblem, presentProblem } from '../errors/problem.js'
 import { createOrderStore } from '../stores/orders.js'
+import { consumeOrderCreated } from '../stores/orderNotices.js'
 import { useSession } from '../stores/session.js'
 
 const session = useSession()
@@ -17,6 +18,7 @@ const router = useRouter()
 const store = createOrderStore(session)
 const problem = ref(null)
 const failedImages = ref(new Set())
+const createdOrderNumber = ref(consumeOrderCreated(session.customer.value?.id))
 let mounted = true
 
 const activeOrders = computed(() => store.orders.value.filter(order => !store.statusFor(order.status)?.isTerminal))
@@ -79,6 +81,7 @@ const stopCustomerWatch = watch(() => session.customer.value?.id, (customerId, p
   if (customerId === previousCustomerId) return
   store.reset()
   problem.value = null
+  createdOrderNumber.value = consumeOrderCreated(customerId)
   failedImages.value = new Set()
   if (customerId) void load()
 }, { flush:'sync' })
@@ -101,7 +104,16 @@ onBeforeUnmount(() => {
     </header>
 
     <UiAlert
-      v-if="problem"
+      v-if="createdOrderNumber && !problem"
+      title="Заказ создан"
+      tone="success"
+      class="orders-created-notice"
+    >
+      Номер заказа {{ createdOrderNumber }}.
+    </UiAlert>
+
+    <UiAlert
+      v-else-if="problem"
       title="Не удалось загрузить заказы"
     >
       <p>{{ error }}</p>
@@ -223,9 +235,14 @@ onBeforeUnmount(() => {
             </div>
           </div>
 
-          <div class="order-card__price">
-            <small>Цена продавца</small>
-            <strong>{{ sellerPrice(order) }}</strong>
+          <div
+            class="order-card__price"
+            :class="{ 'order-card__price--empty':!order.sellerPrice }"
+          >
+            <template v-if="order.sellerPrice">
+              <small>Цена продавца</small>
+              <strong>{{ sellerPrice(order) }}</strong>
+            </template>
             <span
               class="order-card__action"
               aria-hidden="true"
@@ -288,9 +305,14 @@ onBeforeUnmount(() => {
               <span>Срок доставки уточняется</span>
             </p>
           </div>
-          <div class="order-card__price">
-            <small>Цена продавца</small>
-            <strong>{{ sellerPrice(order) }}</strong>
+          <div
+            class="order-card__price"
+            :class="{ 'order-card__price--empty':!order.sellerPrice }"
+          >
+            <template v-if="order.sellerPrice">
+              <small>Цена продавца</small>
+              <strong>{{ sellerPrice(order) }}</strong>
+            </template>
             <span
               class="order-card__action"
               aria-hidden="true"

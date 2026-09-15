@@ -13,6 +13,7 @@ vi.mock('../src/stores/session.js', () => ({ useSession: () => h.session }))
 
 import { createInternalProblem } from '../src/errors/problem.js'
 import { createAppRouter } from '../src/router.js'
+import { resetOrderNoticesForTests, showOrderCreated } from '../src/stores/orderNotices.js'
 import OrdersView from '../src/views/OrdersView.vue'
 
 const statusItems = new Map([
@@ -30,6 +31,7 @@ async function mountView() {
 
 describe('OrdersView', () => {
   beforeEach(() => {
+    resetOrderNoticesForTests()
     h.session = { customer:ref({ id:7 }) }
     h.store.orders = ref([])
     h.store.loading = ref(false)
@@ -82,6 +84,8 @@ describe('OrdersView', () => {
     expect(wrapper.text()).toContain('Срок доставки уточняется')
     expect(wrapper.text()).toContain('$ 85,00')
     expect(wrapper.text()).toContain('€ 10,00')
+    expect(wrapper.findAll('.order-card__price small')).toHaveLength(2)
+    expect(wrapper.findAll('.order-card__price--empty')).toHaveLength(1)
     expect(wrapper.text()).toContain('14 сентября 2026')
     const progress = wrapper.findAll('[role="progressbar"]')
     expect(progress).toHaveLength(2)
@@ -102,6 +106,29 @@ describe('OrdersView', () => {
     await wrapper.findAll('.order-card')[2].trigger('click')
     await flushPromises()
     expect(router.currentRoute.value).toMatchObject({ name:'order-details', params:{ orderId:'2' } })
+  })
+
+  it('shows a created-order notice once and reloads the owner-scoped list', async () => {
+    showOrderCreated(7, '12345678-9')
+    const first = await mountView()
+    await flushPromises()
+    expect(first.wrapper.text()).toContain('Номер заказа 12345678-9.')
+    expect(h.store.load).toHaveBeenCalledOnce()
+    first.wrapper.unmount()
+
+    const second = await mountView()
+    await flushPromises()
+    expect(second.wrapper.text()).not.toContain('Номер заказа 12345678-9.')
+  })
+
+  it('gives a list-load failure precedence over the creation notice', async () => {
+    showOrderCreated(7, '12345678-9')
+    h.store.load.mockRejectedValue(createInternalProblem('networkUnavailable'))
+    const { wrapper } = await mountView()
+    await flushPromises()
+    expect(wrapper.findAll('[role="alert"]')).toHaveLength(1)
+    expect(wrapper.get('[role="alert"]').text()).toContain('Не удалось загрузить заказы')
+    expect(wrapper.text()).not.toContain('Номер заказа 12345678-9.')
   })
 
   it('presents load failures once and retries successfully', async () => {
@@ -163,6 +190,23 @@ describe('OrdersView', () => {
     await flushPromises()
     expect(wrapper.text()).not.toContain('Старый заказ')
     expect(h.store.load).toHaveBeenCalledTimes(2)
+  })
+
+  it('never presents an order notice to a different customer or after identity replacement', async () => {
+    showOrderCreated(8, '87654321-8')
+    const otherCustomer = await mountView()
+    await flushPromises()
+    expect(otherCustomer.wrapper.text()).not.toContain('87654321-8')
+    otherCustomer.wrapper.unmount()
+
+    showOrderCreated(7, '12345678-7')
+    const { wrapper } = await mountView()
+    await flushPromises()
+    expect(wrapper.text()).toContain('Номер заказа 12345678-7.')
+
+    h.session.customer.value = { id:8 }
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('12345678-7')
   })
 
   it('does not present a late failure after unmount', async () => {

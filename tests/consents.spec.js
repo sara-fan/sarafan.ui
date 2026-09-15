@@ -89,6 +89,38 @@ describe('consent state and request contracts', () => {
     session.customer.value = null
     await expect(store.requirePersonalData()).rejects.toMatchObject({ code:'ui_invalid_input' })
   })
+  it('reports current personal consent and propagates history refresh failures', async () => {
+    session.customer.value = { id:7 }
+    session.consentRequest
+      .mockResolvedValueOnce({ ...history, statuses:[{ kind:LEGAL_DOCUMENT_KIND.PERSONAL_DATA_CONSENT, status:'current' }] })
+      .mockResolvedValueOnce({ ...history, statuses:[{ kind:LEGAL_DOCUMENT_KIND.PERSONAL_DATA_CONSENT, status:'renewal-required' }] })
+      .mockResolvedValueOnce(history)
+
+    await expect(store.hasCurrentPersonalData()).resolves.toBe(true)
+    await expect(store.hasCurrentPersonalData()).resolves.toBe(false)
+    await expect(store.hasCurrentPersonalData()).resolves.toBe(false)
+
+    const failure = new Error('private')
+    session.consentRequest.mockRejectedValueOnce(failure)
+    await expect(store.hasCurrentPersonalData()).rejects.toBe(failure)
+    expect(store.personalProblem.value).toBe(failure)
+  })
+  it('keeps the shell notice suppressed until every foreground owner releases it', () => {
+    const releaseFirst = store.acquireNoticeSuppression()
+    const releaseSecond = store.acquireNoticeSuppression()
+    expect(store.noticeSuppressed.value).toBe(true)
+
+    releaseFirst()
+    releaseFirst()
+    expect(store.noticeSuppressed.value).toBe(true)
+
+    releaseSecond()
+    expect(store.noticeSuppressed.value).toBe(false)
+
+    store.acquireNoticeSuppression()
+    store.dispose()
+    expect(store.noticeSuppressed.value).toBe(false)
+  })
   it('cancels scheduled customer-history refreshes when customer state resets', async () => {
     session.customer.value = { id:7 }
     session.consentRequest.mockResolvedValue({

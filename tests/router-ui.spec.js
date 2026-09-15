@@ -15,8 +15,10 @@ import UiButton from '../src/components/ui/UiButton.vue'
 import UiDialog from '../src/components/ui/UiDialog.vue'
 import UiField from '../src/components/ui/UiField.vue'
 import UiSelectionControl from '../src/components/ui/UiSelectionControl.vue'
+import { SERVICE_UNAVAILABLE_MESSAGE, createInternalProblem } from '../src/errors/problem.js'
 import { createSarafanVuetify } from '../src/plugins/vuetify.js'
 import { ACCESS, createAppRouter, routes } from '../src/router.js'
+import { resetProductDraftForTests, useProductDraft } from '../src/stores/productDraft.js'
 import HomeView from '../src/views/HomeView.vue'
 import ConsentsView from '../src/views/ConsentsView.vue'
 import LegalDocumentView from '../src/views/LegalDocumentView.vue'
@@ -24,9 +26,13 @@ import NotFoundView from '../src/views/NotFoundView.vue'
 import OrdersView from '../src/views/OrdersView.vue'
 import PendingView from '../src/views/PendingView.vue'
 
-const h = vi.hoisted(() => ({ store: {}, orderStore: {} }))
+const h = vi.hoisted(() => ({ store: {}, orderStore: {}, session:{} }))
 vi.mock('../src/stores/consents.js', () => ({ useConsents: () => h.store }))
-vi.mock('../src/stores/orders.js', () => ({ createOrderStore: () => h.orderStore }))
+vi.mock('../src/stores/orders.js', async importOriginal => ({
+  ...await importOriginal(),
+  createOrderStore:() => h.orderStore
+}))
+vi.mock('../src/stores/session.js', () => ({ useSession:() => h.session }))
 
 async function routerAt(path = '/') {
   const router = createAppRouter(createMemoryHistory())
@@ -35,6 +41,24 @@ async function routerAt(path = '/') {
 }
 
 beforeEach(() => {
+  resetProductDraftForTests()
+  h.session.customer = ref({ id:7 })
+  h.session.orderRequest = vi.fn((_path, _options, _isCurrent, validateResponse) => {
+    const value = {
+      statuses:[{
+        value:0, name:'На проверке', routeAlias:'under_review', upperStatusValue:0,
+        upperStatusName:'На проверке', upperStatusRouteAlias:'under_review', isTerminal:false, progressPercent:14
+      }],
+      currencies:[{ value:840, name:'Доллар США', routeAlias:'usd' }],
+      productSourceUrl:{
+        maximumLength:2048,
+        topLevelDomainListVersion:'2026091400',
+        topLevelDomains:['COM', 'XN--P1AI']
+      }
+    }
+    validateResponse(value)
+    return Promise.resolve(value)
+  })
   h.store.ops = ref({
     kinds: [
       { value: 2, name: 'Пользовательское соглашение', routeAlias: 'user-agreement' },
@@ -95,15 +119,88 @@ describe('router and page shells', () => {
     expect(legal.getComponent({ name:'ConsentCenter' }).props('mode')).toBe('legal')
   })
 
-  it('submits the public product URL through Vue Router state', async () => {
+  it('submits a protocol-free product address without putting it in router state', async () => {
     const router = await routerAt()
     const wrapper = mount(HomeView, { global: { plugins: [router] } })
-    await wrapper.get('input[type="url"]').setValue('https://store.example/item')
+    await wrapper.get('input[inputmode="url"]').setValue('store.example.com/item')
     await wrapper.get('form').trigger('submit')
     await flushPromises()
     expect(router.currentRoute.value.name).toBe('product')
-    expect(router.options.history.state.sourceUrl).toBe('https://store.example/item')
+    expect(router.currentRoute.value.query).toEqual({})
+    expect(router.options.history.state.sourceUrl).toBeUndefined()
+    expect(useProductDraft().draft.value.sourceUrl).toBe('https://store.example.com/item')
+    expect(h.session.orderRequest).toHaveBeenCalledWith(
+      '/api/v1/orders/ops', {}, expect.any(Function), expect.any(Function)
+    )
     expect(wrapper.findComponent(PublicInfoBlock).exists()).toBe(true)
+  })
+
+  it('keeps empty and invalid product addresses on Home with exact SCN-03 copy', async () => {
+    const router = await routerAt()
+    const wrapper = mount(HomeView, { global:{ plugins:[router] } })
+    await wrapper.get('form').trigger('submit')
+    expect(wrapper.get('[role="alert"]').text()).toBe('Вставьте ссылку на товар')
+    expect(router.currentRoute.value.name).toBe('home')
+
+    await wrapper.get('input[inputmode="url"]').setValue('javascript:alert(1)')
+    await wrapper.get('form').trigger('submit')
+    expect(wrapper.get('[role="alert"]').text()).toBe('Проверьте ссылку на товар и попробуйте ещё раз')
+    expect(router.currentRoute.value.name).toBe('home')
+
+    await wrapper.get('input[inputmode="url"]').setValue('xxxx')
+    await wrapper.get('form').trigger('submit')
+    expect(wrapper.get('[role="alert"]').text()).toBe('Проверьте ссылку на товар и попробуйте ещё раз')
+    expect(router.currentRoute.value.name).toBe('home')
+
+    await wrapper.get('input[inputmode="url"]').setValue('shop.invalid/item')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(wrapper.get('[role="alert"]').text()).toBe('Проверьте ссылку на товар и попробуйте ещё раз')
+    expect(router.currentRoute.value.name).toBe('home')
+
+    await wrapper.get('input[inputmode="url"]').setValue('store.example.com/item')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(h.session.orderRequest).toHaveBeenCalledOnce()
+    expect(router.currentRoute.value.name).toBe('product')
+  })
+
+  it('keeps an order Ops failure recoverable on Home', async () => {
+    h.session.orderRequest.mockRejectedValueOnce(createInternalProblem('serviceUnavailable'))
+    const router = await routerAt()
+    const wrapper = mount(HomeView, { global:{ plugins:[router] } })
+    await wrapper.get('input[inputmode="url"]').setValue('store.example.com/item')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    const alert = wrapper.get('.home-hero > .ui-alert')
+    expect(alert.text()).toBe(SERVICE_UNAVAILABLE_MESSAGE)
+    expect(alert.find('strong').exists()).toBe(false)
+    expect(wrapper.find('.product-entry .ui-alert').exists()).toBe(false)
+    expect(router.currentRoute.value.name).toBe('home')
+
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(router.currentRoute.value.name).toBe('product')
+  })
+
+  it('prevents concurrent Ops requests and discards completion after Home unmounts', async () => {
+    let complete
+    h.session.orderRequest.mockImplementationOnce((_path, _options, isCurrent, validateResponse) => new Promise(resolve => {
+      complete = value => {
+        if (isCurrent()) validateResponse(value)
+        resolve(value)
+      }
+    }))
+    const router = await routerAt()
+    const wrapper = mount(HomeView, { global:{ plugins:[router] } })
+    await wrapper.get('input[inputmode="url"]').setValue('store.example.com/item')
+    await wrapper.get('form').trigger('submit')
+    await wrapper.get('form').trigger('submit')
+    expect(h.session.orderRequest).toHaveBeenCalledOnce()
+    wrapper.unmount()
+    complete({})
+    await flushPromises()
+    expect(useProductDraft().draft.value).toBeNull()
   })
 
   it('navigates home from pending and not-found views', async () => {
@@ -134,7 +231,7 @@ describe('router and page shells', () => {
     expect(wrapper.text()).toContain('На проверке')
     expect(wrapper.text()).toContain('Расчёт готов')
     expect(wrapper.text()).toContain('Цена продавца')
-    expect(wrapper.text()).toContain('Уточняется')
+    expect(wrapper.findAll('.order-card__price small')).toHaveLength(1)
     expect(wrapper.findAll('[role="progressbar"]')).toHaveLength(2)
     expect(h.orderStore.load).toHaveBeenCalledOnce()
 

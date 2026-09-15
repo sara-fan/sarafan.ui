@@ -14,11 +14,13 @@ import UiAlert from './components/ui/UiAlert.vue'
 import UiButton from './components/ui/UiButton.vue'
 import { SERVICE_UNAVAILABLE_MESSAGE, suppressProblem } from './errors/problem.js'
 import { ACCESS } from './router.js'
+import { useConsents } from './stores/consents.js'
 import { useSession } from './stores/session.js'
 
 const route = useRoute()
 const router = useRouter()
 const { customer, logout, restoreProblem, restoreSession, restoring } = useSession()
+const { noticeSuppressed:consentNoticeSuppressed } = useConsents()
 let sessionStarted = false
 const authOpen = ref(false)
 
@@ -71,7 +73,7 @@ onMounted(async () => {
     <div class="app-content">
       <ConsentCenter
         v-if="!consentRoute"
-        :notice-suppressed="restoring || Boolean(restoreProblem) || authOpen"
+        :notice-suppressed="restoring || Boolean(restoreProblem) || authOpen || consentNoticeSuppressed"
       />
       <div
         class="app-route-content"

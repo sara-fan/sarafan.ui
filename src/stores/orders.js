@@ -4,10 +4,13 @@
 
 import { readonly, ref } from 'vue'
 
-import { isRfc3339DateTime } from '../api/validation.js'
+import { isIsoDate, isRfc3339DateTime } from '../api/validation.js'
 import { createInternalProblem } from '../errors/problem.js'
+import { normalizeProductAddress } from '../productAddress.js'
 
 const ROUTE_ALIAS_PATTERN = /^[a-z0-9]+(?:_[a-z0-9]+)*$/u
+const TOP_LEVEL_DOMAIN_PATTERN = /^[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?$/u
+const TOP_LEVEL_DOMAIN_VERSION_PATTERN = /^\d{10}$/u
 
 function protocolError() { throw createInternalProblem('protocolError') }
 function validText(value, maximum) {
@@ -28,7 +31,14 @@ function validHttpUrl(value) {
 
 export function validateOrderOps(value) {
   if (!value || !Array.isArray(value.statuses) || value.statuses.length === 0
-    || !Array.isArray(value.currencies) || value.currencies.length === 0) protocolError()
+    || !Array.isArray(value.currencies) || value.currencies.length === 0
+    || !value.productSourceUrl
+    || !Number.isInteger(value.productSourceUrl.maximumLength)
+    || value.productSourceUrl.maximumLength <= 0 || value.productSourceUrl.maximumLength > 65535
+    || typeof value.productSourceUrl.topLevelDomainListVersion !== 'string'
+    || !TOP_LEVEL_DOMAIN_VERSION_PATTERN.test(value.productSourceUrl.topLevelDomainListVersion)
+    || !Array.isArray(value.productSourceUrl.topLevelDomains)
+    || value.productSourceUrl.topLevelDomains.length === 0) protocolError()
   const statusValues = new Set()
   const statusAliases = new Set()
   for (const item of value.statuses) {
@@ -58,9 +68,21 @@ export function validateOrderOps(value) {
     currencyValues.add(item.value)
     currencyAliases.add(item.routeAlias)
   }
+  const topLevelDomains = new Set()
+  let previousTopLevelDomain = null
+  for (const item of value.productSourceUrl.topLevelDomains) {
+    if (typeof item !== 'string' || !TOP_LEVEL_DOMAIN_PATTERN.test(item)
+      || topLevelDomains.has(item) || previousTopLevelDomain !== null && item < previousTopLevelDomain) protocolError()
+    topLevelDomains.add(item)
+    previousTopLevelDomain = item
+  }
   return {
     statuses:value.statuses.map(item => ({ ...item })),
-    currencies:value.currencies.map(item => ({ ...item }))
+    currencies:value.currencies.map(item => ({ ...item })),
+    productSourceUrl:{
+      ...value.productSourceUrl,
+      topLevelDomains:[...value.productSourceUrl.topLevelDomains]
+    }
   }
 }
 
@@ -68,6 +90,58 @@ function validateSellerPrice(value, currencyValues) {
   if (value === null) return
   if (!value || typeof value.amount !== 'number' || !Number.isFinite(value.amount) || value.amount <= 0
     || !Number.isInteger(value.currency) || !currencyValues.has(value.currency)) protocolError()
+}
+
+function validateOrderIdentityAndProduct(item, statusValues, currencyValues) {
+  if (!item || !Number.isSafeInteger(item.id) || item.id <= 0
+    || !validText(item.orderNumber, 64)
+    || !Number.isInteger(item.status) || !statusValues.has(item.status)
+    || !validHttpUrl(item.sourceUrl) || !validNullableText(item.productName, 500)
+    || !validNullableText(item.storeName, 200)
+    || item.imageUrl !== null && !validHttpUrl(item.imageUrl)
+    || !Number.isInteger(item.quantity) || item.quantity <= 0) protocolError()
+  validateSellerPrice(item.sellerPrice, currencyValues)
+}
+
+export function validateProductPreview(value) {
+  if (!value || value.outcome !== 'manual_review' || typeof value.sourceUrl !== 'string'
+    || normalizeProductAddress(value.sourceUrl) !== value.sourceUrl) protocolError()
+  return { sourceUrl:value.sourceUrl, outcome:value.outcome }
+}
+
+export function validateCreatedOrder(value, ops, expected) {
+  const statusValues = new Set(ops.statuses.map(item => item.value))
+  const currencyValues = new Set(ops.currencies.map(item => item.value))
+  validateOrderIdentityAndProduct(value, statusValues, currencyValues)
+  if (!validNullableText(value.comment, 2000)
+    || value.dimensions !== null && (!value.dimensions
+      || ['lengthCm', 'widthCm', 'heightCm'].some(field => typeof value.dimensions[field] !== 'number'
+        || !Number.isFinite(value.dimensions[field]) || value.dimensions[field] <= 0))
+    || value.characteristics !== null && (!value.characteristics
+      || typeof value.characteristics !== 'object' || Array.isArray(value.characteristics)
+      || Object.entries(value.characteristics).some(([key, item]) => !key || typeof item !== 'string'))
+    || value.appliedExchangeRate !== null && (!value.appliedExchangeRate
+      || !Number.isSafeInteger(value.appliedExchangeRate.id) || value.appliedExchangeRate.id <= 0
+      || !validText(value.appliedExchangeRate.provider, 200)
+      || !Number.isInteger(value.appliedExchangeRate.baseCurrency)
+      || !currencyValues.has(value.appliedExchangeRate.baseCurrency)
+      || !Number.isInteger(value.appliedExchangeRate.quoteCurrency)
+      || !currencyValues.has(value.appliedExchangeRate.quoteCurrency)
+      || value.appliedExchangeRate.baseCurrency === value.appliedExchangeRate.quoteCurrency
+      || !Number.isInteger(value.appliedExchangeRate.nominal) || value.appliedExchangeRate.nominal <= 0
+      || typeof value.appliedExchangeRate.officialRate !== 'number'
+      || !Number.isFinite(value.appliedExchangeRate.officialRate) || value.appliedExchangeRate.officialRate <= 0
+      || !isIsoDate(value.appliedExchangeRate.sourceEffectiveDate))) protocolError()
+  const normalizedComment = expected.comment.trim() || null
+  if (value.sourceUrl !== expected.sourceUrl || value.quantity !== expected.quantity
+    || value.comment !== normalizedComment) protocolError()
+  return {
+    ...value,
+    sellerPrice:value.sellerPrice ? { ...value.sellerPrice } : null,
+    dimensions:value.dimensions ? { ...value.dimensions } : null,
+    characteristics:value.characteristics ? { ...value.characteristics } : null,
+    appliedExchangeRate:value.appliedExchangeRate ? { ...value.appliedExchangeRate } : null
+  }
 }
 
 export function validateCustomerOrders(value, ops) {
@@ -78,14 +152,8 @@ export function validateCustomerOrders(value, ops) {
   const orderNumbers = new Set()
   let previous = null
   for (const item of value) {
-    if (!item || !Number.isSafeInteger(item.id) || item.id <= 0 || ids.has(item.id)
-      || !validText(item.orderNumber, 64) || orderNumbers.has(item.orderNumber)
-      || !Number.isInteger(item.status) || !statusValues.has(item.status)
-      || !validHttpUrl(item.sourceUrl) || !validNullableText(item.productName, 500)
-      || !validNullableText(item.storeName, 200)
-      || item.imageUrl !== null && !validHttpUrl(item.imageUrl)
-      || !Number.isInteger(item.quantity) || item.quantity <= 0 || !isRfc3339DateTime(item.createdAt)) protocolError()
-    validateSellerPrice(item.sellerPrice, currencyValues)
+    validateOrderIdentityAndProduct(item, statusValues, currencyValues)
+    if (ids.has(item.id) || orderNumbers.has(item.orderNumber) || !isRfc3339DateTime(item.createdAt)) protocolError()
     const createdAt = Date.parse(item.createdAt)
     if (previous && (createdAt > previous.createdAt
       || createdAt === previous.createdAt && item.id > previous.id)) protocolError()

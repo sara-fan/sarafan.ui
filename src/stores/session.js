@@ -27,7 +27,7 @@ const customer = ref(null)
 const restoring = ref(true)
 const restoreProblem = ref(null)
 const notice = ref('')
-const refreshInvalidations = new WeakMap()
+const identityInvalidations = new WeakMap()
 let identityGeneration = 0
 let refreshPromise = null
 let refreshPromiseGeneration = null
@@ -175,11 +175,11 @@ async function refreshSession(operationTrace) {
         if (isServiceUnavailableProblem(error)) {
           const problem = asServiceUnavailableProblem(error)
           clearSession(SERVICE_UNAVAILABLE_MESSAGE)
-          refreshInvalidations.set(problem, identityGeneration)
+          identityInvalidations.set(problem, identityGeneration)
           throw problem
         }
         clearSession()
-        refreshInvalidations.set(error, identityGeneration)
+        identityInvalidations.set(error, identityGeneration)
         throw error
       })
       .finally(() => {
@@ -282,6 +282,35 @@ async function orderRequest(path, options = {}, isCurrent = () => true, validate
   return authorizedRequest(path, options, {}, validateResponse, isCurrent)
 }
 
+async function previewOrder(sourceUrl, isCurrent = () => true, validateResponse) {
+  if (!isCurrent()) return null
+  try {
+    const result = await client.request(
+      `${API_BASE_PATH}/orders/preview`,
+      { ...jsonOptions('POST', { sourceUrl }), cache:'no-store' }
+    )
+    if (!isCurrent()) return null
+    if (validateResponse) validateResponse(result)
+    return result
+  } catch (error) {
+    if (!isCurrent()) return null
+    throw error
+  }
+}
+
+async function createOrder(payload, idempotencyKey, isCurrent = () => true, validateResponse) {
+  return authorizedRequest(
+    `${API_BASE_PATH}/orders`,
+    {
+      ...jsonOptions('POST', payload),
+      headers: { 'Content-Type':'application/json', 'Idempotency-Key':idempotencyKey }
+    },
+    {},
+    validateResponse,
+    isCurrent
+  )
+}
+
 async function verifyCode(payload, isCurrent = () => true, signal) {
   notice.value = ''
   try {
@@ -320,13 +349,14 @@ async function identityScopedRequest(path, options, policy, validateResponse, is
     if (validateResponse) validateResponse(result)
     return result
   } catch (error) {
-    // Preserve the refresh failure that invalidated this identity; discard failures from older identities.
-    const refreshInvalidationGeneration = refreshInvalidations.get(error)
-    if (!isCurrent() && refreshInvalidationGeneration !== identityGeneration) return null
-    if (refreshInvalidationGeneration === identityGeneration) throw error
+    // Preserve a failure that invalidated this identity; discard failures from older identities.
+    const invalidationGeneration = identityInvalidations.get(error)
+    if (!isCurrent() && invalidationGeneration !== identityGeneration) return null
+    if (invalidationGeneration === identityGeneration) throw error
     if (isServiceUnavailableProblem(error)) {
       const problem = asServiceUnavailableProblem(error)
       clearSession(SERVICE_UNAVAILABLE_MESSAGE)
+      identityInvalidations.set(problem, identityGeneration)
       throw problem
     }
     throw error
@@ -335,6 +365,10 @@ async function identityScopedRequest(path, options, policy, validateResponse, is
 
 async function authorizedRequest(path, options = {}, policy = {}, validateResponse, isCurrent = () => true) {
   return identityScopedRequest(path, options, policy, validateResponse, isCurrent, true)
+}
+
+function isCurrentIdentityInvalidation(error) {
+  return identityInvalidations.get(error) === identityGeneration
 }
 
 async function updateProfile(profile) {
@@ -407,6 +441,9 @@ export function useSession() {
     getStatus,
     consentRequest,
     orderRequest,
+    previewOrder,
+    createOrder,
+    isCurrentIdentityInvalidation,
     ensureOps,
     flowValue,
     resolvePhone,

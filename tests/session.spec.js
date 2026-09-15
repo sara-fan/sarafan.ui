@@ -495,7 +495,9 @@ describe('session store', () => {
     }))))
     const session = useSession()
     await session.verifyCode({ phone:original.phone, code:'1111' })
-    await expect(session.updateProfile({ firstName:'Анна' })).rejects.toMatchObject({ type:INTERNAL_PROBLEM_TYPES.serviceUnavailable })
+    const failure = await session.updateProfile({ firstName:'Анна' }).catch(value => value)
+    expect(failure).toMatchObject({ type:INTERNAL_PROBLEM_TYPES.serviceUnavailable })
+    expect(session.isCurrentIdentityInvalidation(failure)).toBe(true)
     expect(session.customer.value).toBeNull()
   })
 
@@ -580,7 +582,9 @@ describe('session store', () => {
     }))
     const session = useSession()
     await session.verifyCode({ phone:original.phone, code:'1111' })
-    await expect(session.updateProfile({ firstName:'Анна' })).rejects.toMatchObject({ type:INTERNAL_PROBLEM_TYPES.serviceUnavailable })
+    const failure = await session.updateProfile({ firstName:'Анна' }).catch(value => value)
+    expect(failure).toMatchObject({ type:INTERNAL_PROBLEM_TYPES.serviceUnavailable })
+    expect(session.isCurrentIdentityInvalidation(failure)).toBe(true)
     expect(session.customer.value).toBeNull()
     expect(session.notice.value).toBe('Сервис временно недоступен. Пожалуйста, повторите позже')
   })
@@ -1131,6 +1135,80 @@ describe('session store', () => {
     expect(listCall[1].headers.get('Authorization')).toBe('Bearer order-token')
   })
 
+  it('previews anonymously and creates with the retained idempotency key', async () => {
+    const customer = customerDto({ id:7, phone:'+79990000007', state:0, profile:{ phone:'+79990000007' } })
+    const preview = { sourceUrl:'https://shop.example.com/item', outcome:'manual_review' }
+    const created = { id:19, orderNumber:'12345678-19' }
+    const fetch = withOps(url => {
+      if (url === '/api/v1/auth/code/verify') return Promise.resolve(response(200, {
+        accessToken:'order-token', expiresAt:'2026-09-15T00:15:00Z', customer
+      }))
+      if (url === '/api/v1/orders/preview') return Promise.resolve(response(200, preview))
+      if (url === '/api/v1/orders') return Promise.resolve(response(201, created))
+      throw new Error(`Unexpected request: ${url}`)
+    })
+    vi.stubGlobal('fetch', fetch)
+
+    const session = useSession()
+    await session.verifyCode({ phone:customer.phone, code:'1111' })
+    const validatePreview = vi.fn()
+    await expect(session.previewOrder('shop.example.com/item', () => true, validatePreview)).resolves.toEqual(preview)
+    expect(validatePreview).toHaveBeenCalledWith(preview)
+    const validateCreated = vi.fn()
+    await expect(session.createOrder(
+      { sourceUrl:preview.sourceUrl, quantity:1, comment:'' },
+      '11111111-1111-4111-8111-111111111111',
+      () => true,
+      validateCreated
+    )).resolves.toEqual(created)
+    expect(validateCreated).toHaveBeenCalledWith(created)
+
+    const previewCall = fetch.mock.calls.find(([url]) => url === '/api/v1/orders/preview')
+    expect(previewCall[1].headers.has('Authorization')).toBe(false)
+    expect(previewCall[1].cache).toBe('no-store')
+    expect(JSON.parse(previewCall[1].body)).toEqual({ sourceUrl:'shop.example.com/item' })
+    const createCall = fetch.mock.calls.find(([url]) => url === '/api/v1/orders')
+    expect(createCall[1].headers.get('Authorization')).toBe('Bearer order-token')
+    expect(createCall[1].headers.get('Idempotency-Key')).toBe('11111111-1111-4111-8111-111111111111')
+  })
+
+  it('discards stale preview completions and failures', async () => {
+    let resolvePreview
+    let rejectPreview
+    const fetch = vi.fn()
+      .mockImplementationOnce(() => new Promise(resolve => { resolvePreview = resolve }))
+      .mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectPreview = reject }))
+    vi.stubGlobal('fetch', fetch)
+    const validate = vi.fn()
+
+    let current = true
+    const completed = useSession().previewOrder('shop.example.com/item', () => current, validate)
+    current = false
+    resolvePreview(response(200, { sourceUrl:'https://shop.example.com/item', outcome:'manual_review' }))
+    await expect(completed).resolves.toBeNull()
+    expect(validate).not.toHaveBeenCalled()
+
+    current = true
+    const failed = useSession().previewOrder('shop.example.com/item', () => current, validate)
+    current = false
+    rejectPreview(new TypeError('private network detail'))
+    await expect(failed).resolves.toBeNull()
+  })
+
+  it('propagates a current preview transport failure', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('private network detail')))
+    await expect(useSession().previewOrder('shop.example.com/item')).rejects.toMatchObject({
+      type:INTERNAL_PROBLEM_TYPES.networkUnavailable
+    })
+  })
+
+  it('skips preview transport when its operation is already stale', async () => {
+    const fetch = vi.fn()
+    vi.stubGlobal('fetch', fetch)
+    await expect(useSession().previewOrder('shop.example.com/item', () => false)).resolves.toBeNull()
+    expect(fetch).not.toHaveBeenCalled()
+  })
+
   it('treats malformed current order responses as authenticated service unavailability', async () => {
     const customer = customerDto({ id:7, phone:'+79990000007', state:0, profile:{ phone:'+79990000007' } })
     vi.stubGlobal('fetch', withOps(url => {
@@ -1143,9 +1221,11 @@ describe('session store', () => {
 
     const session = useSession()
     await session.verifyCode({ phone:customer.phone, code:'1111' })
-    await expect(session.orderRequest('/api/v1/orders', {}, () => true, () => {
+    const failure = await session.orderRequest('/api/v1/orders', {}, () => true, () => {
       throw createInternalProblem('protocolError')
-    })).rejects.toMatchObject({ type:INTERNAL_PROBLEM_TYPES.serviceUnavailable })
+    }).catch(value => value)
+    expect(failure).toMatchObject({ type:INTERNAL_PROBLEM_TYPES.serviceUnavailable })
+    expect(session.isCurrentIdentityInvalidation(failure)).toBe(true)
     expect(session.customer.value).toBeNull()
     expect(session.notice.value).toBe('Сервис временно недоступен. Пожалуйста, повторите позже')
   })

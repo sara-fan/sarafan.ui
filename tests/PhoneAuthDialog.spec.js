@@ -128,6 +128,7 @@ describe('PhoneAuthDialog', () => {
     const verifyBody = JSON.parse(fetch.mock.calls.find(([url]) => url.endsWith('/code/verify'))[1].body)
     expect(verifyBody).toEqual({ phone:'+7 999 123-45-67', code:'4567' })
     expect(useSession().customer.value).toEqual(customer)
+    expect(wrapper.emitted('authenticated')).toHaveLength(1)
 
     await wrapper.setProps({ modelValue:false })
     await wrapper.setProps({ modelValue:true })
