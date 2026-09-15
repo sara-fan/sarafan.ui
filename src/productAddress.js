@@ -36,7 +36,7 @@ export function normalizeProductAddress(value, productSourceUrlOps = null) {
 
   try {
     const url = new globalThis.URL(candidate)
-    if (!['http:', 'https:'].includes(url.protocol) || !url.hostname
+    if (!['http:', 'https:'].includes(url.protocol) || !url.hostname || url.username || url.password
       || !hasValidHostnameSyntax(url.hostname)
       || productSourceUrlOps && !hasListedSuffix(url.hostname, productSourceUrlOps.topLevelDomains)) return null
     return url.href.length <= maximumLength ? url.href : null
