@@ -242,6 +242,19 @@ describe('ProductView product review', () => {
     expect(h.session.previewOrder).toHaveBeenCalledTimes(2)
   })
 
+  it('does not preview a restored URL that fails the current Ops catalogue and keeps it available for correction', async () => {
+    const longSource = `https://shop.example.com/${'a'.repeat(2040)}`
+    useProductDraft().update({ sourceUrl:longSource })
+    const { router, wrapper } = await mountView()
+    expect(h.session.previewOrder).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('Изменить ссылку')
+    expect(useProductDraft().draft.value.sourceUrl).toBe(longSource)
+    await wrapper.get('[role="alert"] button').trigger('click')
+    await flushPromises()
+    expect(router.currentRoute.value.name).toBe('home')
+    expect(useProductDraft().draft.value.sourceUrl).toBe(longSource)
+  })
+
   it('discards an Ops completion after unmount', async () => {
     let finishOps
     h.session.orderRequest.mockImplementation((_path, _options, isCurrent, validate) => new Promise(resolve => {
@@ -358,6 +371,89 @@ describe('ProductView product review', () => {
     expect(wrapper.get('input[name="sellerPrice"]').element.closest('.ui-field').textContent)
       .toContain(ops.productLimits.valueLimit.exceededMessage)
     expect(h.session.createOrder).not.toHaveBeenCalled()
+  })
+
+  it('refreshes Ops and retains the form after Core rejects a stale value limit', async () => {
+    h.session.customer.value = { id:7 }
+    const reduced = {
+      ...ops,
+      productLimits:{
+        ...ops.productLimits,
+        valueLimit:{ ...ops.productLimits.valueLimit, maximumTotalUsd:5 }
+      }
+    }
+    h.session.orderRequest
+      .mockImplementationOnce(async (_path, _options, isCurrent, validate) => {
+        if (isCurrent()) validate(ops)
+        return ops
+      })
+      .mockImplementationOnce(async (_path, _options, isCurrent, validate) => {
+        if (isCurrent()) validate(ops)
+        return ops
+      })
+      .mockImplementationOnce(async (_path, _options, isCurrent, validate) => {
+        if (isCurrent()) validate(reduced)
+        return reduced
+      })
+    h.session.createOrder.mockRejectedValueOnce(new ProblemError({
+      type:CORE_PROBLEM_TYPES.orderValueLimitExceeded,
+      title:'Превышена стоимость заказа',
+      status:400,
+      detail:ops.productLimits.valueLimit.exceededMessage,
+      instance:'urn:sarafan:problem:4bf92f3577b34da6a3ce929d0e0e4736',
+      code:'order_value_limit_exceeded',
+      errors:{ sellerPrice:[ops.productLimits.valueLimit.exceededMessage] }
+    }))
+    const { wrapper } = await mountView()
+    await wrapper.get('input[name="productName"]').setValue('Товар')
+    await wrapper.get('input[name="sellerPrice"]').setValue('10')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(h.session.orderRequest).toHaveBeenCalledTimes(3)
+    expect(wrapper.find('form').exists()).toBe(true)
+    expect(wrapper.get('input[name="sellerPrice"]').element.closest('.ui-field').textContent)
+      .toContain(reduced.productLimits.valueLimit.exceededMessage)
+  })
+
+  it('refreshes Ops and blocks the retained form when Core loses the rate pair', async () => {
+    h.session.customer.value = { id:7 }
+    const unavailable = {
+      ...ops,
+      productLimits:{
+        ...ops.productLimits,
+        valueLimit:{ ...ops.productLimits.valueLimit, available:false, sourceEffectiveDate:null, maximumTotalUsd:null }
+      }
+    }
+    h.session.orderRequest
+      .mockImplementationOnce(async (_path, _options, isCurrent, validate) => {
+        if (isCurrent()) validate(ops)
+        return ops
+      })
+      .mockImplementationOnce(async (_path, _options, isCurrent, validate) => {
+        if (isCurrent()) validate(ops)
+        return ops
+      })
+      .mockImplementationOnce(async (_path, _options, isCurrent, validate) => {
+        if (isCurrent()) validate(unavailable)
+        return unavailable
+      })
+    h.session.createOrder.mockRejectedValueOnce(new ProblemError({
+      type:CORE_PROBLEM_TYPES.orderLimitRatesUnavailable,
+      title:'Курсы временно недоступны',
+      status:503,
+      detail:'Не удалось проверить стоимость. Повторите попытку позже.',
+      instance:'urn:sarafan:problem:4bf92f3577b34da6a3ce929d0e0e4736',
+      code:'order_limit_rates_unavailable'
+    }))
+    const { wrapper } = await mountView()
+    await wrapper.get('input[name="productName"]').setValue('Товар')
+    await wrapper.get('input[name="sellerPrice"]').setValue('10')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(h.session.orderRequest).toHaveBeenCalledTimes(3)
+    expect(wrapper.find('form').exists()).toBe(true)
+    expect(wrapper.text()).toContain('Проверка лимита временно недоступна')
+    expect(wrapper.get('button[type="submit"]').attributes('disabled')).toBeDefined()
   })
 
   it('reuses the idempotency key after an ambiguous failure and accepts a corrected replay', async () => {

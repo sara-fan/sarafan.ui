@@ -6,7 +6,7 @@ import { readonly, ref } from 'vue'
 
 import { isIsoDate, isRfc3339DateTime } from '../api/validation.js'
 import { createInternalProblem } from '../errors/problem.js'
-import { priceCents, validateProductDto, validateProductLimits } from '../orderProduct.js'
+import { priceCents, validatePreviewProductDto, validateProductDto, validateProductLimits } from '../orderProduct.js'
 import { normalizeProductAddress } from '../productAddress.js'
 
 const ROUTE_ALIAS_PATTERN = /^[a-z0-9]+(?:_[a-z0-9]+)*$/u
@@ -25,6 +25,7 @@ function validHttpUrl(value) {
   try {
     const url = new globalThis.URL(value)
     return (url.protocol === 'http:' || url.protocol === 'https:') && Boolean(url.hostname)
+      && !url.username && !url.password
   } catch {
     return false
   }
@@ -110,12 +111,13 @@ function validateOrderIdentityAndProduct(item, statusValues, currencyValues, lim
 
 export function validateProductPreview(value, ops) {
   if (!value || !['manual_review', 'recognized'].includes(value.outcome)
-    || typeof value.sourceUrl !== 'string' || normalizeProductAddress(value.sourceUrl) !== value.sourceUrl
+    || typeof value.sourceUrl !== 'string'
+    || normalizeProductAddress(value.sourceUrl, ops.productSourceUrl) !== value.sourceUrl
     || !Object.hasOwn(value, 'product')) protocolError()
   return {
     sourceUrl:value.sourceUrl,
     outcome:value.outcome,
-    product:value.product === null ? null : validateProductDto(value.product, ops.currencies, ops.productLimits)
+    product:value.product === null ? null : validatePreviewProductDto(value.product, ops.currencies, ops.productLimits)
   }
 }
 

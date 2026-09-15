@@ -21,6 +21,7 @@ import {
 } from '../errors/problem.js'
 import { formatMoneyInput } from '../moneyFormatting.js'
 import { PRODUCT_FIELDS, previewPrefill, priceCents, productFormErrors, productPayload } from '../orderProduct.js'
+import { normalizeProductAddress } from '../productAddress.js'
 import { useConsents } from '../stores/consents.js'
 import { showOrderCreated } from '../stores/orderNotices.js'
 import { validateCreatedOrder, validateOrderOps, validateProductPreview } from '../stores/orders.js'
@@ -35,6 +36,7 @@ const problem = ref(null)
 const ops = ref(null)
 const previewLoading = ref(false)
 const previewReady = ref(false)
+const sourceNeedsCorrection = ref(false)
 const submitting = ref(false)
 const authOpen = ref(false)
 const attempted = ref(false)
@@ -132,11 +134,17 @@ async function loadPreview() {
   const isCurrent = () => currentPreview(ownOperation)
   previewLoading.value = true
   previewReady.value = false
+  sourceNeedsCorrection.value = false
   problem.value = null
   try {
     const loadedOps = await loadOperations(isCurrent)
     if (!loadedOps) return
     ops.value = loadedOps
+    if (!normalizeProductAddress(sourceUrl.value, loadedOps.productSourceUrl)) {
+      sourceNeedsCorrection.value = true
+      problem.value = createInternalProblem('invalidInput')
+      return
+    }
     let validated
     await session.previewOrder(sourceUrl.value, isCurrent, value => {
       validated = validateProductPreview(value, loadedOps)
@@ -242,6 +250,18 @@ async function submitAuthenticated() {
     if (normalized.type === CORE_PROBLEM_TYPES.personalDataConsentRequired) {
       releaseConsentProblemOwnership()
       await requireConsent(customerId)
+    } else if (normalized.type === CORE_PROBLEM_TYPES.orderValueLimitExceeded
+      || normalized.type === CORE_PROBLEM_TYPES.orderLimitRatesUnavailable) {
+      problem.value = normalized
+      try {
+        const refreshedOps = await loadOperations(isCurrent)
+        if (refreshedOps) {
+          ops.value = refreshedOps
+          problem.value = null
+        }
+      } catch (refreshFailure) {
+        if (isCurrent()) problem.value = normalizeProblem(refreshFailure)
+      }
     } else {
       problem.value = normalized
     }
@@ -266,6 +286,13 @@ async function changeProduct() {
   releaseConsentProblemOwnership()
   drafts.clear()
   await router.push({ name:'home' })
+}
+
+async function correctSource() {
+  ++previewOperation
+  ++submissionOperation
+  releaseConsentProblemOwnership()
+  await router.replace({ name:'home' })
 }
 
 async function resume() {
@@ -336,7 +363,13 @@ onBeforeUnmount(() => {
     >
       <p>{{ error }}</p>
       <UiButton
-        v-if="!previewReady"
+        v-if="sourceNeedsCorrection"
+        @click="correctSource"
+      >
+        Изменить ссылку
+      </UiButton>
+      <UiButton
+        v-else-if="!previewReady"
         :loading="previewLoading"
         @click="loadPreview"
       >

@@ -11,6 +11,7 @@ import {
   productFormErrors,
   productPayload,
   validateProductDto,
+  validatePreviewProductDto,
   validateProductLimits
 } from '../src/orderProduct.js'
 import { currencies, product, productLimits } from './fixtures/orders.js'
@@ -54,12 +55,14 @@ describe('order product rules', () => {
     { ...productLimits, priceDecimalPlaces:3 },
     { ...productLimits, sellerPriceCurrency:978 },
     { ...productLimits, maximumUnitPrice:0 },
+    { ...productLimits, maximumUnitPrice:1.234 },
     { ...productLimits, valueLimit:null },
     { ...productLimits, valueLimit:{ ...productLimits.valueLimit, maximumAmount:0 } },
     { ...productLimits, valueLimit:{ ...productLimits.valueLimit, currency:840 } },
     { ...productLimits, valueLimit:{ ...productLimits.valueLimit, exceededMessage:' ' } },
     { ...productLimits, valueLimit:{ ...productLimits.valueLimit, sourceEffectiveDate:'2026-02-30' } },
     { ...productLimits, valueLimit:{ ...productLimits.valueLimit, maximumTotalUsd:-1 } },
+    { ...productLimits, valueLimit:{ ...productLimits.valueLimit, maximumTotalUsd:1.234 } },
     { ...productLimits, valueLimit:{ ...productLimits.valueLimit, available:false } }
   ])('rejects malformed product limits %#', value => {
     protocolFailure(() => validateProductLimits(value, currencies))
@@ -92,6 +95,11 @@ describe('order product rules', () => {
     protocolFailure(() => validateProductDto(value, currencies, productLimits))
   })
 
+  it('accepts a Core-owned non-USD preview price without treating it as a USD submission', () => {
+    expect(validatePreviewProductDto(product({ sellerPrice:{ amount:16.5, currency:978 } }), currencies, productLimits))
+      .toMatchObject({ sellerPrice:{ amount:16.5, currency:978 } })
+  })
+
   it('maps recognized and empty previews into form input strings', () => {
     expect(previewPrefill(null, productLimits)).toEqual({
       storeName:'', productName:'', sellerPrice:'', quantity:'1', color:'', size:'', comment:''
@@ -113,7 +121,10 @@ describe('order product rules', () => {
     }, productLimits).quantity).toEqual(['Количество должно быть целым числом.'])
     expect(productFormErrors({
       storeName:'', productName:'Товар', sellerPrice:'10', quantity:'0', color:'', size:'', comment:''
-    }, productLimits).quantity).toEqual(['Количество должно быть положительным числом.'])
+    }, productLimits).quantity).toEqual(['Количество должно быть больше нуля.'])
+    expect(productFormErrors({
+      storeName:'', productName:'Товар', sellerPrice:'10', quantity:'-1', color:'', size:'', comment:''
+    }, productLimits).quantity).toEqual(['Количество не может быть отрицательным.'])
     expect(productFormErrors({
       storeName:'', productName:'Товар', sellerPrice:'10', quantity:'5', color:'', size:'', comment:''
     }, productLimits).quantity).toEqual(['Такое количество товара может быть признано коммерческой партией и запрещено к ввозу'])

@@ -39,7 +39,7 @@ function routeTemplate(path) {
     const pathname = new globalThis.URL(path, 'https://sarafan.invalid').pathname
       .replace(/(\/legal\/current\/)\d+$/u, '$1{kind}')
       .replace(/(\/legal\/documents\/)[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?=\/source$|$)/iu, '$1{id}')
-      .replace(/(\/orders\/)\d+$/u, '$1{id}')
+      .replace(/(\/orders\/)[1-9]\d*$/u, '$1{id}')
     return API_ROUTE_TEMPLATES.has(pathname) ? pathname : undefined
   } catch {
     return undefined

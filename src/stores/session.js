@@ -355,6 +355,7 @@ async function identityScopedRequest(path, options, policy, validateResponse, is
     const invalidationGeneration = identityInvalidations.get(error)
     if (!isCurrent() && invalidationGeneration !== identityGeneration) return null
     if (invalidationGeneration === identityGeneration) throw error
+    if (error?.type === CORE_PROBLEM_TYPES.orderLimitRatesUnavailable) throw error
     if (isServiceUnavailableProblem(error)) {
       const problem = asServiceUnavailableProblem(error)
       clearSession(SERVICE_UNAVAILABLE_MESSAGE)

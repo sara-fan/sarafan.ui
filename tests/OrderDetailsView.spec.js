@@ -71,6 +71,29 @@ describe('OrderDetailsView', () => {
     expect(wrapper.text()).toContain('Комментарий')
   })
 
+  it('renders missing historical product attributes as not specified', async () => {
+    h.session.orderRequest.mockImplementation(async (path, _options, isCurrent, validate) => {
+      const emptyProduct = product({ color:null, size:null, comment:null })
+      const value = path.endsWith('/ops') ? ops : completeOrder({
+        id:3,
+        status:400,
+        showReviewFields:false,
+        product:emptyProduct,
+        productName:emptyProduct.productName,
+        storeName:emptyProduct.storeName,
+        sellerPrice:emptyProduct.sellerPrice,
+        quantity:emptyProduct.quantity,
+        comment:null
+      })
+      if (isCurrent()) validate(value)
+      return value
+    })
+    const { wrapper } = await mountAt()
+    expect(wrapper.find('.order-summary-card').text()).toContain('ЦветНе указано')
+    expect(wrapper.find('.order-summary-card').text()).toContain('РазмерНе указано')
+    expect(wrapper.find('.order-summary-card').text()).toContain('КомментарийНе указано')
+  })
+
   it('uses explicit empty values for missing product attributes', async () => {
     h.session.orderRequest.mockImplementation(async (path, _options, isCurrent, validate) => {
       const value = path.endsWith('/ops') ? ops : completeOrder({

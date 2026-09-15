@@ -261,20 +261,17 @@ onBeforeUnmount(() => {
             <dt>Сайт продавца</dt>
             <dd>{{ sourceHost }}</dd>
           </div>
-          <div v-if="product.color">
+          <div>
             <dt>Цвет</dt>
-            <dd>{{ product.color }}</dd>
+            <dd>{{ display(product.color) }}</dd>
           </div>
-          <div v-if="product.size">
+          <div>
             <dt>Размер</dt>
-            <dd>{{ product.size }}</dd>
+            <dd>{{ display(product.size) }}</dd>
           </div>
-          <div
-            v-if="product.comment"
-            class="order-summary-grid__wide"
-          >
+          <div class="order-summary-grid__wide">
             <dt>Комментарий</dt>
-            <dd>{{ product.comment }}</dd>
+            <dd>{{ display(product.comment) }}</dd>
           </div>
         </dl>
       </section>

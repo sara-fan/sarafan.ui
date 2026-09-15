@@ -30,6 +30,9 @@ describe('order store', () => {
       .toEqual({ sourceUrl:'https://shop.example.com/item', outcome:'manual_review', product:null })
     expect(validateProductPreview({ sourceUrl:'https://shop.example.com/item', outcome:'recognized', product:product() }, validatedOps).product)
       .toEqual(product())
+    expect(validateProductPreview({
+      sourceUrl:'https://shop.example.com/item', outcome:'recognized', product:product({ sellerPrice:{ amount:16.5, currency:978 } })
+    }, validatedOps).product.sellerPrice.currency).toBe(978)
     for (const value of [
       null,
       {},
@@ -38,6 +41,7 @@ describe('order store', () => {
       { sourceUrl:'shop.example.com/item', outcome:'manual_review', product:null },
       { sourceUrl:'https://127.0.0.1/item', outcome:'manual_review', product:null },
       { sourceUrl:'https://alice:secret@shop.example.com/item', outcome:'manual_review', product:null },
+      { sourceUrl:'https://shop.invalid/item', outcome:'manual_review', product:null },
       { sourceUrl:'https://shop.example.com/item', outcome:'unknown', product:null },
       { sourceUrl:'https://shop.example.com/item', outcome:'recognized', product:{} }
     ]) protocolFailure(() => validateProductPreview(value, validatedOps))
@@ -273,6 +277,7 @@ describe('order store', () => {
     [{ ...orders[0], orderNumber:' ' }],
     [{ ...orders[0], status:999 }],
     [{ ...orders[0], sourceUrl:'ftp://shop.example.com/item' }],
+    [{ ...orders[0], sourceUrl:'https://alice:secret@shop.example.com/item' }],
     [{ ...orders[0], imageUrl:'invalid' }],
     [{ ...orders[0], quantity:0 }],
     [{ ...orders[0], createdAt:'2026-02-30T00:00:00Z' }],

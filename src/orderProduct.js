@@ -23,7 +23,7 @@ function limitIsValid(value, currencies) {
     && (value.available
       ? isIsoDate(value.sourceEffectiveDate)
         && typeof value.maximumTotalUsd === 'number' && Number.isFinite(value.maximumTotalUsd)
-        && value.maximumTotalUsd >= 0
+        && value.maximumTotalUsd >= 0 && priceCents(value.maximumTotalUsd) !== null
       : value.sourceEffectiveDate === null && value.maximumTotalUsd === null)
 }
 
@@ -32,7 +32,7 @@ export function validateProductLimits(value, currencies) {
     'productNameMaximumLength', 'colorMaximumLength', 'sizeMaximumLength', 'commentMaximumLength']
     .every(key => Number.isSafeInteger(value[key]) && value[key] > 0)
     || value.minimumQuantity > value.defaultQuantity || value.defaultQuantity > value.maximumQuantity
-    || !positive(value.maximumUnitPrice) || value.priceDecimalPlaces !== 2
+    || !positive(value.maximumUnitPrice) || priceCents(value.maximumUnitPrice) === null || value.priceDecimalPlaces !== 2
     || !currencies.some(item => item.value === value.sellerPriceCurrency && item.routeAlias === 'usd')
     || !limitIsValid(value.valueLimit, currencies)) protocolError()
   return {
@@ -41,7 +41,7 @@ export function validateProductLimits(value, currencies) {
   }
 }
 
-export function validateProductDto(value, currencies, limits) {
+function validateProduct(value, currencies, limits, allowPreviewCurrency) {
   if (!value || !nullableNormalizedText(value.storeName, limits.storeNameMaximumLength)
     || !nullableNormalizedText(value.productName, limits.productNameMaximumLength)
     || !nullableNormalizedText(value.color, limits.colorMaximumLength)
@@ -50,10 +50,10 @@ export function validateProductDto(value, currencies, limits) {
     || !Number.isSafeInteger(value.quantity) || value.quantity <= 0
     || value.sellerPrice !== null && (!value.sellerPrice || !positive(value.sellerPrice.amount)
       || !Number.isInteger(value.sellerPrice.currency)
-      || value.sellerPrice.currency !== limits.sellerPriceCurrency
       || !currencies.some(item => item.value === value.sellerPrice.currency)
+      || !allowPreviewCurrency && value.sellerPrice.currency !== limits.sellerPriceCurrency
       || priceCents(value.sellerPrice.amount) === null
-      || priceCents(value.sellerPrice.amount) > priceCents(limits.maximumUnitPrice))) protocolError()
+      || !allowPreviewCurrency && priceCents(value.sellerPrice.amount) > priceCents(limits.maximumUnitPrice))) protocolError()
   return {
     storeName:value.storeName,
     productName:value.productName,
@@ -63,6 +63,14 @@ export function validateProductDto(value, currencies, limits) {
     size:value.size,
     comment:value.comment
   }
+}
+
+export function validateProductDto(value, currencies, limits) {
+  return validateProduct(value, currencies, limits, false)
+}
+
+export function validatePreviewProductDto(value, currencies, limits) {
+  return validateProduct(value, currencies, limits, true)
 }
 
 export function previewPrefill(product, limits) {
@@ -111,11 +119,16 @@ export function productFormErrors(form, limits) {
   const rawQuantity = form.quantity.trim()
   let quantity = null
   if (!rawQuantity) errors.quantity = ['Укажите количество товара.']
-  else if (!/^-?\d+$/u.test(rawQuantity)) errors.quantity = ['Количество должно быть целым числом.']
+  else if (rawQuantity.startsWith('-')) errors.quantity = ['Количество не может быть отрицательным.']
+  else if (!/^\d+$/u.test(rawQuantity)) errors.quantity = ['Количество должно быть целым числом.']
   else {
     quantity = Number(rawQuantity)
-    if (!Number.isSafeInteger(quantity) || quantity < limits.minimumQuantity) {
-      errors.quantity = ['Количество должно быть положительным числом.']
+    if (!Number.isSafeInteger(quantity)) {
+      errors.quantity = ['Количество должно быть целым числом.']
+    } else if (quantity === 0) {
+      errors.quantity = ['Количество должно быть больше нуля.']
+    } else if (quantity < limits.minimumQuantity) {
+      errors.quantity = ['Количество не может быть отрицательным.']
     } else if (quantity > limits.maximumQuantity) {
       errors.quantity = ['Такое количество товара может быть признано коммерческой партией и запрещено к ввозу']
     }
