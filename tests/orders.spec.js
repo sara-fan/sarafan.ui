@@ -49,7 +49,9 @@ describe('order store', () => {
       {},
       { sourceUrl:'https://shop.example.com/item', outcome:'recognized' },
       { sourceUrl:7, outcome:'manual_review' },
-      { sourceUrl:'shop.example.com/item', outcome:'manual_review' }
+      { sourceUrl:'shop.example.com/item', outcome:'manual_review' },
+      { sourceUrl:'https://127.0.0.1/item', outcome:'manual_review' },
+      { sourceUrl:'https://alice:secret@shop.example.com/item', outcome:'manual_review' }
     ]) protocolFailure(() => validateProductPreview(value))
   })
 

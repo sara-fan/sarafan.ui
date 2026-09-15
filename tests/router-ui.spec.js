@@ -15,6 +15,7 @@ import UiButton from '../src/components/ui/UiButton.vue'
 import UiDialog from '../src/components/ui/UiDialog.vue'
 import UiField from '../src/components/ui/UiField.vue'
 import UiSelectionControl from '../src/components/ui/UiSelectionControl.vue'
+import { SERVICE_UNAVAILABLE_MESSAGE, createInternalProblem } from '../src/errors/problem.js'
 import { createSarafanVuetify } from '../src/plugins/vuetify.js'
 import { ACCESS, createAppRouter, routes } from '../src/router.js'
 import { resetProductDraftForTests, useProductDraft } from '../src/stores/productDraft.js'
@@ -165,13 +166,16 @@ describe('router and page shells', () => {
   })
 
   it('keeps an order Ops failure recoverable on Home', async () => {
-    h.session.orderRequest.mockRejectedValueOnce(new TypeError('private transport detail'))
+    h.session.orderRequest.mockRejectedValueOnce(createInternalProblem('serviceUnavailable'))
     const router = await routerAt()
     const wrapper = mount(HomeView, { global:{ plugins:[router] } })
     await wrapper.get('input[inputmode="url"]').setValue('store.example.com/item')
     await wrapper.get('form').trigger('submit')
     await flushPromises()
-    expect(wrapper.get('[role="alert"]').text()).toContain('Повторите попытку позднее')
+    const alert = wrapper.get('.home-hero > .ui-alert')
+    expect(alert.text()).toBe(SERVICE_UNAVAILABLE_MESSAGE)
+    expect(alert.find('strong').exists()).toBe(false)
+    expect(wrapper.find('.product-entry .ui-alert').exists()).toBe(false)
     expect(router.currentRoute.value.name).toBe('home')
 
     await wrapper.get('form').trigger('submit')

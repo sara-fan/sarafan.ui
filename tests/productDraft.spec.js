@@ -100,6 +100,17 @@ describe('same-tab product draft', () => {
     expect(randomUUID).toHaveBeenCalledTimes(2)
   })
 
+  it('retains a canonical URL longer than the former local default across updates and restoration', () => {
+    const sourceUrl = 'https://shop.example.com/' + 'a'.repeat(2050)
+    const drafts = useProductDraft()
+    expect(drafts.start(sourceUrl)).toBe(true)
+    expect(drafts.update({ quantity:'2' })).toBe(true)
+    const serialized = globalThis.sessionStorage.getItem(PRODUCT_DRAFT_STORAGE_KEY)
+    resetProductDraftForTests()
+    globalThis.sessionStorage.setItem(PRODUCT_DRAFT_STORAGE_KEY, serialized)
+    expect(useProductDraft().draft.value).toMatchObject({ sourceUrl, quantity:'2' })
+  })
+
   it('binds consent resume to one customer and clears resume on editing or cancellation', () => {
     const drafts = useProductDraft()
     drafts.start('shop.example.com/item')

@@ -2,15 +2,17 @@
 // All rights reserved.
 // This file is a part of the Sarafan application
 
-const MAXIMUM_URL_LENGTH = 2048
+const MAXIMUM_URL_LENGTH = 65535
 const EXPLICIT_SCHEME = /^[A-Za-z][A-Za-z0-9+.-]*:/u
-const DOTTED_HOST_WITH_PORT = /^(?:[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+|\[[0-9A-Fa-f:.]+\]):[0-9]+(?:[/?#]|$)/u
+const DOTTED_HOST_WITH_PORT = /^(?:[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+(?:\.)?|\[[0-9A-Fa-f:.]+\]):[0-9]+(?:[/?#]|$)/u
 const DNS_LABEL = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/iu
+const IPV4_ADDRESS = /^(?:\d{1,3}\.){3}\d{1,3}$/u
 
 function hasValidHostnameSyntax(hostname) {
   const normalized = hostname.endsWith('.') ? hostname.slice(0, -1) : hostname
   const labels = normalized.split('.')
-  return normalized.length <= 253 && labels.length > 1 && labels.every(label => DNS_LABEL.test(label))
+  return normalized.length <= 253 && !IPV4_ADDRESS.test(normalized)
+    && labels.length > 1 && labels.every(label => DNS_LABEL.test(label))
 }
 
 function hasListedSuffix(hostname, topLevelDomains) {
@@ -36,7 +38,7 @@ export function normalizeProductAddress(value, productSourceUrlOps = null) {
 
   try {
     const url = new globalThis.URL(candidate)
-    if (!['http:', 'https:'].includes(url.protocol) || !url.hostname
+    if (!['http:', 'https:'].includes(url.protocol) || !url.hostname || url.username || url.password
       || !hasValidHostnameSyntax(url.hostname)
       || productSourceUrlOps && !hasListedSuffix(url.hostname, productSourceUrlOps.topLevelDomains)) return null
     return url.href.length <= maximumLength ? url.href : null

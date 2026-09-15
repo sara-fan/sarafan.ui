@@ -123,6 +123,7 @@ a { color: var(--sarafan-secondary); }
 .home-hero .page-kicker { color: #78d5f5; }
 .home-hero h1 { max-width: 850px; margin: 0; color: #ffffff; font: 500 clamp(46px, 6.1vw, 76px)/0.98 var(--sarafan-font-display); letter-spacing: -0.05em; }
 .home-hero__lead { max-width: 650px; margin: var(--sarafan-space-24) 0 var(--sarafan-space-32); color: rgba(229, 246, 255, 0.74); font-size: 18px; line-height: 29px; }
+.home-hero > .ui-alert { max-width: 760px; margin-bottom: var(--sarafan-space-12); }
 .product-entry { display: grid; max-width: 760px; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: var(--sarafan-space-12); padding: var(--sarafan-space-20); border: 1px solid rgba(255, 255, 255, 0.54); border-radius: var(--sarafan-radius-20); background: rgba(255, 255, 255, 0.97); box-shadow: 0 24px 60px rgba(5, 17, 44, 0.24); }
 .product-entry .ui-button { min-width: 205px; }
 .product-entry__note { margin: var(--sarafan-space-12) 0 0; color: rgba(229, 246, 255, 0.62); font-size: 13px; }

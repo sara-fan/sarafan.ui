@@ -495,7 +495,9 @@ describe('session store', () => {
     }))))
     const session = useSession()
     await session.verifyCode({ phone:original.phone, code:'1111' })
-    await expect(session.updateProfile({ firstName:'Анна' })).rejects.toMatchObject({ type:INTERNAL_PROBLEM_TYPES.serviceUnavailable })
+    const failure = await session.updateProfile({ firstName:'Анна' }).catch(value => value)
+    expect(failure).toMatchObject({ type:INTERNAL_PROBLEM_TYPES.serviceUnavailable })
+    expect(session.isCurrentIdentityInvalidation(failure)).toBe(true)
     expect(session.customer.value).toBeNull()
   })
 
@@ -580,7 +582,9 @@ describe('session store', () => {
     }))
     const session = useSession()
     await session.verifyCode({ phone:original.phone, code:'1111' })
-    await expect(session.updateProfile({ firstName:'Анна' })).rejects.toMatchObject({ type:INTERNAL_PROBLEM_TYPES.serviceUnavailable })
+    const failure = await session.updateProfile({ firstName:'Анна' }).catch(value => value)
+    expect(failure).toMatchObject({ type:INTERNAL_PROBLEM_TYPES.serviceUnavailable })
+    expect(session.isCurrentIdentityInvalidation(failure)).toBe(true)
     expect(session.customer.value).toBeNull()
     expect(session.notice.value).toBe('Сервис временно недоступен. Пожалуйста, повторите позже')
   })
@@ -1161,6 +1165,7 @@ describe('session store', () => {
 
     const previewCall = fetch.mock.calls.find(([url]) => url === '/api/v1/orders/preview')
     expect(previewCall[1].headers.has('Authorization')).toBe(false)
+    expect(previewCall[1].cache).toBe('no-store')
     expect(JSON.parse(previewCall[1].body)).toEqual({ sourceUrl:'shop.example.com/item' })
     const createCall = fetch.mock.calls.find(([url]) => url === '/api/v1/orders')
     expect(createCall[1].headers.get('Authorization')).toBe('Bearer order-token')
@@ -1190,6 +1195,13 @@ describe('session store', () => {
     await expect(failed).resolves.toBeNull()
   })
 
+  it('propagates a current preview transport failure', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('private network detail')))
+    await expect(useSession().previewOrder('shop.example.com/item')).rejects.toMatchObject({
+      type:INTERNAL_PROBLEM_TYPES.networkUnavailable
+    })
+  })
+
   it('skips preview transport when its operation is already stale', async () => {
     const fetch = vi.fn()
     vi.stubGlobal('fetch', fetch)
@@ -1209,9 +1221,11 @@ describe('session store', () => {
 
     const session = useSession()
     await session.verifyCode({ phone:customer.phone, code:'1111' })
-    await expect(session.orderRequest('/api/v1/orders', {}, () => true, () => {
+    const failure = await session.orderRequest('/api/v1/orders', {}, () => true, () => {
       throw createInternalProblem('protocolError')
-    })).rejects.toMatchObject({ type:INTERNAL_PROBLEM_TYPES.serviceUnavailable })
+    }).catch(value => value)
+    expect(failure).toMatchObject({ type:INTERNAL_PROBLEM_TYPES.serviceUnavailable })
+    expect(session.isCurrentIdentityInvalidation(failure)).toBe(true)
     expect(session.customer.value).toBeNull()
     expect(session.notice.value).toBe('Сервис временно недоступен. Пожалуйста, повторите позже')
   })

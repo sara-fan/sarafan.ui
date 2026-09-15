@@ -10,7 +10,7 @@ import PublicInfoBlock from '../components/PublicInfoBlock.vue'
 import UiAlert from '../components/ui/UiAlert.vue'
 import UiButton from '../components/ui/UiButton.vue'
 import UiField from '../components/ui/UiField.vue'
-import { normalizeProblem, presentProblem } from '../errors/problem.js'
+import { normalizeProblem, presentProblem, presentProblemTitle } from '../errors/problem.js'
 import { normalizeProductAddress } from '../productAddress.js'
 import { validateOrderOps } from '../stores/orders.js'
 import { useProductDraft } from '../stores/productDraft.js'
@@ -28,6 +28,7 @@ let mounted = true
 let operation = 0
 const sourceErrors = computed(() => sourceProblem.value ? [sourceProblem.value] : [])
 const error = computed(() => problem.value ? presentProblem(problem.value) : '')
+const errorTitle = computed(() => presentProblemTitle(problem.value))
 
 async function loadOperations(ownOperation) {
   if (operations) return operations
@@ -93,17 +94,17 @@ onBeforeUnmount(() => {
           Вставьте ссылку на товар из американского интернет-магазина и получите предварительный расчёт.
         </p>
       </div>
+      <UiAlert
+        v-if="problem"
+        :title="errorTitle"
+      >
+        {{ error }}
+      </UiAlert>
       <form
         class="product-entry"
         novalidate
         @submit.prevent="begin"
       >
-        <UiAlert
-          v-if="problem"
-          title="Не удалось проверить ссылку"
-        >
-          {{ error }}
-        </UiAlert>
         <UiField
           v-model="sourceUrl"
           label="Ссылка на товар"

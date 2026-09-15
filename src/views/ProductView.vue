@@ -180,7 +180,7 @@ async function submitAuthenticated() {
     showOrderCreated(customerId, order.orderNumber)
     await router.replace({ name:'orders' })
   } catch (value) {
-    if (!isCurrent()) return
+    if (!isCurrent() && !session.isCurrentIdentityInvalidation(value)) return
     const normalized = normalizeProblem(value)
     if (normalized.type === CORE_PROBLEM_TYPES.personalDataConsentRequired) {
       releaseConsentProblemOwnership()

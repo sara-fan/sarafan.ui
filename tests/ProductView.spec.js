@@ -13,7 +13,12 @@ vi.mock('../src/stores/consents.js', () => ({ useConsents:() => h.consents }))
 vi.mock('../src/stores/productDraft.js', () => ({ useProductDraft:() => h.drafts }))
 vi.mock('../src/stores/orderNotices.js', () => ({ showOrderCreated:h.showOrderCreated }))
 
-import { CORE_PROBLEM_TYPES, ProblemError, createInternalProblem } from '../src/errors/problem.js'
+import {
+  CORE_PROBLEM_TYPES,
+  SERVICE_UNAVAILABLE_MESSAGE,
+  ProblemError,
+  createInternalProblem
+} from '../src/errors/problem.js'
 import ProductView from '../src/views/ProductView.vue'
 
 const ops = {
@@ -124,6 +129,7 @@ describe('ProductView manual fallback', () => {
     resetDraft()
     h.session.customer = ref(null)
     h.session.restoring = ref(false)
+    h.session.isCurrentIdentityInvalidation = vi.fn().mockReturnValue(false)
     h.session.previewOrder = vi.fn(async (sourceUrl, isCurrent, validate) => {
       const value = { sourceUrl, outcome:'manual_review' }
       if (isCurrent()) validate(value)
@@ -220,6 +226,40 @@ describe('ProductView manual fallback', () => {
     expect(h.session.createOrder).not.toHaveBeenCalled()
   })
 
+  it('updates quantity and comment through the visible controls and clears their field errors', async () => {
+    resetDraft({ quantity:'bad', comment:'x'.repeat(2001) })
+    h.session.customer.value = { id:7 }
+    const { wrapper } = await mountView()
+    await wrapper.get('form').trigger('submit')
+    expect(wrapper.text()).toContain('Количество должно быть положительным числом')
+    expect(wrapper.text()).toContain('Комментарий не должен превышать 2000 символов')
+
+    await wrapper.get('input[name="quantity"]').setValue('2')
+    await wrapper.get('textarea[name="comment"]').setValue('синий')
+
+    expect(h.drafts.update).toHaveBeenCalledWith({ quantity:'2' })
+    expect(h.drafts.update).toHaveBeenCalledWith({ comment:'синий' })
+    expect(wrapper.text()).not.toContain('Количество должно быть положительным числом')
+    expect(wrapper.text()).not.toContain('Комментарий не должен превышать 2000 символов')
+  })
+
+  it.each([true, false])('resumes an authentication-bound draft with customer=%s', async authenticated => {
+    resetDraft({ resumeMode:'authentication' })
+    h.session.customer.value = authenticated ? { id:7 } : null
+    const { router, wrapper } = await mountView()
+    await flushPromises()
+
+    if (authenticated) {
+      await vi.waitFor(() => expect(router.currentRoute.value.name).toBe('orders'))
+      expect(h.drafts.clearResume).toHaveBeenCalled()
+      expect(h.session.createOrder).toHaveBeenCalledOnce()
+    } else {
+      expect(router.currentRoute.value.name).toBe('product')
+      expect(wrapper.getComponent({ name:'PhoneAuthDialog' }).props('modelValue')).toBe(true)
+      expect(h.session.createOrder).not.toHaveBeenCalled()
+    }
+  })
+
   it('routes missing consent through the fixed return flow', async () => {
     h.session.customer.value = { id:7 }
     h.consents.hasCurrentPersonalData.mockResolvedValue(false)
@@ -299,6 +339,26 @@ describe('ProductView manual fallback', () => {
       '11111111-1111-4111-8111-111111111111'
     ])
   })
+
+  it.each(['orderRequest', 'createOrder'])(
+    'presents a current %s failure that invalidates the authenticated identity',
+    async method => {
+      const failure = createInternalProblem('serviceUnavailable')
+      h.session.customer.value = { id:7 }
+      h.session[method].mockImplementation(async () => {
+        h.session.customer.value = null
+        h.session.isCurrentIdentityInvalidation.mockImplementation(value => value === failure)
+        throw failure
+      })
+      const { wrapper } = await mountView()
+      await wrapper.get('form').trigger('submit')
+      await flushPromises()
+
+      expect(wrapper.get('[role="alert"]').text()).toBe(SERVICE_UNAVAILABLE_MESSAGE)
+      expect(wrapper.text()).not.toContain('Пользователь изменился')
+      expect(h.drafts.clear).not.toHaveBeenCalled()
+    }
+  )
 
   it('drops consent auto-resume after an identity change but retains the draft', async () => {
     resetDraft({ resumeMode:'consent', boundCustomerId:8 })
