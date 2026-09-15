@@ -228,7 +228,6 @@ export function useProductDraft() {
     }
     if (payloadChanged(current, next)) next.idempotencyKey = null
     const validated = validate(next)
-    if (!validated) return false
     save(validated)
     return true
   }

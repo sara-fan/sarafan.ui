@@ -118,6 +118,9 @@ describe('order product rules', () => {
       storeName:'', productName:'Товар', sellerPrice:'10', quantity:'5', color:'', size:'', comment:''
     }, productLimits).quantity).toEqual(['Такое количество товара может быть признано коммерческой партией и запрещено к ввозу'])
     expect(productFormErrors({
+      storeName:'', productName:'x'.repeat(501), sellerPrice:'10', quantity:'1', color:'', size:'', comment:''
+    }, productLimits).productName).toEqual(['Не более 500 символов.'])
+    expect(productFormErrors({
       storeName:'', productName:'Товар', sellerPrice:'300', quantity:'4', color:'', size:'', comment:''
     }, productLimits).sellerPrice).toEqual([productLimits.valueLimit.exceededMessage])
     expect(productFormErrors({

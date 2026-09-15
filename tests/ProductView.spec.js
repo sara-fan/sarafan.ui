@@ -242,6 +242,52 @@ describe('ProductView product review', () => {
     expect(h.session.previewOrder).toHaveBeenCalledTimes(2)
   })
 
+  it('discards an Ops completion after unmount', async () => {
+    let finishOps
+    h.session.orderRequest.mockImplementation((_path, _options, isCurrent, validate) => new Promise(resolve => {
+      finishOps = () => {
+        if (isCurrent()) validate(ops)
+        resolve(ops)
+      }
+    }))
+    const mounting = mountView()
+    await vi.waitFor(() => expect(finishOps).toBeTypeOf('function'))
+    const { wrapper } = await mounting
+    wrapper.unmount()
+    finishOps()
+    await flushPromises()
+    expect(h.session.previewOrder).not.toHaveBeenCalled()
+  })
+
+  it('ignores an empty preview completion and a late preview failure', async () => {
+    h.session.previewOrder.mockResolvedValueOnce(null)
+    const empty = await mountView()
+    expect(empty.wrapper.find('form').exists()).toBe(false)
+    empty.wrapper.unmount()
+
+    resetProductDraftForTests()
+    startDraft()
+    let rejectPreview
+    h.session.previewOrder.mockReturnValueOnce(new Promise((_resolve, reject) => { rejectPreview = reject }))
+    const pending = mountView()
+    await vi.waitFor(() => expect(rejectPreview).toBeTypeOf('function'))
+    const { wrapper } = await pending
+    wrapper.unmount()
+    rejectPreview(createInternalProblem('networkUnavailable'))
+    await flushPromises()
+  })
+
+  it('turns a lost draft during preview into a safe protocol failure', async () => {
+    h.session.previewOrder.mockImplementation(async (sourceUrl, isCurrent, validate) => {
+      useProductDraft().clear()
+      const value = { sourceUrl, outcome:'manual_review', product:null }
+      if (isCurrent()) validate(value)
+      return value
+    })
+    const { wrapper } = await mountView()
+    expect(wrapper.get('[role="alert"]').text()).toContain('Сервис временно недоступен')
+  })
+
   it('preserves the draft and resumes after phone authentication', async () => {
     const { router, wrapper } = await mountView()
     await wrapper.get('input[name="productName"]').setValue('Товар')
@@ -264,6 +310,8 @@ describe('ProductView product review', () => {
     wrapper.getComponent({ name:'PhoneAuthDialog' }).vm.$emit('update:modelValue', false)
     await flushPromises()
     expect(useProductDraft().draft.value).toMatchObject({ resumeMode:'none', productName:'Товар' })
+    wrapper.getComponent({ name:'PhoneAuthDialog' }).vm.$emit('update:modelValue', false)
+    await flushPromises()
   })
 
   it('routes missing consent and automatically resumes for the bound customer', async () => {
@@ -282,6 +330,34 @@ describe('ProductView product review', () => {
     const resumed = mount(ProductView, { global:{ plugins:[router], stubs:{ PhoneAuthDialog:true } } })
     await vi.waitFor(() => expect(h.session.createOrder).toHaveBeenCalledOnce())
     resumed.unmount()
+  })
+
+  it('revalidates the form when refreshed Ops lower the available total', async () => {
+    h.session.customer.value = { id:7 }
+    const reduced = {
+      ...ops,
+      productLimits:{
+        ...ops.productLimits,
+        valueLimit:{ ...ops.productLimits.valueLimit, maximumTotalUsd:5 }
+      }
+    }
+    h.session.orderRequest
+      .mockImplementationOnce(async (_path, _options, isCurrent, validate) => {
+        if (isCurrent()) validate(ops)
+        return ops
+      })
+      .mockImplementationOnce(async (_path, _options, isCurrent, validate) => {
+        if (isCurrent()) validate(reduced)
+        return reduced
+      })
+    const { wrapper } = await mountView()
+    await wrapper.get('input[name="productName"]').setValue('Товар')
+    await wrapper.get('input[name="sellerPrice"]').setValue('10')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(wrapper.get('input[name="sellerPrice"]').element.closest('.ui-field').textContent)
+      .toContain(ops.productLimits.valueLimit.exceededMessage)
+    expect(h.session.createOrder).not.toHaveBeenCalled()
   })
 
   it('reuses the idempotency key after an ambiguous failure and accepts a corrected replay', async () => {
@@ -319,6 +395,22 @@ describe('ProductView product review', () => {
     await flushPromises()
     expect(wrapper.text()).toContain('Проверьте данные заказа и отправьте его ещё раз')
     expect(h.session.createOrder).not.toHaveBeenCalled()
+  })
+
+  it.each([false, true])('discards a late creation failure after identity change (owned=%s)', async owned => {
+    h.session.customer.value = { id:7 }
+    h.session.isCurrentIdentityInvalidation.mockReturnValue(owned)
+    let rejectCreation
+    h.session.createOrder.mockReturnValue(new Promise((_resolve, reject) => { rejectCreation = reject }))
+    const { wrapper } = await mountView()
+    await wrapper.get('input[name="productName"]').setValue('Товар')
+    await wrapper.get('input[name="sellerPrice"]').setValue('10')
+    await wrapper.get('form').trigger('submit')
+    await vi.waitFor(() => expect(rejectCreation).toBeTypeOf('function'))
+    h.session.customer.value = { id:8 }
+    rejectCreation(createInternalProblem('networkUnavailable'))
+    await flushPromises()
+    expect(wrapper.text()).toContain(owned ? 'Проверьте подключение к интернету' : 'Проверьте данные заказа')
   })
 
   it('shows Core field errors under the matching control without a duplicate page alert', async () => {
@@ -402,6 +494,20 @@ describe('ProductView product review', () => {
     const signedIn = await mountView()
     await vi.waitFor(() => expect(h.session.createOrder).toHaveBeenCalledOnce())
     signedIn.wrapper.unmount()
+  })
+
+  it('drops consent auto-resume when it belongs to another customer', async () => {
+    h.session.customer.value = { id:7 }
+    h.session.previewOrder.mockImplementation(async (sourceUrl, isCurrent, validate) => {
+      const value = { sourceUrl, outcome:'recognized', product:product() }
+      if (isCurrent()) validate(value)
+      return value
+    })
+    useProductDraft().markConsentResume(8)
+    const { wrapper } = await mountView()
+    expect(useProductDraft().draft.value.resumeMode).toBe('none')
+    expect(h.session.createOrder).not.toHaveBeenCalled()
+    wrapper.unmount()
   })
 
   it('prevents concurrent creation submissions', async () => {

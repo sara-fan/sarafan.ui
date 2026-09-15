@@ -46,12 +46,12 @@ let resumeRunning = false
 let releaseConsentNoticeSuppression = null
 
 const draft = computed(() => drafts.draft.value)
-const sourceUrl = computed(() => draft.value?.sourceUrl || '')
+const sourceUrl = computed(() => draft.value.sourceUrl)
 const busy = computed(() => previewLoading.value || submitting.value)
 const ratesUnavailable = computed(() => previewReady.value && ops.value && !ops.value.productLimits.valueLimit.available)
-const localErrors = computed(() => draft.value && ops.value ? productFormErrors(draft.value, ops.value.productLimits) : {})
+const localErrors = computed(() => productFormErrors(draft.value, ops.value.productLimits))
 const pageProblem = computed(() => hasOnlyPresentedFieldErrors(problem.value, PRODUCT_FIELDS) ? null : problem.value)
-const error = computed(() => pageProblem.value ? presentProblem(pageProblem.value) : '')
+const error = computed(() => presentProblem(pageProblem.value))
 const errorTitle = computed(() => presentProblemTitle(pageProblem.value))
 const previewNotice = computed(() => draft.value?.previewOutcome === 'recognized'
   ? 'Проверьте распознанные данные и при необходимости исправьте их.'
@@ -59,7 +59,7 @@ const previewNotice = computed(() => draft.value?.previewOutcome === 'recognized
 
 function fieldModel(name) {
   return computed({
-    get:() => draft.value?.[name] ?? '',
+    get:() => draft.value[name],
     set:value => {
       touched.value = new Set([...touched.value, name])
       problem.value = null
@@ -83,8 +83,8 @@ function markTouched(name) {
 function blurSellerPrice() {
   markTouched('sellerPrice')
   const cents = priceCents(sellerPrice.value)
-  const maximum = ops.value ? priceCents(ops.value.productLimits.maximumUnitPrice) : null
-  if (cents !== null && maximum !== null && cents <= maximum) {
+  const maximum = priceCents(ops.value.productLimits.maximumUnitPrice)
+  if (cents !== null && cents <= maximum) {
     drafts.update({ sellerPrice:formatMoneyInput(Number(cents) / 100) })
   }
 }
@@ -120,7 +120,7 @@ async function loadOperations(isCurrent) {
   await session.orderRequest('/api/v1/orders/ops', {}, isCurrent, value => {
     validated = validateOrderOps(value)
   })
-  return isCurrent() ? validated : null
+  return validated
 }
 
 async function loadPreview() {
@@ -141,7 +141,7 @@ async function loadPreview() {
     await session.previewOrder(sourceUrl.value, isCurrent, value => {
       validated = validateProductPreview(value, loadedOps)
     })
-    if (!isCurrent() || !validated) return
+    if (!validated) return
     const prefill = previewPrefill(validated.product, loadedOps.productLimits)
     if (!drafts.applyPreview(validated.sourceUrl, validated.outcome, prefill)) {
       throw createInternalProblem('protocolError')
@@ -223,17 +223,16 @@ async function submitAuthenticated() {
     drafts.clearResume()
 
     const loadedOps = await loadOperations(isCurrent)
-    if (!isCurrent() || !loadedOps) return
+    if (!loadedOps) return
     ops.value = loadedOps
     payload = currentPayload()
     if (!payload) return
     const idempotencyKey = drafts.ensureIdempotencyKey()
-    if (!idempotencyKey) return
     let order
     await session.createOrder(payload, idempotencyKey, isCurrent, value => {
       order = validateCreatedOrder(value, loadedOps, payload)
     })
-    if (!isCurrent() || !order) return
+    if (!order) return
     drafts.clear()
     showOrderCreated(customerId, order.orderNumber)
     await router.replace({ name:'orders' })
@@ -253,7 +252,7 @@ async function submitAuthenticated() {
 
 async function submit() {
   if (!currentPayload() || busy.value) return
-  if (!drafts.ensureIdempotencyKey()) return
+  drafts.ensureIdempotencyKey()
   if (!session.customer.value) {
     openAuthentication()
     return

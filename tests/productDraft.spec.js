@@ -124,6 +124,16 @@ describe('same-tab product draft', () => {
     expect(globalThis.sessionStorage.getItem(PRODUCT_DRAFT_STORAGE_KEY)).toBeNull()
   })
 
+  it.each([
+    { version:1, sourceUrl:'ftp://bad', quantity:'1', comment:'' },
+    { version:1, sourceUrl:'https://shop.example.com', quantity:'1'.repeat(21), comment:'' },
+    { version:1, sourceUrl:'https://shop.example.com', quantity:'1', comment:'x'.repeat(2001) }
+  ])('discards a malformed legacy draft %#', value => {
+    globalThis.sessionStorage.setItem(LEGACY_KEY, JSON.stringify(value))
+    expect(useProductDraft().draft.value).toBeNull()
+    expect(globalThis.sessionStorage.getItem(LEGACY_KEY)).toBeNull()
+  })
+
   it('rejects invalid operations without replacing the current draft', () => {
     const drafts = useProductDraft()
     expect(drafts.start('ftp://shop.example.com/item')).toBe(false)

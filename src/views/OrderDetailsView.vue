@@ -23,15 +23,11 @@ const problem = ref(null)
 const loading = ref(false)
 let generation = 0
 
-const error = computed(() => problem.value ? presentProblem(problem.value) : '')
+const error = computed(() => presentProblem(problem.value))
 const errorTitle = computed(() => presentProblemTitle(problem.value))
 const status = computed(() => ops.value?.statuses.find(item => item.value === order.value?.status))
 const product = computed(() => order.value?.product)
-const sourceHost = computed(() => {
-  if (!order.value) return ''
-  try { return new globalThis.URL(order.value.sourceUrl).hostname }
-  catch { return '' }
-})
+const sourceHost = computed(() => new globalThis.URL(order.value.sourceUrl).hostname)
 
 function orderId() {
   const value = String(route.params.orderId ?? '')
@@ -47,8 +43,8 @@ function createdAt(value) {
 }
 function sellerPrice(value) {
   if (!value) return 'Не указано'
-  const currency = ops.value?.currencies.find(item => item.value === value.currency)
-  return `${formatMoneyAmount(value.amount)} ${currency?.name || ''}`.trim()
+  const currency = ops.value.currencies.find(item => item.value === value.currency)
+  return `${formatMoneyAmount(value.amount)} ${currency.name}`
 }
 function goBack() { return router.push({ name:'orders' }) }
 
@@ -88,10 +84,7 @@ async function load() {
 
 const stopWatch = watch(
   [() => route.params.orderId, () => session.customer.value?.id],
-  ([currentOrderId, currentCustomerId], [previousOrderId, previousCustomerId] = []) => {
-    if (currentOrderId === previousOrderId && currentCustomerId === previousCustomerId) return
-    void load()
-  },
+  () => { void load() },
   { immediate:true, flush:'sync' }
 )
 

@@ -116,6 +116,57 @@ describe('OrderDetailsView', () => {
     expect(wrapper.text()).not.toContain('Заказ 12345678-3')
   })
 
+  it('discards a stale detail response after the route changes', async () => {
+    let finishDetail
+    h.session.orderRequest.mockImplementation((path, _options, isCurrent, validate) => {
+      if (path.endsWith('/ops')) {
+        validate(ops)
+        return Promise.resolve(ops)
+      }
+      if (path.endsWith('/3')) {
+        return new Promise(resolve => { finishDetail = resolve }).then(value => {
+          if (isCurrent()) validate(value)
+          return value
+        })
+      }
+      const value = completeOrder({ id:4, orderNumber:'12345678-4' })
+      validate(value)
+      return Promise.resolve(value)
+    })
+    const mounting = mountAt('/orders/3')
+    await vi.waitFor(() => expect(finishDetail).toBeTypeOf('function'))
+    const { router, wrapper } = await mounting
+    await router.push('/orders/4')
+    await flushPromises()
+    finishDetail(completeOrder({ id:3 }))
+    await flushPromises()
+    expect(wrapper.text()).toContain('Заказ 12345678-4')
+  })
+
+  it('does not present a detail failure from the previous customer', async () => {
+    let rejectDetail
+    h.session.orderRequest.mockImplementation((path, _options, isCurrent, validate) => {
+      if (path.endsWith('/ops')) {
+        validate(ops)
+        return Promise.resolve(ops)
+      }
+      if (!rejectDetail) {
+        return new Promise((_resolve, reject) => { rejectDetail = reject })
+      }
+      const value = completeOrder({ id:3 })
+      if (isCurrent()) validate(value)
+      return Promise.resolve(value)
+    })
+    const mounting = mountAt()
+    await vi.waitFor(() => expect(rejectDetail).toBeTypeOf('function'))
+    const { wrapper } = await mounting
+    h.session.customer.value = { id:8 }
+    rejectDetail(createInternalProblem('networkUnavailable'))
+    await flushPromises()
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('Заказ 12345678-3')
+  })
+
   it('keeps failures recoverable and refreshes the current detail', async () => {
     h.session.orderRequest.mockRejectedValueOnce(createInternalProblem('serviceUnavailable'))
     const { wrapper } = await mountAt()
