@@ -6,6 +6,7 @@ import { readonly, ref } from 'vue'
 
 import { isIsoDate, isRfc3339DateTime } from '../api/validation.js'
 import { createInternalProblem } from '../errors/problem.js'
+import { priceCents, validateProductDto, validateProductLimits } from '../orderProduct.js'
 import { normalizeProductAddress } from '../productAddress.js'
 
 const ROUTE_ALIAS_PATTERN = /^[a-z0-9]+(?:_[a-z0-9]+)*$/u
@@ -68,6 +69,7 @@ export function validateOrderOps(value) {
     currencyValues.add(item.value)
     currencyAliases.add(item.routeAlias)
   }
+  const productLimits = validateProductLimits(value.productLimits, value.currencies)
   const topLevelDomains = new Set()
   let previousTopLevelDomain = null
   for (const item of value.productSourceUrl.topLevelDomains) {
@@ -82,38 +84,49 @@ export function validateOrderOps(value) {
     productSourceUrl:{
       ...value.productSourceUrl,
       topLevelDomains:[...value.productSourceUrl.topLevelDomains]
-    }
+    },
+    productLimits
   }
 }
 
-function validateSellerPrice(value, currencyValues) {
+function validateSellerPrice(value, currencyValues, limits) {
   if (value === null) return
   if (!value || typeof value.amount !== 'number' || !Number.isFinite(value.amount) || value.amount <= 0
-    || !Number.isInteger(value.currency) || !currencyValues.has(value.currency)) protocolError()
+    || !Number.isInteger(value.currency) || !currencyValues.has(value.currency)
+    || value.currency !== limits.sellerPriceCurrency
+    || priceCents(value.amount) === null || value.amount > limits.maximumUnitPrice) protocolError()
 }
 
-function validateOrderIdentityAndProduct(item, statusValues, currencyValues) {
+function validateOrderIdentityAndProduct(item, statusValues, currencyValues, limits) {
   if (!item || !Number.isSafeInteger(item.id) || item.id <= 0
     || !validText(item.orderNumber, 64)
     || !Number.isInteger(item.status) || !statusValues.has(item.status)
-    || !validHttpUrl(item.sourceUrl) || !validNullableText(item.productName, 500)
-    || !validNullableText(item.storeName, 200)
+    || !validHttpUrl(item.sourceUrl) || !validNullableText(item.productName, limits.productNameMaximumLength)
+    || !validNullableText(item.storeName, limits.storeNameMaximumLength)
     || item.imageUrl !== null && !validHttpUrl(item.imageUrl)
     || !Number.isInteger(item.quantity) || item.quantity <= 0) protocolError()
-  validateSellerPrice(item.sellerPrice, currencyValues)
+  validateSellerPrice(item.sellerPrice, currencyValues, limits)
 }
 
-export function validateProductPreview(value) {
-  if (!value || value.outcome !== 'manual_review' || typeof value.sourceUrl !== 'string'
-    || normalizeProductAddress(value.sourceUrl) !== value.sourceUrl) protocolError()
-  return { sourceUrl:value.sourceUrl, outcome:value.outcome }
+export function validateProductPreview(value, ops) {
+  if (!value || !['manual_review', 'recognized'].includes(value.outcome)
+    || typeof value.sourceUrl !== 'string' || normalizeProductAddress(value.sourceUrl) !== value.sourceUrl
+    || !Object.hasOwn(value, 'product')) protocolError()
+  return {
+    sourceUrl:value.sourceUrl,
+    outcome:value.outcome,
+    product:value.product === null ? null : validateProductDto(value.product, ops.currencies, ops.productLimits)
+  }
 }
 
-export function validateCreatedOrder(value, ops, expected) {
+function validateCompleteOrder(value, ops) {
   const statusValues = new Set(ops.statuses.map(item => item.value))
   const currencyValues = new Set(ops.currencies.map(item => item.value))
-  validateOrderIdentityAndProduct(value, statusValues, currencyValues)
-  if (!validNullableText(value.comment, 2000)
+  validateOrderIdentityAndProduct(value, statusValues, currencyValues, ops.productLimits)
+  const product = validateProductDto(value.product, ops.currencies, ops.productLimits)
+  if (!validNullableText(value.comment, ops.productLimits.commentMaximumLength)
+    || !isRfc3339DateTime(value.createdAt)
+    || typeof value.showReviewFields !== 'boolean'
     || value.dimensions !== null && (!value.dimensions
       || ['lengthCm', 'widthCm', 'heightCm'].some(field => typeof value.dimensions[field] !== 'number'
         || !Number.isFinite(value.dimensions[field]) || value.dimensions[field] <= 0))
@@ -132,16 +145,30 @@ export function validateCreatedOrder(value, ops, expected) {
       || typeof value.appliedExchangeRate.officialRate !== 'number'
       || !Number.isFinite(value.appliedExchangeRate.officialRate) || value.appliedExchangeRate.officialRate <= 0
       || !isIsoDate(value.appliedExchangeRate.sourceEffectiveDate))) protocolError()
-  const normalizedComment = expected.comment.trim() || null
-  if (value.sourceUrl !== expected.sourceUrl || value.quantity !== expected.quantity
-    || value.comment !== normalizedComment) protocolError()
+  if (value.productName !== product.productName || value.storeName !== product.storeName
+    || value.quantity !== product.quantity || value.comment !== product.comment
+    || value.sellerPrice?.amount !== product.sellerPrice?.amount
+    || value.sellerPrice?.currency !== product.sellerPrice?.currency) protocolError()
   return {
     ...value,
+    product,
     sellerPrice:value.sellerPrice ? { ...value.sellerPrice } : null,
     dimensions:value.dimensions ? { ...value.dimensions } : null,
     characteristics:value.characteristics ? { ...value.characteristics } : null,
     appliedExchangeRate:value.appliedExchangeRate ? { ...value.appliedExchangeRate } : null
   }
+}
+
+export function validateCreatedOrder(value, ops, expected) {
+  const order = validateCompleteOrder(value, ops)
+  if (order.sourceUrl !== expected.sourceUrl) protocolError()
+  return order
+}
+
+export function validateCustomerOrder(value, ops, expectedId) {
+  const order = validateCompleteOrder(value, ops)
+  if (order.id !== expectedId) protocolError()
+  return order
 }
 
 export function validateCustomerOrders(value, ops) {
@@ -152,7 +179,7 @@ export function validateCustomerOrders(value, ops) {
   const orderNumbers = new Set()
   let previous = null
   for (const item of value) {
-    validateOrderIdentityAndProduct(item, statusValues, currencyValues)
+    validateOrderIdentityAndProduct(item, statusValues, currencyValues, ops.productLimits)
     if (ids.has(item.id) || orderNumbers.has(item.orderNumber) || !isRfc3339DateTime(item.createdAt)) protocolError()
     const createdAt = Date.parse(item.createdAt)
     if (previous && (createdAt > previous.createdAt

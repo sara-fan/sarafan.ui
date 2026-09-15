@@ -1104,7 +1104,7 @@ describe('session store', () => {
     expect(session.notice.value).not.toContain('Внутренняя причина восстановления')
   })
 
-  it('allows only the public Ops and authorized customer order-list requests', async () => {
+  it('allows only public Ops and authorized customer order-list and detail requests', async () => {
     const customer = customerDto({ id:7, phone:'+79990000007', state:0, profile:{ phone:'+79990000007' } })
     const orderOps = { statuses:[], currencies:[] }
     const fetch = withOps((url) => {
@@ -1113,6 +1113,7 @@ describe('session store', () => {
       }))
       if (url === '/api/v1/orders/ops') return Promise.resolve(response(200, orderOps))
       if (url === '/api/v1/orders') return Promise.resolve(response(200, []))
+      if (url === '/api/v1/orders/17') return Promise.resolve(response(200, { id:17 }))
       throw new Error(`Unexpected request: ${url}`)
     })
     vi.stubGlobal('fetch', fetch)
@@ -1125,14 +1126,19 @@ describe('session store', () => {
     const validateOrders = vi.fn()
     await expect(session.orderRequest('/api/v1/orders', {}, () => true, validateOrders)).resolves.toEqual([])
     expect(validateOrders).toHaveBeenCalledWith([])
-    await expect(session.orderRequest('/api/v1/orders/17')).rejects.toMatchObject({
+    const validateOrder = vi.fn()
+    await expect(session.orderRequest('/api/v1/orders/17', {}, () => true, validateOrder)).resolves.toEqual({ id:17 })
+    expect(validateOrder).toHaveBeenCalledWith({ id:17 })
+    await expect(session.orderRequest('/api/v1/orders/0')).rejects.toMatchObject({
       type:INTERNAL_PROBLEM_TYPES.invalidInput
     })
 
     const opsCall = fetch.mock.calls.find(([url]) => url === '/api/v1/orders/ops')
     const listCall = fetch.mock.calls.find(([url]) => url === '/api/v1/orders')
+    const detailCall = fetch.mock.calls.find(([url]) => url === '/api/v1/orders/17')
     expect(opsCall[1].headers.has('Authorization')).toBe(false)
     expect(listCall[1].headers.get('Authorization')).toBe('Bearer order-token')
+    expect(detailCall[1].headers.get('Authorization')).toBe('Bearer order-token')
   })
 
   it('previews anonymously and creates with the retained idempotency key', async () => {

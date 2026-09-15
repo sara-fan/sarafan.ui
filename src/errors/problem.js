@@ -66,6 +66,13 @@ export const { INTERNAL_PROBLEM_TYPES, createInternalProblem, normalizeProblem, 
   }
 })
 
+export function hasOnlyPresentedFieldErrors(value, fields) {
+  if (!value?.errors || typeof value.errors !== 'object' || Array.isArray(value.errors)) return false
+  const presented = new Set(fields.map(field => field.toLocaleLowerCase('en-US')))
+  const keys = Object.keys(value.errors)
+  return keys.length > 0 && keys.every(key => presented.has(key.toLocaleLowerCase('en-US')))
+}
+
 export function isServiceUnavailableProblem(problem) {
   return problem?.type === INTERNAL_PROBLEM_TYPES.networkUnavailable
     || problem?.type === INTERNAL_PROBLEM_TYPES.protocolError

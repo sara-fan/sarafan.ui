@@ -25,6 +25,8 @@ import LegalDocumentView from '../src/views/LegalDocumentView.vue'
 import NotFoundView from '../src/views/NotFoundView.vue'
 import OrdersView from '../src/views/OrdersView.vue'
 import PendingView from '../src/views/PendingView.vue'
+import OrderDetailsView from '../src/views/OrderDetailsView.vue'
+import { ops } from './fixtures/orders.js'
 
 const h = vi.hoisted(() => ({ store: {}, orderStore: {}, session:{} }))
 vi.mock('../src/stores/consents.js', () => ({ useConsents: () => h.store }))
@@ -44,18 +46,7 @@ beforeEach(() => {
   resetProductDraftForTests()
   h.session.customer = ref({ id:7 })
   h.session.orderRequest = vi.fn((_path, _options, _isCurrent, validateResponse) => {
-    const value = {
-      statuses:[{
-        value:0, name:'На проверке', routeAlias:'under_review', upperStatusValue:0,
-        upperStatusName:'На проверке', upperStatusRouteAlias:'under_review', isTerminal:false, progressPercent:14
-      }],
-      currencies:[{ value:840, name:'Доллар США', routeAlias:'usd' }],
-      productSourceUrl:{
-        maximumLength:2048,
-        topLevelDomainListVersion:'2026091400',
-        topLevelDomains:['COM', 'XN--P1AI']
-      }
-    }
+    const value = ops
     validateResponse(value)
     return Promise.resolve(value)
   })
@@ -87,10 +78,7 @@ describe('router and page shells', () => {
     expect(new Set(routes.filter(route => !route.redirect).map(route => route.meta.access))).toEqual(new Set(Object.values(ACCESS)))
     const detail = routes.find(route => route.name === 'order-details')
     expect(routes.find(route => route.name === 'orders').component).toBe(OrdersView)
-    expect(detail.props({ params: { orderId: 'A-17' } })).toEqual({
-      title: 'Заказ',
-      copy: 'Детали заказа A-17 будут подключены отдельной задачей MVP.'
-    })
+    expect(detail.component).toBe(OrderDetailsView)
     const router = await routerAt('/does-not-exist')
     expect(router.currentRoute.value.name).toBe('not-found')
     expect(createAppRouter().hasRoute('home')).toBe(true)
