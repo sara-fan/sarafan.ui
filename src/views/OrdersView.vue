@@ -9,6 +9,7 @@ import { RouterLink, useRouter } from 'vue-router'
 import UiAlert from '../components/ui/UiAlert.vue'
 import UiButton from '../components/ui/UiButton.vue'
 import { normalizeProblem, presentProblem } from '../errors/problem.js'
+import { formatMoneyAmount } from '../moneyFormatting.js'
 import { createOrderStore } from '../stores/orders.js'
 import { consumeOrderCreated } from '../stores/orderNotices.js'
 import { useSession } from '../stores/session.js'
@@ -50,9 +51,7 @@ function createdAt(value) {
 function sellerPrice(order) {
   if (!order.sellerPrice) return 'Уточняется'
   const currency = store.currencyFor(order.sellerPrice.currency)
-  const formatted = new Intl.NumberFormat('ru-RU', {
-    minimumFractionDigits:2, maximumFractionDigits:2
-  }).format(order.sellerPrice.amount)
+  const formatted = formatMoneyAmount(order.sellerPrice.amount)
   let symbol
   try {
     symbol = new Intl.NumberFormat('ru-RU', {
