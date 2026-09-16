@@ -63,6 +63,26 @@ describe('same-tab product draft', () => {
     expect(globalThis.sessionStorage.getItem(PRODUCT_DRAFT_STORAGE_KEY)).not.toBeNull()
   })
 
+  it('retains the legacy draft when its replacement cannot be saved', () => {
+    const values = new Map([[LEGACY_KEY, JSON.stringify({
+      version:1, sourceUrl:'shop.example.com/item', quantity:'4', comment:'Сохранить'
+    })]])
+    const removeItem = vi.fn(key => { values.delete(key) })
+    vi.stubGlobal('sessionStorage', {
+      getItem:key => values.get(key) ?? null,
+      setItem:key => {
+        if (key === PRODUCT_DRAFT_STORAGE_KEY) throw new Error('quota exceeded')
+      },
+      removeItem
+    })
+
+    expect(useProductDraft().draft.value).toMatchObject({
+      version:2, sourceUrl:'https://shop.example.com/item', quantity:'4', comment:'Сохранить'
+    })
+    expect(values.get(LEGACY_KEY)).not.toBeNull()
+    expect(removeItem).not.toHaveBeenCalledWith(LEGACY_KEY)
+  })
+
   it('applies preview values only once and preserves every edited field', () => {
     const drafts = useProductDraft()
     drafts.start('shop.example.com/item')

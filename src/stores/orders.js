@@ -20,8 +20,8 @@ function validText(value, maximum) {
 function validNullableText(value, maximum) {
   return value === null || typeof value === 'string' && value.length <= maximum
 }
-function validHttpUrl(value) {
-  if (!validText(value, 2048)) return false
+function validHttpUrl(value, maximumLength = 2048) {
+  if (!validText(value, maximumLength)) return false
   try {
     const url = new globalThis.URL(value)
     return (url.protocol === 'http:' || url.protocol === 'https:') && Boolean(url.hostname)
@@ -98,11 +98,11 @@ function validateSellerPrice(value, currencyValues, limits) {
     || priceCents(value.amount) === null || value.amount > limits.maximumUnitPrice) protocolError()
 }
 
-function validateOrderIdentityAndProduct(item, statusValues, currencyValues, limits) {
+function validateOrderIdentityAndProduct(item, statusValues, currencyValues, limits, sourceUrlMaximumLength) {
   if (!item || !Number.isSafeInteger(item.id) || item.id <= 0
     || !validText(item.orderNumber, 64)
     || !Number.isInteger(item.status) || !statusValues.has(item.status)
-    || !validHttpUrl(item.sourceUrl) || !validNullableText(item.productName, limits.productNameMaximumLength)
+    || !validHttpUrl(item.sourceUrl, sourceUrlMaximumLength) || !validNullableText(item.productName, limits.productNameMaximumLength)
     || !validNullableText(item.storeName, limits.storeNameMaximumLength)
     || item.imageUrl !== null && !validHttpUrl(item.imageUrl)
     || !Number.isInteger(item.quantity) || item.quantity <= 0) protocolError()
@@ -124,7 +124,7 @@ export function validateProductPreview(value, ops) {
 function validateCompleteOrder(value, ops) {
   const statusValues = new Set(ops.statuses.map(item => item.value))
   const currencyValues = new Set(ops.currencies.map(item => item.value))
-  validateOrderIdentityAndProduct(value, statusValues, currencyValues, ops.productLimits)
+  validateOrderIdentityAndProduct(value, statusValues, currencyValues, ops.productLimits, ops.productSourceUrl.maximumLength)
   const product = validateProductDto(value.product, ops.currencies, ops.productLimits)
   if (!validNullableText(value.comment, ops.productLimits.commentMaximumLength)
     || !isRfc3339DateTime(value.createdAt)
@@ -181,7 +181,7 @@ export function validateCustomerOrders(value, ops) {
   const orderNumbers = new Set()
   let previous = null
   for (const item of value) {
-    validateOrderIdentityAndProduct(item, statusValues, currencyValues, ops.productLimits)
+    validateOrderIdentityAndProduct(item, statusValues, currencyValues, ops.productLimits, ops.productSourceUrl.maximumLength)
     if (ids.has(item.id) || orderNumbers.has(item.orderNumber) || !isRfc3339DateTime(item.createdAt)) protocolError()
     const createdAt = Date.parse(item.createdAt)
     if (previous && (createdAt > previous.createdAt

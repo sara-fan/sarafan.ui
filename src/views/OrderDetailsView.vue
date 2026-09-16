@@ -58,7 +58,12 @@ async function load() {
   order.value = null
   ops.value = null
   if (expectedId === null) {
+    loading.value = false
     problem.value = createInternalProblem('invalidInput')
+    return
+  }
+  if (!customerId) {
+    loading.value = false
     return
   }
   loading.value = true

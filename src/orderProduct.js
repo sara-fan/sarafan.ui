@@ -16,7 +16,7 @@ const nullableNormalizedText = (value, maximum) => value === null
 const protocolError = () => { throw createInternalProblem('protocolError') }
 
 function limitIsValid(value, currencies) {
-  return value && positive(value.maximumAmount)
+  return value && positive(value.maximumAmount) && priceCents(value.maximumAmount) !== null
     && typeof value.exceededMessage === 'string' && Boolean(value.exceededMessage.trim())
     && currencies.some(item => item.value === value.currency && item.routeAlias === 'eur')
     && typeof value.available === 'boolean'
@@ -119,16 +119,13 @@ export function productFormErrors(form, limits) {
   const rawQuantity = form.quantity.trim()
   let quantity = null
   if (!rawQuantity) errors.quantity = ['Укажите количество товара.']
-  else if (rawQuantity.startsWith('-')) errors.quantity = ['Количество не может быть отрицательным.']
-  else if (!/^\d+$/u.test(rawQuantity)) errors.quantity = ['Количество должно быть целым числом.']
+  else if (!/^-?\d+$/u.test(rawQuantity)) errors.quantity = ['Количество должно быть целым числом.']
   else {
     quantity = Number(rawQuantity)
     if (!Number.isSafeInteger(quantity)) {
       errors.quantity = ['Количество должно быть целым числом.']
-    } else if (quantity === 0) {
-      errors.quantity = ['Количество должно быть больше нуля.']
-    } else if (quantity < limits.minimumQuantity) {
-      errors.quantity = ['Количество не может быть отрицательным.']
+    } else if (quantity === 0 || quantity < limits.minimumQuantity) {
+      errors.quantity = ['Такое количество нельзя заказать.']
     } else if (quantity > limits.maximumQuantity) {
       errors.quantity = ['Такое количество товара может быть признано коммерческой партией и запрещено к ввозу']
     }

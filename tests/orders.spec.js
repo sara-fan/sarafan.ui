@@ -279,6 +279,7 @@ describe('order store', () => {
     [{ ...orders[0], sourceUrl:'ftp://shop.example.com/item' }],
     [{ ...orders[0], sourceUrl:'https://alice:secret@shop.example.com/item' }],
     [{ ...orders[0], imageUrl:'invalid' }],
+    [{ ...orders[0], imageUrl:'https://images.example/' + 'a'.repeat(2048) }],
     [{ ...orders[0], quantity:0 }],
     [{ ...orders[0], createdAt:'2026-02-30T00:00:00Z' }],
     [{ ...orders[0], sellerPrice:{ amount:0, currency:840 } }],
@@ -294,5 +295,14 @@ describe('order store', () => {
     const value = orders.map((order, index) => ({ ...order, orderNumber:`Заказ / ${index + 1}` }))
     expect(validateCustomerOrders(value, validateOrderOps(ops)).map(order => order.orderNumber))
       .toEqual(['Заказ / 1', 'Заказ / 2'])
+  })
+
+  it('uses the Ops source URL maximum for orders and retains the image limit', () => {
+    const sourceUrl = 'https://shop.example.com/' + 'a'.repeat(3000)
+    const extendedOps = validateOrderOps({
+      ...ops,
+      productSourceUrl:{ ...productSourceUrl, maximumLength:4096 }
+    })
+    expect(validateCustomerOrders([{ ...orders[0], sourceUrl }], extendedOps)[0].sourceUrl).toBe(sourceUrl)
   })
 })

@@ -211,6 +211,22 @@ describe('OrderDetailsView', () => {
     expect(router.currentRoute.value.name).toBe('orders')
   })
 
+  it('clears loading when a pending valid route changes to an invalid route', async () => {
+    let finishOps
+    h.session.orderRequest.mockImplementation(() => new Promise(resolve => { finishOps = resolve }))
+    const mounting = mountAt()
+    await vi.waitFor(() => expect(finishOps).toBeTypeOf('function'))
+    const { router, wrapper } = await mounting
+
+    await router.push('/orders/not-a-number')
+    await flushPromises()
+    expect(wrapper.get('.product-back').attributes('disabled')).toBeUndefined()
+    expect(wrapper.get('[role="alert"]').exists()).toBe(true)
+
+    finishOps(ops)
+    await flushPromises()
+  })
+
   it('rejects an unsafe integer route id and disposes an in-flight request on unmount', async () => {
     const invalid = await mountAt('/orders/999999999999999999999')
     expect(h.session.orderRequest).not.toHaveBeenCalled()
@@ -235,5 +251,15 @@ describe('OrderDetailsView', () => {
     await flushPromises()
     expect(h.session.orderRequest).toHaveBeenCalledTimes(4)
     expect(wrapper.text()).toContain('Заказ 12345678-3')
+  })
+
+  it('does not request order data after the customer signs out', async () => {
+    await mountAt()
+    expect(h.session.orderRequest).toHaveBeenCalledTimes(2)
+
+    h.session.customer.value = null
+    await flushPromises()
+
+    expect(h.session.orderRequest).toHaveBeenCalledTimes(2)
   })
 })

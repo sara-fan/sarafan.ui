@@ -58,6 +58,7 @@ describe('order product rules', () => {
     { ...productLimits, maximumUnitPrice:1.234 },
     { ...productLimits, valueLimit:null },
     { ...productLimits, valueLimit:{ ...productLimits.valueLimit, maximumAmount:0 } },
+    { ...productLimits, valueLimit:{ ...productLimits.valueLimit, maximumAmount:900.001 } },
     { ...productLimits, valueLimit:{ ...productLimits.valueLimit, currency:840 } },
     { ...productLimits, valueLimit:{ ...productLimits.valueLimit, exceededMessage:' ' } },
     { ...productLimits, valueLimit:{ ...productLimits.valueLimit, sourceEffectiveDate:'2026-02-30' } },
@@ -121,10 +122,13 @@ describe('order product rules', () => {
     }, productLimits).quantity).toEqual(['Количество должно быть целым числом.'])
     expect(productFormErrors({
       storeName:'', productName:'Товар', sellerPrice:'10', quantity:'0', color:'', size:'', comment:''
-    }, productLimits).quantity).toEqual(['Количество должно быть больше нуля.'])
+    }, productLimits).quantity).toEqual(['Такое количество нельзя заказать.'])
     expect(productFormErrors({
       storeName:'', productName:'Товар', sellerPrice:'10', quantity:'-1', color:'', size:'', comment:''
-    }, productLimits).quantity).toEqual(['Количество не может быть отрицательным.'])
+    }, productLimits).quantity).toEqual(['Такое количество нельзя заказать.'])
+    expect(productFormErrors({
+      storeName:'', productName:'Товар', sellerPrice:'10', quantity:'1', color:'', size:'', comment:''
+    }, { ...productLimits, minimumQuantity:2 }).quantity).toEqual(['Такое количество нельзя заказать.'])
     expect(productFormErrors({
       storeName:'', productName:'Товар', sellerPrice:'10', quantity:'5', color:'', size:'', comment:''
     }, productLimits).quantity).toEqual(['Такое количество товара может быть признано коммерческой партией и запрещено к ввозу'])

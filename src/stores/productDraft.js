@@ -118,9 +118,16 @@ function parseStored(key, validator) {
 }
 
 function persist(value) {
-  try { storage()?.setItem(PRODUCT_DRAFT_STORAGE_KEY, JSON.stringify(value)) }
-  catch { /* Continue with the in-memory draft when storage is unavailable. */ }
-  removeKey(LEGACY_STORAGE_KEY)
+  try {
+    const target = storage()
+    if (!target) return false
+    target.setItem(PRODUCT_DRAFT_STORAGE_KEY, JSON.stringify(value))
+    removeKey(LEGACY_STORAGE_KEY)
+    return true
+  } catch {
+    // Continue with the in-memory draft and retain a legacy draft when migration cannot persist.
+    return false
+  }
 }
 
 function readStored() {
