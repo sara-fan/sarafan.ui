@@ -8,29 +8,12 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   createOrderStore,
   validateCreatedOrder,
+  validateCustomerOrder,
   validateCustomerOrders,
   validateOrderOps,
   validateProductPreview
 } from '../src/stores/orders.js'
-
-const statuses = [
-  { value:0, name:'На проверке', routeAlias:'under_review', upperStatusValue:0, upperStatusName:'На проверке', upperStatusRouteAlias:'under_review', isTerminal:false, progressPercent:14 },
-  { value:100, name:'Расчёт готов', routeAlias:'quote_ready', upperStatusValue:100, upperStatusName:'Расчёт готов', upperStatusRouteAlias:'quote_ready', isTerminal:false, progressPercent:32 },
-  { value:200, name:'Расчёт истёк', routeAlias:'quote_expired', upperStatusValue:200, upperStatusName:'Расчёт истёк', upperStatusRouteAlias:'quote_expired', isTerminal:false, progressPercent:32 },
-  { value:300, name:'Оплачен', routeAlias:'paid', upperStatusValue:300, upperStatusName:'Выполняется', upperStatusRouteAlias:'in_progress', isTerminal:false, progressPercent:48 },
-  { value:400, name:'Получен', routeAlias:'received', upperStatusValue:400, upperStatusName:'Завершён', upperStatusRouteAlias:'completed', isTerminal:true, progressPercent:100 },
-  { value:500, name:'Отменён', routeAlias:'cancelled', upperStatusValue:500, upperStatusName:'Отменён', upperStatusRouteAlias:'cancelled', isTerminal:true, progressPercent:100 }
-]
-const currencies = [
-  { value:643, name:'Российский рубль', routeAlias:'rub' },
-  { value:840, name:'Доллар США', routeAlias:'usd' }
-]
-const productSourceUrl = {
-  maximumLength:2048,
-  topLevelDomainListVersion:'2026091400',
-  topLevelDomains:['COM', 'XN--P1AI']
-}
-const ops = { statuses, currencies, productSourceUrl }
+import { completeOrder, currencies, ops, product, productLimits, productSourceUrl, statuses } from './fixtures/orders.js'
 const orders = [
   { id:2, orderNumber:'12345678-2', status:100, sourceUrl:'https://shop.example.com/two', productName:'Товар', storeName:'Магазин', imageUrl:'https://images.example/two.jpg', sellerPrice:{ amount:12.34, currency:840 }, quantity:2, createdAt:'2026-09-14T10:00:00Z' },
   { id:1, orderNumber:'12345678-1', status:0, sourceUrl:'https://shop.example.com/one', productName:null, storeName:null, imageUrl:null, sellerPrice:null, quantity:1, createdAt:'2026-09-13T10:00:00Z' }
@@ -42,33 +25,32 @@ function protocolFailure(action) {
 
 describe('order store', () => {
   it('validates the manual-review preview contract', () => {
-    expect(validateProductPreview({ sourceUrl:'https://shop.example.com/item', outcome:'manual_review' }))
-      .toEqual({ sourceUrl:'https://shop.example.com/item', outcome:'manual_review' })
+    const validatedOps = validateOrderOps(ops)
+    expect(validateProductPreview({ sourceUrl:'https://shop.example.com/item', outcome:'manual_review', product:null }, validatedOps))
+      .toEqual({ sourceUrl:'https://shop.example.com/item', outcome:'manual_review', product:null })
+    expect(validateProductPreview({ sourceUrl:'https://shop.example.com/item', outcome:'recognized', product:product() }, validatedOps).product)
+      .toEqual(product())
+    expect(validateProductPreview({
+      sourceUrl:'https://shop.example.com/item', outcome:'recognized', product:product({ sellerPrice:{ amount:16.5, currency:978 } })
+    }, validatedOps).product.sellerPrice.currency).toBe(978)
     for (const value of [
       null,
       {},
       { sourceUrl:'https://shop.example.com/item', outcome:'recognized' },
-      { sourceUrl:7, outcome:'manual_review' },
-      { sourceUrl:'shop.example.com/item', outcome:'manual_review' },
-      { sourceUrl:'https://127.0.0.1/item', outcome:'manual_review' },
-      { sourceUrl:'https://alice:secret@shop.example.com/item', outcome:'manual_review' }
-    ]) protocolFailure(() => validateProductPreview(value))
+      { sourceUrl:7, outcome:'manual_review', product:null },
+      { sourceUrl:'shop.example.com/item', outcome:'manual_review', product:null },
+      { sourceUrl:'https://127.0.0.1/item', outcome:'manual_review', product:null },
+      { sourceUrl:'https://alice:secret@shop.example.com/item', outcome:'manual_review', product:null },
+      { sourceUrl:'https://shop.invalid/item', outcome:'manual_review', product:null },
+      { sourceUrl:'https://shop.example.com/item', outcome:'unknown', product:null },
+      { sourceUrl:'https://shop.example.com/item', outcome:'recognized', product:{} }
+    ]) protocolFailure(() => validateProductPreview(value, validatedOps))
   })
 
   it('validates a complete created order against the submitted payload', () => {
-    const value = {
-      id:3,
-      orderNumber:'12345678-3',
-      status:0,
-      sourceUrl:'https://shop.example.com/item',
-      productName:null,
-      storeName:null,
-      imageUrl:null,
-      sellerPrice:null,
+    const value = completeOrder({
       dimensions:{ lengthCm:1, widthCm:2, heightCm:3 },
       characteristics:{ color:'blue' },
-      quantity:2,
-      comment:'note',
       appliedExchangeRate:{
         id:5,
         provider:'Банк России',
@@ -78,11 +60,9 @@ describe('order store', () => {
         officialRate:82.5,
         sourceEffectiveDate:'2026-09-15'
       }
-    }
+    })
     const validated = validateCreatedOrder(value, validateOrderOps(ops), {
-      sourceUrl:value.sourceUrl,
-      quantity:2,
-      comment:' note '
+      sourceUrl:value.sourceUrl
     })
     expect(validated).toEqual(value)
     expect(validated.dimensions).not.toBe(value.dimensions)
@@ -106,19 +86,21 @@ describe('order store', () => {
     value => ({ ...value, appliedExchangeRate:{ id:5, provider:'bank', baseCurrency:840, quoteCurrency:643, nominal:1, officialRate:0, sourceEffectiveDate:'2026-09-15' } }),
     value => ({ ...value, appliedExchangeRate:{ id:5, provider:'bank', baseCurrency:840, quoteCurrency:643, nominal:1, officialRate:1, sourceEffectiveDate:'2026-02-30' } }),
     value => ({ ...value, sourceUrl:'https://other.example.com/item' }),
-    value => ({ ...value, quantity:3 }),
-    value => ({ ...value, comment:'other' })
+    value => ({ ...value, productName:'other' }),
+    value => ({ ...value, quantity:3 })
   ])('rejects a malformed or mismatched created order %#', mutate => {
-    const value = {
-      id:3, orderNumber:'12345678-3', status:0, sourceUrl:'https://shop.example.com/item',
-      productName:null, storeName:null, imageUrl:null, sellerPrice:null,
-      dimensions:null, characteristics:null, quantity:2, comment:'note', appliedExchangeRate:null
-    }
+    const value = completeOrder()
     protocolFailure(() => validateCreatedOrder(mutate(value), validateOrderOps(ops), {
-      sourceUrl:value.sourceUrl,
-      quantity:2,
-      comment:'note'
+      sourceUrl:value.sourceUrl
     }))
+  })
+
+  it('accepts staff-corrected current product on idempotent replay and validates a detail identity', () => {
+    const corrected = completeOrder({ product:product({ productName:'Исправленное название', quantity:4, comment:'Исправлено' }) })
+    expect(validateCreatedOrder(corrected, validateOrderOps(ops), { sourceUrl:corrected.sourceUrl }).product)
+      .toEqual(corrected.product)
+    expect(validateCustomerOrder(corrected, validateOrderOps(ops), corrected.id).id).toBe(corrected.id)
+    protocolFailure(() => validateCustomerOrder(corrected, validateOrderOps(ops), corrected.id + 1))
   })
 
   it('loads, validates, clones, and resolves Core-owned metadata', async () => {
@@ -257,32 +239,32 @@ describe('order store', () => {
   it.each([
     null,
     {},
-    { statuses:[], currencies, productSourceUrl },
-    { statuses, currencies:[], productSourceUrl },
-    { statuses, currencies },
-    { statuses, currencies, productSourceUrl:null },
-    { statuses, currencies, productSourceUrl:{ ...productSourceUrl, maximumLength:0 } },
-    { statuses, currencies, productSourceUrl:{ ...productSourceUrl, topLevelDomainListVersion:'latest' } },
-    { statuses, currencies, productSourceUrl:{ ...productSourceUrl, topLevelDomains:[] } },
-    { statuses, currencies, productSourceUrl:{ ...productSourceUrl, topLevelDomains:['COM', 'COM'] } },
-    { statuses, currencies, productSourceUrl:{ ...productSourceUrl, topLevelDomains:['XN--P1AI', 'COM'] } },
-    { statuses, currencies, productSourceUrl:{ ...productSourceUrl, topLevelDomains:['com'] } },
-    { statuses:[...statuses, { ...statuses[0], value:1 }], currencies, productSourceUrl },
-    { statuses:[...statuses, { ...statuses[0], value:600, routeAlias:'under_review' }], currencies, productSourceUrl },
-    { statuses:statuses.map(item => item.routeAlias === 'under_review' ? { ...item, upperStatusValue:999 } : item), currencies, productSourceUrl },
-    { statuses:statuses.map((item, index) => index ? item : { ...item, name:' ' }), currencies, productSourceUrl },
-    { statuses:statuses.map((item, index) => index ? item : { ...item, routeAlias:7 }), currencies, productSourceUrl },
-    { statuses:statuses.map((item, index) => index ? item : { ...item, upperStatusName:' ' }), currencies, productSourceUrl },
-    { statuses:statuses.map((item, index) => index ? item : { ...item, upperStatusRouteAlias:7 }), currencies, productSourceUrl },
-    { statuses:statuses.map((item, index) => index ? item : { ...item, isTerminal:'false' }), currencies, productSourceUrl },
-    { statuses:statuses.map((item, index) => index ? item : { ...item, progressPercent:1.5 }), currencies, productSourceUrl },
-    { statuses:statuses.map((item, index) => index ? item : { ...item, progressPercent:101 }), currencies, productSourceUrl },
-    { statuses:statuses.map(item => item.value === 400 ? { ...item, progressPercent:99 } : item), currencies, productSourceUrl },
-    { statuses:statuses.map(item => item.value === 300 ? { ...item, upperStatusValue:400 } : item), currencies, productSourceUrl },
-    { statuses, currencies:[...currencies, { ...currencies[0], value:999 }], productSourceUrl },
-    { statuses, currencies:[...currencies, { ...currencies[0], value:999, routeAlias:'rub' }], productSourceUrl },
-    { statuses, currencies:currencies.map((item, index) => index ? item : { ...item, name:' ' }), productSourceUrl },
-    { statuses, currencies:currencies.map((item, index) => index ? item : { ...item, routeAlias:840 }), productSourceUrl }
+    { statuses:[], currencies, productSourceUrl, productLimits },
+    { statuses, currencies:[], productSourceUrl, productLimits },
+    { statuses, currencies, productSourceUrl },
+    { statuses, currencies, productSourceUrl:null, productLimits },
+    { statuses, currencies, productSourceUrl:{ ...productSourceUrl, maximumLength:0 }, productLimits },
+    { statuses, currencies, productSourceUrl:{ ...productSourceUrl, topLevelDomainListVersion:'latest' }, productLimits },
+    { statuses, currencies, productSourceUrl:{ ...productSourceUrl, topLevelDomains:[] }, productLimits },
+    { statuses, currencies, productSourceUrl:{ ...productSourceUrl, topLevelDomains:['COM', 'COM'] }, productLimits },
+    { statuses, currencies, productSourceUrl:{ ...productSourceUrl, topLevelDomains:['XN--P1AI', 'COM'] }, productLimits },
+    { statuses, currencies, productSourceUrl:{ ...productSourceUrl, topLevelDomains:['com'] }, productLimits },
+    { statuses:[...statuses, { ...statuses[0], value:1 }], currencies, productSourceUrl, productLimits },
+    { statuses:[...statuses, { ...statuses[0], value:600, routeAlias:'under_review' }], currencies, productSourceUrl, productLimits },
+    { statuses:statuses.map(item => item.routeAlias === 'under_review' ? { ...item, upperStatusValue:999 } : item), currencies, productSourceUrl, productLimits },
+    { statuses:statuses.map((item, index) => index ? item : { ...item, name:' ' }), currencies, productSourceUrl, productLimits },
+    { statuses:statuses.map((item, index) => index ? item : { ...item, routeAlias:7 }), currencies, productSourceUrl, productLimits },
+    { statuses:statuses.map((item, index) => index ? item : { ...item, upperStatusName:' ' }), currencies, productSourceUrl, productLimits },
+    { statuses:statuses.map((item, index) => index ? item : { ...item, upperStatusRouteAlias:7 }), currencies, productSourceUrl, productLimits },
+    { statuses:statuses.map((item, index) => index ? item : { ...item, isTerminal:'false' }), currencies, productSourceUrl, productLimits },
+    { statuses:statuses.map((item, index) => index ? item : { ...item, progressPercent:1.5 }), currencies, productSourceUrl, productLimits },
+    { statuses:statuses.map((item, index) => index ? item : { ...item, progressPercent:101 }), currencies, productSourceUrl, productLimits },
+    { statuses:statuses.map(item => item.value === 400 ? { ...item, progressPercent:99 } : item), currencies, productSourceUrl, productLimits },
+    { statuses:statuses.map(item => item.value === 300 ? { ...item, upperStatusValue:400 } : item), currencies, productSourceUrl, productLimits },
+    { statuses, currencies:[...currencies, { ...currencies[0], value:999 }], productSourceUrl, productLimits },
+    { statuses, currencies:[...currencies, { ...currencies[0], value:999, routeAlias:'rub' }], productSourceUrl, productLimits },
+    { statuses, currencies:currencies.map((item, index) => index ? item : { ...item, name:' ' }), productSourceUrl, productLimits },
+    { statuses, currencies:currencies.map((item, index) => index ? item : { ...item, routeAlias:840 }), productSourceUrl, productLimits }
   ])('rejects malformed Ops %#', value => {
     protocolFailure(() => validateOrderOps(value))
   })
@@ -295,6 +277,7 @@ describe('order store', () => {
     [{ ...orders[0], orderNumber:' ' }],
     [{ ...orders[0], status:999 }],
     [{ ...orders[0], sourceUrl:'ftp://shop.example.com/item' }],
+    [{ ...orders[0], sourceUrl:'https://alice:secret@shop.example.com/item' }],
     [{ ...orders[0], imageUrl:'invalid' }],
     [{ ...orders[0], quantity:0 }],
     [{ ...orders[0], createdAt:'2026-02-30T00:00:00Z' }],

@@ -17,6 +17,8 @@ export const CORE_PROBLEM_TYPES = Object.freeze({
   invalidRefreshToken: `${PROBLEM_TYPE_ROOT}invalid-refresh-token`,
   loginFailed: `${PROBLEM_TYPE_ROOT}login-failed`,
   onboardingConsentExpired: `${PROBLEM_TYPE_ROOT}onboarding-consent-expired`,
+  orderLimitRatesUnavailable: `${PROBLEM_TYPE_ROOT}order-limit-rates-unavailable`,
+  orderValueLimitExceeded: `${PROBLEM_TYPE_ROOT}order-value-limit-exceeded`,
   personalDataConsentRequired: `${PROBLEM_TYPE_ROOT}personal-data-consent-required`,
   validationFailed: `${PROBLEM_TYPE_ROOT}validation-failed`
 })
@@ -65,6 +67,13 @@ export const { INTERNAL_PROBLEM_TYPES, createInternalProblem, normalizeProblem, 
     }
   }
 })
+
+export function hasOnlyPresentedFieldErrors(value, fields) {
+  if (!value?.errors || typeof value.errors !== 'object' || Array.isArray(value.errors)) return false
+  const presented = new Set(fields.map(field => field.toLocaleLowerCase('en-US')))
+  const keys = Object.keys(value.errors)
+  return keys.length > 0 && keys.every(key => presented.has(key.toLocaleLowerCase('en-US')))
+}
 
 export function isServiceUnavailableProblem(problem) {
   return problem?.type === INTERNAL_PROBLEM_TYPES.networkUnavailable

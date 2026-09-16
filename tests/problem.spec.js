@@ -9,6 +9,7 @@ import {
   ProblemError,
   asServiceUnavailableProblem,
   createInternalProblem,
+  hasOnlyPresentedFieldErrors,
   isServiceUnavailableProblem,
   normalizeProblem,
   presentProblem,
@@ -93,6 +94,11 @@ describe('shared problem model', () => {
       errors: { phone: ['Введите номер телефона'] }
     })
     expect(problemFieldErrors(validation, 'phone')).toEqual(['Введите номер телефона'])
+    expect(hasOnlyPresentedFieldErrors(validation, ['phone', 'code'])).toBe(true)
+    expect(hasOnlyPresentedFieldErrors({ errors:{ Phone:['Ошибка'], other:['Ошибка'] } }, ['phone'])).toBe(false)
+    expect(hasOnlyPresentedFieldErrors(null, ['phone'])).toBe(false)
+    expect(hasOnlyPresentedFieldErrors({ errors:[] }, ['phone'])).toBe(false)
+    expect(hasOnlyPresentedFieldErrors({ errors:{} }, ['phone'])).toBe(false)
     expect(suppressProblem(validation, { operation: 'validation.local', logger })).toBe(validation)
     expect(suppressProblem(new Error('hidden'), {
       detail: 'Безопасная диагностика',

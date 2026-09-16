@@ -278,7 +278,9 @@ async function orderRequest(path, options = {}, isCurrent = () => true, validate
   if (path === `${API_BASE_PATH}/orders/ops`) {
     return identityScopedRequest(path, options, {}, validateResponse, isCurrent, false)
   }
-  if (path !== `${API_BASE_PATH}/orders`) throw createInternalProblem('invalidInput')
+  if (path !== `${API_BASE_PATH}/orders` && !/^\/api\/v1\/orders\/[1-9]\d*$/u.test(path)) {
+    throw createInternalProblem('invalidInput')
+  }
   return authorizedRequest(path, options, {}, validateResponse, isCurrent)
 }
 
@@ -353,6 +355,7 @@ async function identityScopedRequest(path, options, policy, validateResponse, is
     const invalidationGeneration = identityInvalidations.get(error)
     if (!isCurrent() && invalidationGeneration !== identityGeneration) return null
     if (invalidationGeneration === identityGeneration) throw error
+    if (error?.type === CORE_PROBLEM_TYPES.orderLimitRatesUnavailable) throw error
     if (isServiceUnavailableProblem(error)) {
       const problem = asServiceUnavailableProblem(error)
       clearSession(SERVICE_UNAVAILABLE_MESSAGE)

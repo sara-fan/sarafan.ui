@@ -19,7 +19,7 @@ import { useSession } from '../stores/session.js'
 const router = useRouter()
 const session = useSession()
 const draftStore = useProductDraft()
-const sourceUrl = ref('')
+const sourceUrl = ref(draftStore.draft.value?.sourceUrl ?? '')
 const sourceProblem = ref('')
 const problem = ref(null)
 const loading = ref(false)
