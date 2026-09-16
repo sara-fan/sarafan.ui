@@ -61,8 +61,8 @@ beforeEach(() => {
     [100, { value:100, name:'Расчёт готов', routeAlias:'quote_ready', upperStatusName:'Расчёт готов', upperStatusRouteAlias:'quote_ready', isTerminal:false, progressPercent:32 }]
   ])
   h.orderStore.orders = ref([
-    { id:17, orderNumber:'12345678-2', status:0, sourceUrl:'https://nike.com/item', productName:'Nike Air Max 90 Essential', storeName:'nike.com', imageUrl:null, sellerPrice:null, quantity:1, createdAt:'2026-09-14T10:00:00Z' },
-    { id:16, orderNumber:'12345678-1', status:100, sourceUrl:'https://cos.com/item', productName:'Mini Quilted Shoulder Bag', storeName:'cos.com', imageUrl:null, sellerPrice:{ amount:85, currency:840 }, quantity:2, createdAt:'2026-09-13T10:00:00Z' }
+    { orderNumber:'12345678-2', status:0, sourceUrl:'https://nike.com/item', productName:'Nike Air Max 90 Essential', storeName:'nike.com', imageUrl:null, sellerPrice:null, quantity:1, createdAt:'2026-09-14T10:00:00Z' },
+    { orderNumber:'12345678-1', status:100, sourceUrl:'https://cos.com/item', productName:'Mini Quilted Shoulder Bag', storeName:'cos.com', imageUrl:null, sellerPrice:{ amount:85, currency:840 }, quantity:2, createdAt:'2026-09-13T10:00:00Z' }
   ])
   h.orderStore.loading = ref(false)
   h.orderStore.load = vi.fn().mockResolvedValue(true)
@@ -225,7 +225,7 @@ describe('router and page shells', () => {
 
     await wrapper.findAll('.order-card')[0].trigger('click')
     await flushPromises()
-    expect(router.currentRoute.value).toMatchObject({ name: 'order-details', params: { orderId: '17' } })
+    expect(router.currentRoute.value).toMatchObject({ name: 'order-details', params: { orderNumber: '12345678-2' } })
   })
 })
 

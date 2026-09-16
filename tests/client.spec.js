@@ -195,7 +195,7 @@ describe('RFC 9457 API client', () => {
     expect(logger.log.mock.calls[1][1]['http.route']).toBeUndefined()
   })
 
-  it('normalizes only positive numeric order detail routes for logging', async () => {
+  it('redacts public order numbers and malformed detail segments in logs', async () => {
     const logger = { log:vi.fn() }
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(problemResponse(
       503,
@@ -207,13 +207,14 @@ describe('RFC 9457 API client', () => {
       logger
     })
 
-    await expect(client.request('/api/v1/orders/17')).rejects.toMatchObject({ code:'service_unavailable' })
+    await expect(client.request('/api/v1/orders/01234567-17')).rejects.toMatchObject({ code:'service_unavailable' })
     await expect(client.request('/api/v1/orders/0')).rejects.toMatchObject({ code:'service_unavailable' })
     await expect(client.request('/api/v1/orders/not-an-id')).rejects.toMatchObject({ code:'service_unavailable' })
 
-    expect(logger.log.mock.calls[0][1]['http.route']).toBe('/api/v1/orders/{id}')
-    expect(logger.log.mock.calls[1][1]['http.route']).toBeUndefined()
-    expect(logger.log.mock.calls[2][1]['http.route']).toBeUndefined()
+    expect(logger.log.mock.calls[0][1]['http.route']).toBe('/api/v1/orders/{orderNumber}')
+    expect(logger.log.mock.calls[1][1]['http.route']).toBe('/api/v1/orders/{orderNumber}')
+    expect(logger.log.mock.calls[2][1]['http.route']).toBe('/api/v1/orders/{orderNumber}')
+    expect(JSON.stringify(logger.log.mock.calls)).not.toContain('01234567-17')
   })
 
   it('logs non-validation client failures', async () => {

@@ -62,9 +62,9 @@ function sellerPrice(order) {
   }
   return symbol ? `${symbol} ${formatted}` : `${formatted} ${currency.name}`
 }
-function hasImage(order) { return Boolean(order.imageUrl) && !failedImages.value.has(order.id) }
-function markImageFailed(orderId) {
-  failedImages.value = new Set([...failedImages.value, orderId])
+function hasImage(order) { return Boolean(order.imageUrl) && !failedImages.value.has(order.orderNumber) }
+function markImageFailed(orderNumber) {
+  failedImages.value = new Set([...failedImages.value, orderNumber])
 }
 function addProduct() { return router.push({ name:'home' }) }
 async function load() {
@@ -181,9 +181,9 @@ onBeforeUnmount(() => {
       >
         <RouterLink
           v-for="order in activeOrders"
-          :key="order.id"
+          :key="order.orderNumber"
           class="order-card"
-          :to="{ name:'order-details', params:{ orderId:order.id } }"
+          :to="{ name:'order-details', params:{ orderNumber:order.orderNumber } }"
         >
           <div
             class="order-card__visual"
@@ -194,7 +194,7 @@ onBeforeUnmount(() => {
               :src="order.imageUrl"
               alt=""
               referrerpolicy="no-referrer"
-              @error="markImageFailed(order.id)"
+              @error="markImageFailed(order.orderNumber)"
             >
             <span v-else>◇</span>
           </div>
@@ -271,9 +271,9 @@ onBeforeUnmount(() => {
       <div class="orders-list">
         <RouterLink
           v-for="order in historyOrders"
-          :key="order.id"
+          :key="order.orderNumber"
           class="order-card"
-          :to="{ name:'order-details', params:{ orderId:order.id } }"
+          :to="{ name:'order-details', params:{ orderNumber:order.orderNumber } }"
         >
           <div
             class="order-card__visual"
@@ -284,7 +284,7 @@ onBeforeUnmount(() => {
               :src="order.imageUrl"
               alt=""
               referrerpolicy="no-referrer"
-              @error="markImageFailed(order.id)"
+              @error="markImageFailed(order.orderNumber)"
             >
             <span v-else>◇</span>
           </div>

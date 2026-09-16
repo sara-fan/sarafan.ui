@@ -99,8 +99,7 @@ function validateSellerPrice(value, currencyValues, limits) {
 }
 
 function validateOrderIdentityAndProduct(item, statusValues, currencyValues, limits, sourceUrlMaximumLength) {
-  if (!item || !Number.isSafeInteger(item.id) || item.id <= 0
-    || !validText(item.orderNumber, 64)
+  if (!item || !validText(item.orderNumber, 64)
     || !Number.isInteger(item.status) || !statusValues.has(item.status)
     || !validHttpUrl(item.sourceUrl, sourceUrlMaximumLength) || !validNullableText(item.productName, limits.productNameMaximumLength)
     || !validNullableText(item.storeName, limits.storeNameMaximumLength)
@@ -167,9 +166,9 @@ export function validateCreatedOrder(value, ops, expected) {
   return order
 }
 
-export function validateCustomerOrder(value, ops, expectedId) {
+export function validateCustomerOrder(value, ops, expectedNumber) {
   const order = validateCompleteOrder(value, ops)
-  if (order.id !== expectedId) protocolError()
+  if (order.orderNumber !== expectedNumber) protocolError()
   return order
 }
 
@@ -177,18 +176,15 @@ export function validateCustomerOrders(value, ops) {
   if (!Array.isArray(value)) protocolError()
   const statusValues = new Set(ops.statuses.map(item => item.value))
   const currencyValues = new Set(ops.currencies.map(item => item.value))
-  const ids = new Set()
   const orderNumbers = new Set()
   let previous = null
   for (const item of value) {
     validateOrderIdentityAndProduct(item, statusValues, currencyValues, ops.productLimits, ops.productSourceUrl.maximumLength)
-    if (ids.has(item.id) || orderNumbers.has(item.orderNumber) || !isRfc3339DateTime(item.createdAt)) protocolError()
+    if (orderNumbers.has(item.orderNumber) || !isRfc3339DateTime(item.createdAt)) protocolError()
     const createdAt = Date.parse(item.createdAt)
-    if (previous && (createdAt > previous.createdAt
-      || createdAt === previous.createdAt && item.id > previous.id)) protocolError()
-    ids.add(item.id)
+    if (previous !== null && createdAt > previous) protocolError()
     orderNumbers.add(item.orderNumber)
-    previous = { createdAt, id:item.id }
+    previous = createdAt
   }
   return value.map(item => ({ ...item, sellerPrice:item.sellerPrice ? { ...item.sellerPrice } : null }))
 }

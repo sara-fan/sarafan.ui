@@ -28,7 +28,7 @@ const API_ROUTE_TEMPLATES = new Set([
   '/api/v1/customers/ops',
   '/api/v1/customers/me/photo',
   '/api/v1/orders',
-  '/api/v1/orders/{id}',
+  '/api/v1/orders/{orderNumber}',
   '/api/v1/orders/preview',
   '/api/v1/orders/ops',
   '/api/v1/status/status'
@@ -39,7 +39,7 @@ function routeTemplate(path) {
     const pathname = new globalThis.URL(path, 'https://sarafan.invalid').pathname
       .replace(/(\/legal\/current\/)\d+$/u, '$1{kind}')
       .replace(/(\/legal\/documents\/)[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?=\/source$|$)/iu, '$1{id}')
-      .replace(/(\/orders\/)[1-9]\d*$/u, '$1{id}')
+      .replace(/(\/orders\/)(?!ops$|preview$)[^/]+$/u, '$1{orderNumber}')
     return API_ROUTE_TEMPLATES.has(pathname) ? pathname : undefined
   } catch {
     return undefined

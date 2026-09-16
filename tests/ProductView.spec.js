@@ -21,7 +21,6 @@ const IDEMPOTENCY_KEY = '11111111-1111-4111-8111-111111111111'
 
 function created(payload, overrides = {}) {
   return completeOrder({
-    id:19,
     orderNumber:'12345678-19',
     sourceUrl:payload.sourceUrl,
     product:{
