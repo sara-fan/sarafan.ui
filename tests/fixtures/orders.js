@@ -64,7 +64,6 @@ export function completeOrder(overrides = {}) {
   const { product:productOverrides, ...orderOverrides } = overrides
   const currentProduct = product(productOverrides)
   return {
-    id:3,
     orderNumber:'12345678-3',
     status:0,
     sourceUrl:'https://shop.example.com/item',

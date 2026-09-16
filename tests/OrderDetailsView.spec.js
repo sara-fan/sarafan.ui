@@ -14,13 +14,13 @@ import { createInternalProblem, SERVICE_UNAVAILABLE_MESSAGE } from '../src/error
 import OrderDetailsView from '../src/views/OrderDetailsView.vue'
 import { completeOrder, ops, product } from './fixtures/orders.js'
 
-async function mountAt(path = '/orders/3') {
+async function mountAt(path = '/orders/12345678-3') {
   const empty = { template:'<main />' }
   const router = createRouter({
     history:createMemoryHistory(),
     routes:[
       { path:'/orders', name:'orders', component:empty },
-      { path:'/orders/:orderId', name:'order-details', component:OrderDetailsView }
+      { path:'/orders/:orderNumber', name:'order-details', component:OrderDetailsView }
     ]
   })
   await router.push(path)
@@ -33,7 +33,7 @@ describe('OrderDetailsView', () => {
   beforeEach(() => {
     h.session.customer = ref({ id:7 })
     h.session.orderRequest = vi.fn(async (path, _options, isCurrent, validate) => {
-      const value = path.endsWith('/ops') ? ops : completeOrder({ id:Number(path.split('/').at(-1)) })
+      const value = path.endsWith('/ops') ? ops : completeOrder({ orderNumber:decodeURIComponent(path.split('/').at(-1)) })
       if (isCurrent()) validate(value)
       return value
     })
@@ -42,7 +42,7 @@ describe('OrderDetailsView', () => {
   it('loads the current product into the expanded read-only review card', async () => {
     const { wrapper } = await mountAt()
     expect(h.session.orderRequest).toHaveBeenNthCalledWith(1, '/api/v1/orders/ops', {}, expect.any(Function), expect.any(Function))
-    expect(h.session.orderRequest).toHaveBeenNthCalledWith(2, '/api/v1/orders/3', {}, expect.any(Function), expect.any(Function))
+    expect(h.session.orderRequest).toHaveBeenNthCalledWith(2, '/api/v1/orders/12345678-3', {}, expect.any(Function), expect.any(Function))
     expect(wrapper.text()).toContain('Заказ 12345678-3')
     expect(wrapper.text()).toContain('Проверим данные в течение двух часов')
     expect(wrapper.findAll('.order-review-fields input').map(field => field.element.value)).toContain('12,34 USD')
@@ -52,10 +52,27 @@ describe('OrderDetailsView', () => {
     expect(wrapper.get('.order-review-card__heading a').attributes('href')).toBe('https://shop.example.com/item')
   })
 
+  it.each(['01234567-3', 'Заказ / 3'])('keeps %s opaque and encodes the API path', async number => {
+    const { wrapper } = await mountAt(`/orders/${encodeURIComponent(number)}`)
+    expect(h.session.orderRequest).toHaveBeenNthCalledWith(2,
+      `/api/v1/orders/${encodeURIComponent(number)}`, {}, expect.any(Function), expect.any(Function))
+    expect(wrapper.text()).toContain(`Заказ ${number}`)
+  })
+
+  it('rejects a detail response for a different public number', async () => {
+    h.session.orderRequest.mockImplementation(async (path, _options, isCurrent, validate) => {
+      const value = path.endsWith('/ops') ? ops : completeOrder({ orderNumber:'12345678-4' })
+      if (isCurrent()) validate(value)
+      return value
+    })
+    const { wrapper } = await mountAt()
+    expect(wrapper.get('[role="alert"]').exists()).toBe(true)
+    expect(wrapper.find('.order-review-card').exists()).toBe(false)
+  })
+
   it('renders a compact historical summary when review fields are hidden', async () => {
     h.session.orderRequest.mockImplementation(async (path, _options, isCurrent, validate) => {
       const value = path.endsWith('/ops') ? ops : completeOrder({
-        id:3,
         status:400,
         showReviewFields:false
       })
@@ -75,7 +92,6 @@ describe('OrderDetailsView', () => {
     h.session.orderRequest.mockImplementation(async (path, _options, isCurrent, validate) => {
       const emptyProduct = product({ color:null, size:null, comment:null })
       const value = path.endsWith('/ops') ? ops : completeOrder({
-        id:3,
         status:400,
         showReviewFields:false,
         product:emptyProduct,
@@ -97,7 +113,6 @@ describe('OrderDetailsView', () => {
   it('uses explicit empty values for missing product attributes', async () => {
     h.session.orderRequest.mockImplementation(async (path, _options, isCurrent, validate) => {
       const value = path.endsWith('/ops') ? ops : completeOrder({
-        id:3,
         product:product({
           productName:null, storeName:null, sellerPrice:null, color:null, size:null, comment:null
         })
@@ -124,14 +139,14 @@ describe('OrderDetailsView', () => {
         validate(ops)
         return Promise.resolve(ops)
       }
-      const value = completeOrder({ id:Number(path.split('/').at(-1)), orderNumber:'12345678-4' })
+      const value = completeOrder({ orderNumber:'12345678-4' })
       validate(value)
       return Promise.resolve(value)
     })
-    const mounting = mountAt('/orders/3')
+    const mounting = mountAt('/orders/12345678-3')
     await vi.waitFor(() => expect(finishFirst).toBeTypeOf('function'))
     const { router, wrapper } = await mounting
-    await router.push('/orders/4')
+    await router.push('/orders/12345678-4')
     await flushPromises()
     finishFirst(ops)
     await flushPromises()
@@ -146,22 +161,22 @@ describe('OrderDetailsView', () => {
         validate(ops)
         return Promise.resolve(ops)
       }
-      if (path.endsWith('/3')) {
+      if (path.endsWith('/12345678-3')) {
         return new Promise(resolve => { finishDetail = resolve }).then(value => {
           if (isCurrent()) validate(value)
           return value
         })
       }
-      const value = completeOrder({ id:4, orderNumber:'12345678-4' })
+      const value = completeOrder({ orderNumber:'12345678-4' })
       validate(value)
       return Promise.resolve(value)
     })
-    const mounting = mountAt('/orders/3')
+    const mounting = mountAt('/orders/12345678-3')
     await vi.waitFor(() => expect(finishDetail).toBeTypeOf('function'))
     const { router, wrapper } = await mounting
-    await router.push('/orders/4')
+    await router.push('/orders/12345678-4')
     await flushPromises()
-    finishDetail(completeOrder({ id:3 }))
+    finishDetail(completeOrder({}))
     await flushPromises()
     expect(wrapper.text()).toContain('Заказ 12345678-4')
   })
@@ -176,7 +191,7 @@ describe('OrderDetailsView', () => {
       if (!rejectDetail) {
         return new Promise((_resolve, reject) => { rejectDetail = reject })
       }
-      const value = completeOrder({ id:3 })
+      const value = completeOrder({})
       if (isCurrent()) validate(value)
       return Promise.resolve(value)
     })
@@ -203,7 +218,7 @@ describe('OrderDetailsView', () => {
   })
 
   it('rejects an invalid route without making a private request and navigates back', async () => {
-    const { router, wrapper } = await mountAt('/orders/not-a-number')
+    const { router, wrapper } = await mountAt('/orders/%20')
     expect(h.session.orderRequest).not.toHaveBeenCalled()
     expect(wrapper.get('[role="alert"]').exists()).toBe(true)
     await wrapper.get('.product-back').trigger('click')
@@ -218,7 +233,7 @@ describe('OrderDetailsView', () => {
     await vi.waitFor(() => expect(finishOps).toBeTypeOf('function'))
     const { router, wrapper } = await mounting
 
-    await router.push('/orders/not-a-number')
+    await router.push('/orders/%20')
     await flushPromises()
     expect(wrapper.get('.product-back').attributes('disabled')).toBeUndefined()
     expect(wrapper.get('[role="alert"]').exists()).toBe(true)
@@ -227,8 +242,8 @@ describe('OrderDetailsView', () => {
     await flushPromises()
   })
 
-  it('rejects an unsafe integer route id and disposes an in-flight request on unmount', async () => {
-    const invalid = await mountAt('/orders/999999999999999999999')
+  it('rejects an overlong route number and disposes an in-flight request on unmount', async () => {
+    const invalid = await mountAt('/orders/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx')
     expect(h.session.orderRequest).not.toHaveBeenCalled()
     invalid.wrapper.unmount()
 
@@ -236,7 +251,7 @@ describe('OrderDetailsView', () => {
     h.session.orderRequest.mockImplementationOnce((_path, _options, isCurrent) => new Promise(resolve => {
       finish = () => resolve(isCurrent() ? ops : null)
     }))
-    const pending = mountAt('/orders/3')
+    const pending = mountAt('/orders/12345678-3')
     await vi.waitFor(() => expect(finish).toBeTypeOf('function'))
     const { wrapper } = await pending
     wrapper.unmount()

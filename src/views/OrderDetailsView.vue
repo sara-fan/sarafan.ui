@@ -29,11 +29,9 @@ const status = computed(() => ops.value?.statuses.find(item => item.value === or
 const product = computed(() => order.value?.product)
 const sourceHost = computed(() => new globalThis.URL(order.value.sourceUrl).hostname)
 
-function orderId() {
-  const value = String(route.params.orderId ?? '')
-  if (!/^[1-9]\d*$/u.test(value)) return null
-  const parsed = Number(value)
-  return Number.isSafeInteger(parsed) ? parsed : null
+function orderNumber() {
+  const value = String(route.params.orderNumber ?? '')
+  return value.trim() && value.length <= 64 ? value : null
 }
 function display(value) { return value?.trim() || 'Не указано' }
 function createdAt(value) {
@@ -51,13 +49,13 @@ function goBack() { return router.push({ name:'orders' }) }
 async function load() {
   const requestGeneration = ++generation
   const customerId = session.customer.value?.id
-  const expectedId = orderId()
+  const expectedNumber = orderNumber()
   const isCurrent = () => requestGeneration === generation
-    && customerId === session.customer.value?.id && expectedId === orderId()
+    && customerId === session.customer.value?.id && expectedNumber === orderNumber()
   problem.value = null
   order.value = null
   ops.value = null
-  if (expectedId === null) {
+  if (expectedNumber === null) {
     loading.value = false
     problem.value = createInternalProblem('invalidInput')
     return
@@ -74,8 +72,8 @@ async function load() {
     })
     if (!isCurrent()) return
     let validatedOrder
-    await session.orderRequest(`/api/v1/orders/${expectedId}`, {}, isCurrent, value => {
-      validatedOrder = validateCustomerOrder(value, validatedOps, expectedId)
+    await session.orderRequest(`/api/v1/orders/${encodeURIComponent(expectedNumber)}`, {}, isCurrent, value => {
+      validatedOrder = validateCustomerOrder(value, validatedOps, expectedNumber)
     })
     if (!isCurrent()) return
     ops.value = validatedOps
@@ -88,7 +86,7 @@ async function load() {
 }
 
 const stopWatch = watch(
-  [() => route.params.orderId, () => session.customer.value?.id],
+  [() => route.params.orderNumber, () => session.customer.value?.id],
   () => { void load() },
   { immediate:true, flush:'sync' }
 )

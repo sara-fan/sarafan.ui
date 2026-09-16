@@ -15,8 +15,8 @@ import {
 } from '../src/stores/orders.js'
 import { completeOrder, currencies, ops, product, productLimits, productSourceUrl, statuses } from './fixtures/orders.js'
 const orders = [
-  { id:2, orderNumber:'12345678-2', status:100, sourceUrl:'https://shop.example.com/two', productName:'Товар', storeName:'Магазин', imageUrl:'https://images.example/two.jpg', sellerPrice:{ amount:12.34, currency:840 }, quantity:2, createdAt:'2026-09-14T10:00:00Z' },
-  { id:1, orderNumber:'12345678-1', status:0, sourceUrl:'https://shop.example.com/one', productName:null, storeName:null, imageUrl:null, sellerPrice:null, quantity:1, createdAt:'2026-09-13T10:00:00Z' }
+  { orderNumber:'12345678-2', status:100, sourceUrl:'https://shop.example.com/two', productName:'Товар', storeName:'Магазин', imageUrl:'https://images.example/two.jpg', sellerPrice:{ amount:12.34, currency:840 }, quantity:2, createdAt:'2026-09-14T10:00:00Z' },
+  { orderNumber:'12345678-1', status:0, sourceUrl:'https://shop.example.com/one', productName:null, storeName:null, imageUrl:null, sellerPrice:null, quantity:1, createdAt:'2026-09-13T10:00:00Z' }
 ]
 
 function protocolFailure(action) {
@@ -99,8 +99,8 @@ describe('order store', () => {
     const corrected = completeOrder({ product:product({ productName:'Исправленное название', quantity:4, comment:'Исправлено' }) })
     expect(validateCreatedOrder(corrected, validateOrderOps(ops), { sourceUrl:corrected.sourceUrl }).product)
       .toEqual(corrected.product)
-    expect(validateCustomerOrder(corrected, validateOrderOps(ops), corrected.id).id).toBe(corrected.id)
-    protocolFailure(() => validateCustomerOrder(corrected, validateOrderOps(ops), corrected.id + 1))
+    expect(validateCustomerOrder(corrected, validateOrderOps(ops), corrected.orderNumber).orderNumber).toBe(corrected.orderNumber)
+    protocolFailure(() => validateCustomerOrder(corrected, validateOrderOps(ops), corrected.orderNumber + 1))
   })
 
   it('loads, validates, clones, and resolves Core-owned metadata', async () => {
@@ -272,8 +272,6 @@ describe('order store', () => {
   it.each([
     null,
     {},
-    [{ ...orders[0], id:0 }],
-    [{ ...orders[0], id:1.5 }],
     [{ ...orders[0], orderNumber:' ' }],
     [{ ...orders[0], status:999 }],
     [{ ...orders[0], sourceUrl:'ftp://shop.example.com/item' }],
@@ -285,7 +283,6 @@ describe('order store', () => {
     [{ ...orders[0], sellerPrice:{ amount:0, currency:840 } }],
     [{ ...orders[0], sellerPrice:{ amount:1, currency:999 } }],
     [orders[1], orders[0]],
-    [orders[0], { ...orders[1], id:2 }],
     [orders[0], { ...orders[1], orderNumber:orders[0].orderNumber }]
   ])('rejects malformed or unsorted orders %#', value => {
     protocolFailure(() => validateCustomerOrders(value, validateOrderOps(ops)))
@@ -295,6 +292,12 @@ describe('order store', () => {
     const value = orders.map((order, index) => ({ ...order, orderNumber:`Заказ / ${index + 1}` }))
     expect(validateCustomerOrders(value, validateOrderOps(ops)).map(order => order.orderNumber))
       .toEqual(['Заказ / 1', 'Заказ / 2'])
+  })
+
+  it('preserves server ordering for equal creation times without internal IDs', () => {
+    const value = orders.map(order => ({ ...order, createdAt:orders[0].createdAt })).reverse()
+    expect(value.every(order => !Object.hasOwn(order, 'id'))).toBe(true)
+    expect(validateCustomerOrders(value, validateOrderOps(ops))).toEqual(value)
   })
 
   it('uses the Ops source URL maximum for orders and retains the image limit', () => {

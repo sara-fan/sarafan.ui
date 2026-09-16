@@ -1113,7 +1113,7 @@ describe('session store', () => {
       }))
       if (url === '/api/v1/orders/ops') return Promise.resolve(response(200, orderOps))
       if (url === '/api/v1/orders') return Promise.resolve(response(200, []))
-      if (url === '/api/v1/orders/17') return Promise.resolve(response(200, { id:17 }))
+      if (url === '/api/v1/orders/01234567-17') return Promise.resolve(response(200, { orderNumber:'01234567-17' }))
       throw new Error(`Unexpected request: ${url}`)
     })
     vi.stubGlobal('fetch', fetch)
@@ -1127,15 +1127,17 @@ describe('session store', () => {
     await expect(session.orderRequest('/api/v1/orders', {}, () => true, validateOrders)).resolves.toEqual([])
     expect(validateOrders).toHaveBeenCalledWith([])
     const validateOrder = vi.fn()
-    await expect(session.orderRequest('/api/v1/orders/17', {}, () => true, validateOrder)).resolves.toEqual({ id:17 })
-    expect(validateOrder).toHaveBeenCalledWith({ id:17 })
-    await expect(session.orderRequest('/api/v1/orders/0')).rejects.toMatchObject({
-      type:INTERNAL_PROBLEM_TYPES.invalidInput
-    })
+    await expect(session.orderRequest('/api/v1/orders/01234567-17', {}, () => true, validateOrder)).resolves.toEqual({ orderNumber:'01234567-17' })
+    expect(validateOrder).toHaveBeenCalledWith({ orderNumber:'01234567-17' })
+    for (const segment of ['01234567-17/product', 'preview', '..', '%2e%2e', 'number?query', 'number#hash', 'number\\path']) {
+      await expect(session.orderRequest(`/api/v1/orders/${segment}`)).rejects.toMatchObject({
+        type:INTERNAL_PROBLEM_TYPES.invalidInput
+      })
+    }
 
     const opsCall = fetch.mock.calls.find(([url]) => url === '/api/v1/orders/ops')
     const listCall = fetch.mock.calls.find(([url]) => url === '/api/v1/orders')
-    const detailCall = fetch.mock.calls.find(([url]) => url === '/api/v1/orders/17')
+    const detailCall = fetch.mock.calls.find(([url]) => url === '/api/v1/orders/01234567-17')
     expect(opsCall[1].headers.has('Authorization')).toBe(false)
     expect(listCall[1].headers.get('Authorization')).toBe('Bearer order-token')
     expect(detailCall[1].headers.get('Authorization')).toBe('Bearer order-token')

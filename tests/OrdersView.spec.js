@@ -67,9 +67,9 @@ describe('OrdersView', () => {
 
   it('renders active and historical cards with honest fallbacks and resilient images', async () => {
     h.store.orders.value = [
-      { id:4, orderNumber:'12345678-4', status:310, productName:'Куртка', storeName:'Магазин', imageUrl:'https://images.example/item.jpg', sellerPrice:{ amount:85, currency:840 }, quantity:2, createdAt:'2026-09-14T10:00:00Z' },
-      { id:3, orderNumber:'12345678-3', status:0, productName:'', storeName:null, imageUrl:null, sellerPrice:null, quantity:11, createdAt:'2026-09-13T10:00:00Z' },
-      { id:2, orderNumber:'12345678-2', status:400, productName:'Сумка', storeName:'Бутик', imageUrl:'https://images.example/history.jpg', sellerPrice:{ amount:10, currency:978 }, quantity:1, createdAt:'2026-09-12T10:00:00Z' }
+      { orderNumber:'12345678-4', status:310, productName:'Куртка', storeName:'Магазин', imageUrl:'https://images.example/item.jpg', sellerPrice:{ amount:85, currency:840 }, quantity:2, createdAt:'2026-09-14T10:00:00Z' },
+      { orderNumber:'12345678-3', status:0, productName:'', storeName:null, imageUrl:null, sellerPrice:null, quantity:11, createdAt:'2026-09-13T10:00:00Z' },
+      { orderNumber:'12345678-2', status:400, productName:'Сумка', storeName:'Бутик', imageUrl:'https://images.example/history.jpg', sellerPrice:{ amount:10, currency:978 }, quantity:1, createdAt:'2026-09-12T10:00:00Z' }
     ]
     const { router, wrapper } = await mountView()
     await flushPromises()
@@ -105,7 +105,7 @@ describe('OrdersView', () => {
 
     await wrapper.findAll('.order-card')[2].trigger('click')
     await flushPromises()
-    expect(router.currentRoute.value).toMatchObject({ name:'order-details', params:{ orderId:'2' } })
+    expect(router.currentRoute.value).toMatchObject({ name:'order-details', params:{ orderNumber:'12345678-2' } })
   })
 
   it('shows a created-order notice once and reloads the owner-scoped list', async () => {
@@ -135,7 +135,7 @@ describe('OrdersView', () => {
     h.store.load
       .mockRejectedValueOnce(createInternalProblem('networkUnavailable'))
       .mockImplementationOnce(async () => {
-        h.store.orders.value = [{ id:1, orderNumber:'12345678-1', status:500, productName:null, storeName:null, imageUrl:null, sellerPrice:null, quantity:4, createdAt:'2026-09-11T10:00:00Z' }]
+        h.store.orders.value = [{ orderNumber:'12345678-1', status:500, productName:null, storeName:null, imageUrl:null, sellerPrice:null, quantity:4, createdAt:'2026-09-11T10:00:00Z' }]
         return true
       })
     const { wrapper } = await mountView()
@@ -154,7 +154,6 @@ describe('OrdersView', () => {
   it('uses safe presentation defaults for added statuses and Russian count boundaries', async () => {
     statusItems.set(999, { value:999, name:'Новый этап', routeAlias:'renamed_stage', upperStatusName:'Новый этап', upperStatusRouteAlias:'renamed_group', isTerminal:false, progressPercent:63 })
     h.store.orders.value = Array.from({ length:11 }, (_, index) => ({
-      id:20 - index,
       orderNumber:`12345678-${20 - index}`,
       status:999,
       productName:'Товар',
@@ -178,7 +177,7 @@ describe('OrdersView', () => {
 
   it('clears prior cards and reloads when the customer identity changes', async () => {
     h.store.orders.value = [
-      { id:1, orderNumber:'12345678-1', status:0, productName:'Старый заказ', storeName:null, imageUrl:null, sellerPrice:null, quantity:1, createdAt:'2026-09-14T10:00:00Z' }
+      { orderNumber:'12345678-1', status:0, productName:'Старый заказ', storeName:null, imageUrl:null, sellerPrice:null, quantity:1, createdAt:'2026-09-14T10:00:00Z' }
     ]
     const { wrapper } = await mountView()
     await flushPromises()
