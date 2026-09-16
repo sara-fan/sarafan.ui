@@ -3,6 +3,7 @@
 // All rights reserved.
 // This file is a part of the Sarafan application
 
+import { useValidationFocus, validationFields } from '../validationFocus.js'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
@@ -27,6 +28,8 @@ import { showOrderCreated } from '../stores/orderNotices.js'
 import { validateCreatedOrder, validateOrderOps, validateProductPreview } from '../stores/orders.js'
 import { useProductDraft } from '../stores/productDraft.js'
 import { useSession } from '../stores/session.js'
+
+const focusRoot = ref(null)
 
 const router = useRouter()
 const session = useSession()
@@ -193,7 +196,7 @@ function updateAuthentication(open) {
   if (!open && draft.value?.resumeMode === 'authentication') drafts.clearResume()
 }
 
-async function authenticated() {
+async function authenticatedAction() {
   authOpen.value = false
   drafts.clearResume()
   await submitAuthenticated()
@@ -270,7 +273,7 @@ async function submitAuthenticated() {
   }
 }
 
-async function submit() {
+async function submitAction() {
   if (!currentPayload() || busy.value) return
   drafts.ensureIdempotencyKey()
   if (!session.customer.value) {
@@ -338,10 +341,18 @@ onBeforeUnmount(() => {
   submissionOperation++
   releaseConsentProblemOwnership()
 })
+function submit(...args) { return focusAfter(() => submitAction(...args), () => [...validationFields(problem.value), ...(attempted.value && ops.value ? Object.keys(localErrors.value) : [])]) }
+
+function authenticated(...args) { return focusAfter(() => authenticatedAction(...args), () => [...validationFields(problem.value), ...(attempted.value && ops.value ? Object.keys(localErrors.value) : [])]) }
+
+const focusAfter = useValidationFocus(focusRoot, { context:() => session.customer.value?.id, active:() => Boolean(draft.value) && !authOpen.value, ready:() => !busy.value })
 </script>
 
 <template>
-  <main class="page-container product-view">
+  <main
+    ref="focusRoot"
+    class="page-container product-view"
+  >
     <header class="page-heading product-heading">
       <div>
         <button

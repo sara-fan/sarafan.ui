@@ -52,7 +52,7 @@ function deferred() {
 function mountView() {
   const router = createAppRouter(createMemoryHistory())
   router.push('/profile')
-  mountedWrapper = mount(ProfileView, { global: { plugins: [createSarafanVuetify(), router] } })
+  mountedWrapper = mount(ProfileView, { attachTo:document.body, global: { plugins: [createSarafanVuetify(), router] } })
   return mountedWrapper
 }
 
@@ -81,6 +81,21 @@ describe('ProfileView', () => {
     mountedWrapper = null
     vi.unstubAllGlobals()
     globalThis.URL = originalUrl
+  })
+
+  it.each(['field', 'mixed', 'service', 'hidden'])('keeps the correct presentation owner for a %s photo problem', async scenario => {
+    const customer = customerDto({ id:15, phone:'+79990000015', state:0, hasPhoto:false, profile:{} })
+    vi.stubGlobal('fetch', vi.fn(url => Promise.resolve(opsResponse(url) || sessionResponse(customer))))
+    await useSession().verifyCode({ phone:customer.phone, code:'1111' })
+    const wrapper = mountView()
+    await flushPromises()
+    if (scenario !== 'hidden') await startEditing(wrapper)
+    wrapper.vm.$.setupState.problem = createInternalProblem(scenario === 'service' ? 'serviceUnavailable' : 'invalidInput', {
+      errors:{ photo:['Проверьте фото'], ...(scenario === 'mixed' ? { other:['Другая ошибка'] } : {}) }
+    })
+    await flushPromises()
+    expect(wrapper.find('[role="alert"]').exists()).toBe(scenario !== 'field')
+    expect(wrapper.find('#profile-photo-error').exists()).toBe(['field', 'mixed'].includes(scenario))
   })
 
   it('loads, saves, replaces, removes, and presents customer profile data', async () => {
@@ -277,11 +292,21 @@ describe('ProfileView', () => {
     await setFile(fileInput, null)
     await setFile(fileInput, new globalThis.File(['text'], 'bad.txt', { type: 'text/plain' }))
     expect(wrapper.text()).toContain('Выберите JPEG')
+    expect(wrapper.get('[data-validation-field="photo"]').attributes('aria-describedby')).toBe('profile-photo-error')
+    expect(wrapper.get('#profile-photo-error').text()).toContain('Выберите JPEG')
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+    expect(document.activeElement).toBe(wrapper.get('[data-validation-field="photo"]').element)
     await setFile(fileInput, new globalThis.File([new Uint8Array(5 * 1024 * 1024 + 1)], 'large.png', { type: 'image/png' }))
     expect(wrapper.text()).toContain('не более 5 МБ')
     await setFile(fileInput, new globalThis.File(['png'], 'valid.png', { type: 'image/png' }))
     await vi.waitFor(() => expect(wrapper.text()).toContain('Фото не загружено'))
+    expect(wrapper.get('#profile-photo-error').text()).toBe('Фото не загружено')
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+    expect(wrapper.get('[data-validation-field="photo"]').attributes('aria-invalid')).toBe('true')
+    await flushPromises()
+    expect(document.activeElement).toBe(wrapper.get('[data-validation-field="photo"]').element)
     await wrapper.get('.photo-remove').trigger('click')
     await vi.waitFor(() => expect(wrapper.text()).toContain('Фото не удалено'))
+    expect(wrapper.get('[role="alert"]').text()).toContain('Фото не удалено')
   })
 })

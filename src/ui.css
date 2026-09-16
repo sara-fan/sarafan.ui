@@ -157,9 +157,9 @@
 .ui-field__control:focus { border-color: var(--sarafan-accent); background: var(--sarafan-paper); box-shadow: 0 0 0 4px color-mix(in srgb, var(--sarafan-accent) 16%, transparent); }
 .ui-field__control--multiline { min-height: 92px; height: auto; resize: vertical; }
 .ui-field--error .ui-field__control { border-color: var(--sarafan-danger); }
-.ui-field--readonly .ui-field__control { background: var(--sarafan-soft); color: var(--sarafan-muted); }
+.ui-field--readonly .ui-field__control { background: var(--sarafan-soft); color: var(--sarafan-ink); }
 .ui-field--disabled { color: var(--sarafan-disabled-text); }
-.ui-field--disabled .ui-field__control { border-color: var(--sarafan-disabled-bg); background: var(--sarafan-disabled-bg); color: var(--sarafan-disabled-text); }
+.ui-field--disabled .ui-field__control { border-color: var(--sarafan-disabled-bg); background: var(--sarafan-disabled-bg); color: var(--sarafan-ink); -webkit-text-fill-color: var(--sarafan-ink); opacity: 1; }
 .ui-field__message { min-height: 17px; color: var(--sarafan-muted); font: 400 13px/17px var(--sarafan-font-ui); }
 .ui-field__message--error { color: var(--sarafan-danger); }
 

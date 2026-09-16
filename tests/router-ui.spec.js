@@ -125,9 +125,11 @@ describe('router and page shells', () => {
 
   it('keeps empty and invalid product addresses on Home with exact SCN-03 copy', async () => {
     const router = await routerAt()
-    const wrapper = mount(HomeView, { global:{ plugins:[router] } })
+    const wrapper = mount(HomeView, { attachTo:document.body, global:{ plugins:[router] } })
     await wrapper.get('form').trigger('submit')
     expect(wrapper.get('[role="alert"]').text()).toBe('Вставьте ссылку на товар')
+    await flushPromises()
+    expect(document.activeElement).toBe(wrapper.get('[name="sourceUrl"]').element)
     expect(router.currentRoute.value.name).toBe('home')
 
     await wrapper.get('input[inputmode="url"]').setValue('javascript:alert(1)')
@@ -151,6 +153,7 @@ describe('router and page shells', () => {
     await flushPromises()
     expect(h.session.orderRequest).toHaveBeenCalledOnce()
     expect(router.currentRoute.value.name).toBe('product')
+    wrapper.unmount()
   })
 
   it('keeps an order Ops failure recoverable on Home', async () => {

@@ -27,12 +27,12 @@ describe('order product rules', () => {
   })
 
   it.each([
-    ['1', 100n], ['1.2', 120n], ['1,23', 123n], ['0001.00', 100n]
+    ['1', 100n], ['1.2', 120n], ['1,23', 123n], ['0001.00', 100n], ['58.', 5800n], ['58,', 5800n]
   ])('parses cents exactly from %s', (value, expected) => {
     expect(priceCents(value)).toBe(expected)
   })
 
-  it.each(['', '-1', '1.234', '1,2.3', 'one'])('rejects malformed decimal %s', value => {
+  it.each(['', '-1', '1.234', '1,2.3', 'one', '.', ',', '58..', '58,,'])('rejects malformed decimal %s', value => {
     expect(priceCents(value)).toBeNull()
   })
 
@@ -140,7 +140,19 @@ describe('order product rules', () => {
     }, productLimits).sellerPrice).toEqual([productLimits.valueLimit.exceededMessage])
     expect(productFormErrors({
       storeName:'', productName:'Товар', sellerPrice:'-1', quantity:'1', color:'', size:'', comment:''
-    }, productLimits).sellerPrice[0]).toContain('положительную цену')
+    }, productLimits).sellerPrice[0]).toBe('Неправильная цена')
+  })
+
+  it.each(['58.123', '58,123', '0.001', '12.3456'])('explains excess decimal places in %s', sellerPrice => {
+    expect(productFormErrors({
+      storeName:'', productName:'Товар', sellerPrice, quantity:'1', color:'', size:'', comment:''
+    }, productLimits).sellerPrice).toEqual(['Не больше двух знаков после запятой'])
+  })
+
+  it.each(['', ' ', '0', '-1', 'one', '.', ',', '58..', '1,2.3', String(productLimits.maximumUnitPrice + 1)])('reports invalid price %s', sellerPrice => {
+    expect(productFormErrors({
+      storeName:'', productName:'Товар', sellerPrice, quantity:'1', color:'', size:'', comment:''
+    }, productLimits).sellerPrice).toEqual(['Неправильная цена'])
   })
 
   it('builds the trimmed Core payload with a numeric price', () => {

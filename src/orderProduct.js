@@ -95,7 +95,7 @@ export function previewPrefill(product, limits) {
 // Parse decimal input into integer cents, without binary floating-point comparisons.
 export function priceCents(value) {
   const raw = String(value).trim().replace(',', '.')
-  if (!/^\d+(?:\.\d{1,2})?$/u.test(raw)) return null
+  if (!/^\d+(?:\.\d{0,2})?$/u.test(raw)) return null
   const [whole, fraction = ''] = raw.split('.')
   return BigInt(whole) * 100n + BigInt(fraction.padEnd(2, '0'))
 }
@@ -133,9 +133,11 @@ export function productFormErrors(form, limits) {
 
   const rawPrice = form.sellerPrice.trim()
   const cents = priceCents(rawPrice)
-  if (!rawPrice) errors.sellerPrice = ['Укажите цену товара.']
+  if (/^\d+[.,]\d{3,}$/u.test(rawPrice)) {
+    errors.sellerPrice = ['Не больше двух знаков после запятой']
+  }
   else if (cents === null || cents <= 0n || cents > priceCents(limits.maximumUnitPrice)) {
-    errors.sellerPrice = ['Укажите положительную цену в USD, не более двух знаков после запятой.']
+    errors.sellerPrice = ['Неправильная цена']
   } else if (!errors.quantity && limits.valueLimit.available
     && cents * BigInt(quantity) > priceCents(limits.valueLimit.maximumTotalUsd)) {
     errors.sellerPrice = [limits.valueLimit.exceededMessage]

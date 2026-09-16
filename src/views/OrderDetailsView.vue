@@ -11,6 +11,7 @@ import UiButton from '../components/ui/UiButton.vue'
 import UiField from '../components/ui/UiField.vue'
 import { createInternalProblem, normalizeProblem, presentProblem, presentProblemTitle } from '../errors/problem.js'
 import { formatMoneyAmount } from '../moneyFormatting.js'
+import { isOrderNumber } from '../orderNumber.js'
 import { validateCustomerOrder, validateOrderOps } from '../stores/orders.js'
 import { useSession } from '../stores/session.js'
 
@@ -31,7 +32,13 @@ const sourceHost = computed(() => new globalThis.URL(order.value.sourceUrl).host
 
 function orderNumber() {
   const value = String(route.params.orderNumber ?? '')
-  return value.trim() && value.length <= 64 ? value : null
+  const rawSegment = route.path.startsWith('/orders/') ? route.path.slice('/orders/'.length) : ''
+  try {
+    decodeURIComponent(rawSegment)
+  } catch {
+    return null
+  }
+  return isOrderNumber(value) ? value : null
 }
 function display(value) { return value?.trim() || 'Не указано' }
 function createdAt(value) {
@@ -216,14 +223,15 @@ onBeforeUnmount(() => {
             label="Размер"
             readonly
           />
-          <UiField
-            :model-value="display(product.comment)"
-            label="Комментарий"
-            readonly
-            multiline
-            :rows="4"
-            class="order-review-fields__wide"
-          />
+          <div class="order-review-fields__wide">
+            <UiField
+              :model-value="display(product.comment)"
+              label="Комментарий"
+              readonly
+              multiline
+              :rows="4"
+            />
+          </div>
         </div>
       </section>
 

@@ -4,6 +4,7 @@
 
 import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { createMemoryHistory, createRouter } from 'vue-router'
 
 import PhoneAuthDialog from '../src/components/PhoneAuthDialog.vue'
 import { createSarafanVuetify } from '../src/plugins/vuetify.js'
@@ -56,12 +57,19 @@ function legalDocument(url) {
   }
 }
 
-function mountView(attachTo, modelValue = true) {
+function testRouter() {
+  return createRouter({
+    history:createMemoryHistory(),
+    routes:[{ path:'/:pathMatch(.*)*', component:{ template:'<main />' } }]
+  })
+}
+
+function mountView(attachTo, modelValue = true, router = testRouter()) {
   return mount(PhoneAuthDialog, {
     props: { modelValue },
     ...(attachTo ? { attachTo } : {}),
     global: {
-      plugins: [createSarafanVuetify()],
+      plugins: [createSarafanVuetify(), router],
       stubs: {
         RouterLink: { template:'<a><slot /></a>' },
         VDialog: { props:['modelValue'], template:'<section v-if="modelValue"><slot /></section>' }
@@ -93,6 +101,100 @@ describe('PhoneAuthDialog', () => {
   })
 
   afterEach(() => vi.unstubAllGlobals())
+
+  it('explains a short phone number, retains its value and restores focus after re-enabling the field', async () => {
+    const detail = 'Номер слишком короткий. Введите 11 цифр, начиная с 8 или +7.'
+    const fetch = vi.fn(url => {
+      const standard = standardResponse(url)
+      if (standard) return Promise.resolve(standard)
+      if (url === '/api/v1/auth/phone/resolve') return Promise.resolve(problemResponse(400, 'invalid-phone', {
+        title:'Некорректный номер телефона', detail
+      }))
+      throw new Error(`Unexpected request: ${url}`)
+    })
+    vi.stubGlobal('fetch', fetch)
+    const wrapper = mountView(globalThis.document.body)
+    await wrapper.get('input[name="phone"]').setValue('892100011')
+    wrapper.get('button[type="submit"]').element.focus()
+    await wrapper.get('.auth-form').trigger('submit')
+    await flushPromises()
+
+    expect(wrapper.get('[role="alert"]').text()).toContain(detail)
+    expect(wrapper.get('input[name="phone"]').element.value).toBe('892100011')
+    expect(wrapper.get('input[name="phone"]').element.disabled).toBe(false)
+    expect(globalThis.document.activeElement).toBe(wrapper.get('input[name="phone"]').element)
+    expect(wrapper.find('input[name="code"]').exists()).toBe(false)
+    expect(fetch.mock.calls.some(([url]) => url.endsWith('/code/request'))).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('focuses the phone field after an empty submission', async () => {
+    const wrapper = mountView(globalThis.document.body)
+    wrapper.get('button[type="submit"]').element.focus()
+    await wrapper.get('.auth-form').trigger('submit')
+    await flushPromises()
+    expect(globalThis.document.activeElement).toBe(wrapper.get('input[name="phone"]').element)
+    wrapper.unmount()
+  })
+
+  it('does not restore phone focus for a failure after the dialog closes', async () => {
+    const pending = deferred()
+    vi.stubGlobal('fetch', vi.fn(url => {
+      const standard = standardResponse(url)
+      if (standard) return Promise.resolve(standard)
+      if (url === '/api/v1/auth/phone/resolve') return pending.promise
+      throw new Error(`Unexpected request: ${url}`)
+    }))
+    const wrapper = mountView(globalThis.document.body)
+    const phoneInput = wrapper.get('input[name="phone"]')
+    const focus = vi.spyOn(phoneInput.element, 'focus')
+    await phoneInput.setValue('892100011')
+    await wrapper.get('.auth-form').trigger('submit')
+    await flushPromises()
+    await wrapper.setProps({ modelValue:false })
+    pending.resolve(problemResponse(400, 'invalid-phone'))
+    await flushPromises()
+    expect(focus).not.toHaveBeenCalled()
+    focus.mockRestore()
+    wrapper.unmount()
+  })
+
+  it.each([false, true])('discards pre-navigation focus work (return to origin: %s) and focuses a new attempt', async returnToOrigin => {
+    const router = testRouter()
+    await router.push('/')
+    const pending = deferred()
+    const resolvePhone = vi.fn().mockReturnValueOnce(pending.promise)
+      .mockImplementation(() => Promise.resolve(problemResponse(400, 'invalid-phone')))
+    vi.stubGlobal('fetch', vi.fn(url => {
+      const standard = standardResponse(url)
+      if (standard) return Promise.resolve(standard)
+      if (url === '/api/v1/auth/phone/resolve') return resolvePhone()
+      throw new Error(`Unexpected request: ${url}`)
+    }))
+    const wrapper = mountView(globalThis.document.body, true, router)
+    const phoneInput = wrapper.get('input[name="phone"]')
+    const focus = vi.spyOn(phoneInput.element, 'focus')
+    try {
+      await phoneInput.setValue('892100011')
+      await wrapper.get('.auth-form').trigger('submit')
+      await flushPromises()
+      expect(resolvePhone).toHaveBeenCalledTimes(1)
+      await router.push('/another-page')
+      if (returnToOrigin) await router.push('/')
+      pending.resolve(problemResponse(400, 'invalid-phone'))
+      await flushPromises()
+      expect(wrapper.props('modelValue')).toBe(true)
+      expect(phoneInput.element.disabled).toBe(false)
+      expect(focus).not.toHaveBeenCalled()
+      await wrapper.get('.auth-form').trigger('submit')
+      await flushPromises()
+      expect(focus).toHaveBeenCalledTimes(1)
+      expect(globalThis.document.activeElement).toBe(phoneInput.element)
+    } finally {
+      focus.mockRestore()
+      wrapper.unmount()
+    }
+  })
 
   it('uses the direct code flow for an active customer without exposing a mode selector', async () => {
     const fetch = vi.fn((url, options) => {
@@ -791,7 +893,7 @@ describe('PhoneAuthDialog', () => {
       throw new Error(`Unexpected request: ${url}`)
     })
     vi.stubGlobal('fetch', fetch)
-    const wrapper = mountView()
+    const wrapper = mountView(document.body)
 
     await wrapper.get('input[name="phone"]').setValue('+79991234567')
     await wrapper.get('.auth-form').trigger('submit')
@@ -799,12 +901,15 @@ describe('PhoneAuthDialog', () => {
     await wrapper.get('.auth-form').trigger('submit')
     await flushPromises()
 
+    await flushPromises()
+    expect(document.activeElement).toBe(wrapper.get('#authentication-terms').element)
     expect(wrapper.get('#authentication-terms-error').text()).toContain('Примите условия')
     expect(wrapper.get('#authentication-personal-error').text()).toContain('Дайте согласие')
     expect(wrapper.get('.form-error').text()).toContain('Подтвердите необходимые документы')
     expect(wrapper.get('#authentication-terms').attributes('aria-describedby')).toContain('authentication-terms-error')
     expect(wrapper.get('#authentication-personal-data').attributes('aria-describedby')).toContain('authentication-personal-error')
     expect(fetch.mock.calls.some(([url]) => url.endsWith('/code/request'))).toBe(false)
+    wrapper.unmount()
   })
 
   it('presents a failed requirements request and preserves selections and its retry key', async () => {
