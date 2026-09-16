@@ -24,6 +24,14 @@ function protocolFailure(action) {
 }
 
 describe('order store', () => {
+  it.each([123, 0, null, undefined, 'legacy'])('rejects a top-level internal id (%s) in all customer order responses', id => {
+    const catalogue = validateOrderOps(ops)
+    const value = completeOrder({ id })
+    protocolFailure(() => validateCustomerOrders([{ ...orders[0], id }], catalogue))
+    protocolFailure(() => validateCustomerOrder(value, catalogue, value.orderNumber))
+    protocolFailure(() => validateCreatedOrder(value, catalogue, { sourceUrl:value.sourceUrl }))
+  })
+
   it('validates the manual-review preview contract', () => {
     const validatedOps = validateOrderOps(ops)
     expect(validateProductPreview({ sourceUrl:'https://shop.example.com/item', outcome:'manual_review', product:null }, validatedOps))
@@ -292,6 +300,12 @@ describe('order store', () => {
     const value = orders.map((order, index) => ({ ...order, orderNumber:`Заказ / ${index + 1}` }))
     expect(validateCustomerOrders(value, validateOrderOps(ops)).map(order => order.orderNumber))
       .toEqual(['Заказ / 1', 'Заказ / 2'])
+  })
+
+  it.each(['ops', 'OPS', 'preview', 'Preview', '.', '..'])('rejects reserved number %s in list and detail DTOs', orderNumber => {
+    const catalogue = validateOrderOps(ops)
+    protocolFailure(() => validateCustomerOrders([{ ...orders[0], orderNumber }], catalogue))
+    protocolFailure(() => validateCustomerOrder(completeOrder({ orderNumber }), catalogue, orderNumber))
   })
 
   it('preserves server ordering for equal creation times without internal IDs', () => {

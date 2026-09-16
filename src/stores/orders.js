@@ -3,6 +3,7 @@
 // This file is a part of the Sarafan application
 
 import { readonly, ref } from 'vue'
+import { isOrderNumber } from '../orderNumber.js'
 
 import { isIsoDate, isRfc3339DateTime } from '../api/validation.js'
 import { createInternalProblem } from '../errors/problem.js'
@@ -99,7 +100,7 @@ function validateSellerPrice(value, currencyValues, limits) {
 }
 
 function validateOrderIdentityAndProduct(item, statusValues, currencyValues, limits, sourceUrlMaximumLength) {
-  if (!item || !validText(item.orderNumber, 64)
+  if (!item || Object.hasOwn(item, 'id') || !isOrderNumber(item.orderNumber)
     || !Number.isInteger(item.status) || !statusValues.has(item.status)
     || !validHttpUrl(item.sourceUrl, sourceUrlMaximumLength) || !validNullableText(item.productName, limits.productNameMaximumLength)
     || !validNullableText(item.storeName, limits.storeNameMaximumLength)

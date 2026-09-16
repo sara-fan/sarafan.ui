@@ -3,8 +3,9 @@
 // All rights reserved.
 // This file is a part of the Sarafan application
 
+import { useValidationFocus, validationFields } from '../validationFocus.js'
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
-import { RouterLink } from 'vue-router'
+import { RouterLink, useRoute } from 'vue-router'
 
 import { BRAND_ICON_URL } from '../branding.js'
 import {
@@ -27,6 +28,7 @@ import UiSelectionControl from './ui/UiSelectionControl.vue'
 const props = defineProps({ modelValue: { type: Boolean, default: true } })
 const emit = defineEmits(['update:modelValue', 'authenticated'])
 const session = useSession()
+const route = useRoute()
 const consentStore = useConsents()
 const step = ref('phone')
 const phone = ref('')
@@ -39,6 +41,7 @@ const termsAccepted = ref(false)
 const personalDataAccepted = ref(false)
 const busy = ref(false)
 const problem = ref(null)
+const focusRoot = ref(null)
 const codeField = ref(null)
 let consentRetryFingerprint = ''
 let consentRetryKey = ''
@@ -275,12 +278,12 @@ async function restartFlow(value, operation) {
   }
 }
 
-async function submitPhone() {
+async function submitPhoneAction() {
   const normalizedPhone = phone.value.trim()
   if (!normalizedPhone) {
     problem.value = createInternalProblem('invalidInput', {
-      detail: 'Введите номер телефона',
-      errors: { phone: ['Введите номер телефона'] }
+      detail: 'Введите номер телефона.',
+      errors: { phone: ['Введите номер телефона.'] }
     })
     return
   }
@@ -299,7 +302,7 @@ async function submitPhone() {
   }
 }
 
-async function submitRequirements() {
+async function submitRequirementsAction() {
   const errors = {}
   if (requiresAgreement.value && !termsAccepted.value) errors.termsAccepted = ['Примите условия использования сервиса']
   if (requiresPersonalData.value && !personalDataAccepted.value) {
@@ -332,7 +335,7 @@ async function submitRequirements() {
   }
 }
 
-async function submitCode() {
+async function submitCodeAction() {
   const normalizedCode = code.value.trim()
   if (!normalizedCode) {
     problem.value = createInternalProblem('invalidInput', {
@@ -374,6 +377,24 @@ async function submitCode() {
     if (currentOperation(operation)) busy.value = false
   }
 }
+function submitPhone(...args) { return focusAfter(() => submitPhoneAction(...args), () => validationFields(problem.value, authenticationFocusOptions)) }
+
+function submitRequirements(...args) { return focusAfter(() => submitRequirementsAction(...args), () => validationFields(problem.value, authenticationFocusOptions)) }
+
+function submitCode(...args) { return focusAfter(() => submitCodeAction(...args), () => validationFields(problem.value, authenticationFocusOptions)) }
+
+const authenticationFocusOptions = {
+  types:{
+    'https://sarafan.sw.consulting/problems/invalid-phone':['phone'],
+    'https://sarafan.sw.consulting/problems/invalid-code':['code']
+  },
+  aliases:{ personalDataConsent:'personalDataConsent' }
+}
+const focusAfter = useValidationFocus(focusRoot, {
+  context:() => [props.modelValue, session.customer.value?.id, route.fullPath],
+  active:() => props.modelValue,
+  ready:() => !busy.value
+})
 </script>
 
 <template>
@@ -395,6 +416,7 @@ async function submitCode() {
 
     <form
       v-if="step === 'phone'"
+      ref="focusRoot"
       class="auth-form"
       @submit.prevent="submitPhone"
     >
@@ -428,6 +450,7 @@ async function submitCode() {
 
     <form
       v-else-if="step === 'requirements'"
+      ref="focusRoot"
       class="auth-form"
       @submit.prevent="submitRequirements"
     >
@@ -445,6 +468,7 @@ async function submitCode() {
           <UiSelectionControl
             id="authentication-terms"
             :model-value="termsAccepted"
+            name="termsAccepted"
             :disabled="busy"
             :error="termsErrors.length > 0"
             :aria-describedby="termsDescribedBy"
@@ -478,6 +502,7 @@ async function submitCode() {
           <UiSelectionControl
             id="authentication-personal-data"
             :model-value="personalDataAccepted"
+            name="personalDataConsent"
             :disabled="busy"
             :error="personalDataErrors.length > 0"
             :aria-describedby="personalDataDescribedBy"
@@ -523,6 +548,7 @@ async function submitCode() {
 
     <form
       v-else
+      ref="focusRoot"
       class="auth-form"
       @submit.prevent="submitCode"
     >

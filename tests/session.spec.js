@@ -1129,7 +1129,7 @@ describe('session store', () => {
     const validateOrder = vi.fn()
     await expect(session.orderRequest('/api/v1/orders/01234567-17', {}, () => true, validateOrder)).resolves.toEqual({ orderNumber:'01234567-17' })
     expect(validateOrder).toHaveBeenCalledWith({ orderNumber:'01234567-17' })
-    for (const segment of ['01234567-17/product', 'preview', '..', '%2e%2e', 'number?query', 'number#hash', 'number\\path']) {
+    for (const segment of ['01234567-17/product', 'preview', 'PREVIEW', 'OPS', '%6f%70%73', '%70review', '..', '%2e%2e', '%FF', '%20', 'x'.repeat(65), 'number?query', 'number#hash', 'number\\path']) {
       await expect(session.orderRequest(`/api/v1/orders/${segment}`)).rejects.toMatchObject({
         type:INTERNAL_PROBLEM_TYPES.invalidInput
       })

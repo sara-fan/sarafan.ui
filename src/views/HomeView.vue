@@ -3,6 +3,7 @@
 // All rights reserved.
 // This file is a part of the Sarafan application
 
+import { useValidationFocus, validationFields } from '../validationFocus.js'
 import { computed, onBeforeUnmount, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
@@ -15,6 +16,8 @@ import { normalizeProductAddress } from '../productAddress.js'
 import { validateOrderOps } from '../stores/orders.js'
 import { useProductDraft } from '../stores/productDraft.js'
 import { useSession } from '../stores/session.js'
+
+const focusRoot = ref(null)
 
 const router = useRouter()
 const session = useSession()
@@ -41,7 +44,7 @@ async function loadOperations(ownOperation) {
   return operations
 }
 
-async function begin() {
+async function beginAction() {
   if (loading.value) return
   sourceProblem.value = ''
   problem.value = null
@@ -75,6 +78,9 @@ onBeforeUnmount(() => {
   mounted = false
   ++operation
 })
+function begin(...args) { return focusAfter(() => beginAction(...args), () => sourceProblem.value ? ['sourceUrl'] : validationFields(problem.value)) }
+
+const focusAfter = useValidationFocus(focusRoot, { context:() => null, ready:() => !loading.value })
 </script>
 
 <template>
@@ -101,12 +107,14 @@ onBeforeUnmount(() => {
         {{ error }}
       </UiAlert>
       <form
+        ref="focusRoot"
         class="product-entry"
         novalidate
         @submit.prevent="begin"
       >
         <UiField
           v-model="sourceUrl"
+          name="sourceUrl"
           label="Ссылка на товар"
           type="text"
           placeholder="https://store.com/product"

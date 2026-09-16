@@ -315,6 +315,41 @@ it('shows personal-data and withdrawal failures without losing consent choices o
   expect(wrapper.find('.consent-page__panel--personal').findComponent(LegalDocumentReader).exists()).toBe(false)
   expect(wrapper.text()).toContain('Документ о согласии на обработку персональных данных пока не действует.')
 })
+it.each(['personalDataConsent', 'personalDataConsent.documentId', 'decision'])('associates %s errors with the consent checkbox and clears them on success', async field => {
+  h.session.customer.value = { id:7 }
+  await mountCenter('/consents'); await flushPromises()
+  const checkbox = wrapper.get('input[name="personalDataConsent"]')
+  await checkbox.setValue(true)
+  h.store.grant.mockRejectedValueOnce(createInternalProblem('invalidInput', {
+    errors:{ [field]:['Подтвердите согласие'] }
+  }))
+  await click('Дать согласие')
+  expect(checkbox.element.checked).toBe(true)
+  expect(checkbox.attributes('aria-invalid')).toBe('true')
+  expect(checkbox.attributes('aria-describedby')).toBe('personal-consent-error')
+  expect(wrapper.get('#personal-consent-error').text()).toBe('Подтвердите согласие')
+  expect(wrapper.find('.consent-page__alert').exists()).toBe(false)
+  expect(button('Повторить')).toBeUndefined()
+  await click('Дать согласие')
+  expect(checkbox.attributes('aria-invalid')).toBeUndefined()
+  expect(checkbox.attributes('aria-describedby')).toBeUndefined()
+  expect(wrapper.find('#personal-consent-error').exists()).toBe(false)
+})
+it.each(['mixed', 'service', 'store', 'hidden'])('retains the consent page alert for %s failures', async scenario => {
+  h.session.customer.value = { id:7 }
+  await mountCenter('/consents'); await flushPromises()
+  await wrapper.get('input[name="personalDataConsent"]').setValue(true)
+  h.store.grant.mockRejectedValueOnce(createInternalProblem(scenario === 'service' ? 'serviceUnavailable' : 'invalidInput', {
+    errors:{ personalDataConsent:['Подтвердите согласие'], ...(scenario === 'mixed' ? { other:['Другая ошибка'] } : {}) }
+  }))
+  await click('Дать согласие')
+  if (scenario === 'store') h.store.opsProblem.value = denied()
+  if (scenario === 'hidden') state().personalDocument = null
+  await nextTick()
+  expect(wrapper.find('.consent-page__alert').exists()).toBe(true)
+  expect(button('Повторить')).toBeTruthy()
+})
+
 it('makes immutable and current legal links available without login as routed pages', async () => {
   await mountCenter('/legal/privacy-policy'); await flushPromises()
   expect(h.store.current).toHaveBeenCalledWith(LEGAL_DOCUMENT_KIND.PRIVACY_POLICY)

@@ -3,17 +3,20 @@
 // All rights reserved.
 // This file is a part of the Sarafan application
 
+import { useValidationFocus, validationFields } from '../validationFocus.js'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 
 import { LEGAL_DOCUMENT_KIND, CONSENT_STATUSES, documentNodes, isDocumentId, moscowTime } from '../consentFormatting.js'
 import {
   createInternalProblem,
+  hasOnlyPresentedFieldErrors,
   asServiceUnavailableProblem,
   isServiceUnavailableProblem,
   normalizeProblem,
   presentProblem,
-  presentProblemTitle
+  presentProblemTitle,
+  problemFieldErrors
 } from '../errors/problem.js'
 import { useConsents } from '../stores/consents.js'
 import { useSession } from '../stores/session.js'
@@ -50,6 +53,10 @@ const legalReader = ref(null)
 const personalDocument = ref(null)
 const accepted = ref(false)
 const problem = ref(null)
+const consentErrors = computed(() => [...new Set(Object.keys(problem.value?.errors ?? {})
+  .filter(field => /^(?:personalDataConsent|decision)(?:\.|$)/iu.test(field))
+  .flatMap(field => problemFieldErrors(problem.value, field)))])
+const focusRoot = ref(null)
 const busy = ref(false)
 let documentEpoch = 0
 let personalKey = globalThis.crypto.randomUUID()
@@ -85,10 +92,15 @@ const legalDocumentHasH1 = computed(() => {
   } catch { return false }
 })
 const prioritizedProblem = values => values.find(isServiceUnavailableProblem) || values.find(Boolean) || null
+const consentFieldOwnsProblem = computed(() => personalPage.value && personalDocument.value
+  && status.value?.status !== 'current' && consentErrors.value.length > 0
+  && !isServiceUnavailableProblem(problem.value)
+  && hasOnlyPresentedFieldErrors(problem.value, Object.keys(problem.value.errors)
+    .filter(field => /^(?:personalDataConsent|decision)(?:\.|$)/iu.test(field))))
 const activeProblem = computed(() => {
   if (props.mode === 'legal') return problem.value
   if (props.mode === 'notice') return prioritizedProblem([problem.value, opsProblem.value])
-  return prioritizedProblem([problem.value, personalProblem.value, opsProblem.value])
+  return prioritizedProblem([consentFieldOwnsProblem.value ? null : problem.value, personalProblem.value, opsProblem.value])
 })
 const presentationProblem = computed(() => activeProblem.value && isServiceUnavailableProblem(activeProblem.value)
   ? asServiceUnavailableProblem(activeProblem.value) : activeProblem.value)
@@ -251,7 +263,7 @@ async function openPersonal(isCurrent = alwaysCurrent, preserveChoice = false) {
   await showPersonal(isCurrent, preserveChoice)
 }
 
-async function grant() {
+async function grantAction() {
   if (!accepted.value || !personalDocument.value || !session.customer.value) return
   const succeeded = await perform(async ownsOperation => {
     const signature = JSON.stringify([session.customer.value.id, personalDocument.value.id, personalDocument.value.contentHash])
@@ -414,6 +426,11 @@ onUnmounted(() => {
   globalThis.removeEventListener('focus', visible)
   globalThis.document.removeEventListener('visibilitychange', visible)
 })
+function grant() { return focusAfter(grantAction, () => validationFields(problem.value, { aliases:{ personalDataConsent:'personalDataConsent', decision:'personalDataConsent' } })) }
+const focusAfter = useValidationFocus(focusRoot, {
+  context:() => [session.customer.value?.id, route.fullPath, props.mode, props.section],
+  ready:() => !busy.value
+})
 </script>
 
 <template>
@@ -450,6 +467,7 @@ onUnmounted(() => {
 
   <main
     v-else-if="mode === 'consents'"
+    ref="focusRoot"
     class="page-container consent-page"
   >
     <header class="page-heading consent-page__heading consent-page__heading--personal">
@@ -501,11 +519,21 @@ onUnmounted(() => {
         >
           <UiSelectionControl
             :model-value="accepted"
+            name="personalDataConsent"
+            :error="consentErrors.length > 0"
+            :aria-describedby="consentErrors.length ? 'personal-consent-error' : undefined"
             :disabled="busy"
             @update:model-value="accepted = $event"
           >
             Я даю отдельное согласие на хранение и обработку персональных данных по этому документу
           </UiSelectionControl>
+          <p
+            v-if="consentErrors.length"
+            id="personal-consent-error"
+            class="consent-field-error"
+          >
+            {{ consentErrors.join(' ') }}
+          </p>
           <UiButton
             variant="primary"
             :disabled="busy || !accepted"

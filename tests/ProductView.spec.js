@@ -32,7 +32,7 @@ function created(payload, overrides = {}) {
   })
 }
 
-async function mountView() {
+async function mountView(attachTo) {
   const empty = { template:'<main />' }
   const router = createRouter({
     history:createMemoryHistory(),
@@ -45,6 +45,7 @@ async function mountView() {
   })
   await router.push('/product')
   const wrapper = mount(ProductView, {
+    attachTo,
     global:{
       plugins:[router],
       stubs:{
@@ -138,28 +139,35 @@ describe('ProductView product review', () => {
   })
 
   it('validates quantity and the dynamic total limit before authentication', async () => {
-    const { wrapper } = await mountView()
+    const { wrapper } = await mountView(document.body)
     await wrapper.get('input[name="productName"]').setValue('Товар')
     await wrapper.get('input[name="sellerPrice"]').setValue('300,00')
     await wrapper.get('input[name="quantity"]').setValue('5')
     await wrapper.get('form').trigger('submit')
     expect(wrapper.text()).toContain('Такое количество товара может быть признано коммерческой партией и запрещено к ввозу')
+    await flushPromises()
+    expect(document.activeElement).toBe(wrapper.get('[name="quantity"]').element)
     expect(h.session.createOrder).not.toHaveBeenCalled()
 
     await wrapper.get('input[name="quantity"]').setValue('4')
     await wrapper.get('form').trigger('submit')
     expect(wrapper.text()).toContain(ops.productLimits.valueLimit.exceededMessage)
     expect(wrapper.get('[data-auth-dialog]').attributes('data-open')).toBe('false')
+    await flushPromises()
+    expect(document.activeElement).toBe(wrapper.get('[name="sellerPrice"]').element)
+    wrapper.unmount()
   })
 
-  it('accepts a dot or comma price and submits the full normalized payload after fresh Ops', async () => {
+  it.each([
+    ['16.5', '16,50', 16.5], ['16,5', '16,50', 16.5], ['58.', '58,00', 58], ['58,', '58,00', 58]
+  ])('accepts price %s and submits the full normalized payload after fresh Ops', async (input, formatted, amount) => {
     h.session.customer.value = { id:7 }
     const { router, wrapper } = await mountView()
     await wrapper.get('input[name="storeName"]').setValue(' Amazon ')
     await wrapper.get('input[name="productName"]').setValue(' Термос ')
-    await wrapper.get('input[name="sellerPrice"]').setValue('16.5')
+    await wrapper.get('input[name="sellerPrice"]').setValue(input)
     await wrapper.get('input[name="sellerPrice"]').trigger('blur')
-    expect(wrapper.get('input[name="sellerPrice"]').element.value).toBe('16,50')
+    expect(wrapper.get('input[name="sellerPrice"]').element.value).toBe(formatted)
     await wrapper.get('input[name="quantity"]').setValue('2')
     await wrapper.get('input[name="color"]').setValue(' cherry ')
     await wrapper.get('input[name="size"]').setValue(' 1 л ')
@@ -170,7 +178,7 @@ describe('ProductView product review', () => {
     expect(h.session.createOrder).toHaveBeenCalledWith({
       sourceUrl:'https://shop.example.com/item',
       product:{
-        storeName:'Amazon', productName:'Термос', sellerPrice:{ amount:16.5, currency:840 },
+        storeName:'Amazon', productName:'Термос', sellerPrice:{ amount, currency:840 },
         color:'cherry', size:'1 л'
       },
       quantity:2,

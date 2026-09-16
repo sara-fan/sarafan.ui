@@ -217,9 +217,10 @@ describe('OrderDetailsView', () => {
     expect(h.session.orderRequest).toHaveBeenCalledTimes(5)
   })
 
-  it('rejects an invalid route without making a private request and navigates back', async () => {
-    const { router, wrapper } = await mountAt('/orders/%20')
+  it.each(['%20', 'ops', 'OPS', 'preview', 'Preview', '%6f%70%73'])('rejects invalid route %s before Ops loading and preserves identity', async segment => {
+    const { router, wrapper } = await mountAt(`/orders/${segment}`)
     expect(h.session.orderRequest).not.toHaveBeenCalled()
+    expect(h.session.customer.value).toEqual({ id:7 })
     expect(wrapper.get('[role="alert"]').exists()).toBe(true)
     await wrapper.get('.product-back').trigger('click')
     await flushPromises()

@@ -3,10 +3,13 @@
 // All rights reserved.
 // This file is a part of the Sarafan application
 
+import { useValidationFocus, validationFields } from '../validationFocus.js'
 import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
 
 import {
   createInternalProblem,
+  hasOnlyPresentedFieldErrors,
+  isServiceUnavailableProblem,
   normalizeProblem,
   presentProblem,
   presentProblemTitle,
@@ -17,6 +20,9 @@ import { useSession } from '../stores/session.js'
 import UiAlert from '../components/ui/UiAlert.vue'
 import UiButton from '../components/ui/UiButton.vue'
 import UiField from '../components/ui/UiField.vue'
+
+const photoProblemFields = Object.fromEntries(['invalid-photo-size', 'invalid-photo-type', 'invalid-photo-content'].map(type => [`https://sarafan.sw.consulting/problems/${type}`, ['photo']]))
+const focusRoot = ref(null)
 
 const { customer, deletePhoto, getPhoto, updateProfile, uploadPhoto } = useSession()
 const consents = useConsents()
@@ -34,8 +40,20 @@ const photoInput = ref(null)
 let photoLoadVersion = 0
 
 const profile = computed(() => customer.value?.profile || {})
-const error = computed(() => problem.value ? presentProblem(problem.value) : '')
-const errorTitle = computed(() => presentProblemTitle(problem.value))
+const photoFieldOwnsProblem = computed(() => editing.value && Boolean(photoError.value)
+  && !isServiceUnavailableProblem(problem.value)
+  && (hasOnlyPresentedFieldErrors(problem.value, ['photo'])
+    || Object.hasOwn(photoProblemFields, problem.value.type) && !Object.keys(problem.value.errors ?? {}).length))
+const pageProblem = computed(() => photoFieldOwnsProblem.value ? null : problem.value)
+const error = computed(() => pageProblem.value ? presentProblem(pageProblem.value) : '')
+const errorTitle = computed(() => presentProblemTitle(pageProblem.value))
+const photoError = computed(() => {
+  if (isServiceUnavailableProblem(problem.value)) return ''
+  const messages = problemFieldErrors(problem.value, 'photo')
+  if (messages.length) return messages.join(' ')
+  return validationFields(problem.value, { types:photoProblemFields }).includes('photo')
+    ? presentProblem(problem.value) : ''
+})
 const initials = computed(() => {
   const value = `${profile.value.firstName?.[0] || ''}${profile.value.lastName?.[0] || ''}`.trim()
   return value || 'С'
@@ -81,7 +99,7 @@ function cancelEditing() {
   editing.value = false
 }
 
-async function save() {
+async function saveAction() {
   busy.value = true
   problem.value = null
   saved.value = false
@@ -98,7 +116,7 @@ async function save() {
   }
 }
 
-async function selectPhoto(event) {
+async function selectPhotoAction(event) {
   const file = event.target.files?.[0]
   event.target.value = ''
   if (!file) return
@@ -141,10 +159,21 @@ watch(() => customer.value?.id, async () => {
 }, { immediate: true })
 
 onBeforeUnmount(releasePhoto)
+function save(...args) { return focusAfter(() => saveAction(...args), () => validationFields(problem.value)) }
+
+function selectPhoto(event) {
+  if (!event.target.files?.[0]) return
+  return focusAfter(() => selectPhotoAction(event), () => validationFields(problem.value, { types:photoProblemFields }))
+}
+
+const focusAfter = useValidationFocus(focusRoot, { context:() => customer.value?.id, ready:() => !busy.value })
 </script>
 
 <template>
-  <main class="page-container profile-view">
+  <main
+    ref="focusRoot"
+    class="page-container profile-view"
+  >
     <header class="page-heading profile-heading">
       <div>
         <h1>Профиль</h1>
@@ -186,7 +215,7 @@ onBeforeUnmount(releasePhoto)
       {{ error }}
     </UiAlert>
     <UiAlert
-      v-else-if="saved"
+      v-else-if="saved && !problem"
       tone="success"
     >
       Профиль сохранён
@@ -229,6 +258,7 @@ onBeforeUnmount(releasePhoto)
         <UiField
           v-if="editing"
           v-model="form.email"
+          name="email"
           class="profile-account-panel__email"
           label="Электронная почта"
           type="email"
@@ -251,6 +281,9 @@ onBeforeUnmount(releasePhoto)
           <UiButton
             variant="primary"
             :disabled="busy"
+            data-validation-field="photo"
+            :aria-invalid="Boolean(photoError) || undefined"
+            :aria-describedby="photoError ? 'profile-photo-error' : undefined"
             @click="openPhotoPicker"
           >
             {{ customer?.hasPhoto ? 'Заменить фото' : 'Загрузить фото' }}
@@ -264,6 +297,13 @@ onBeforeUnmount(releasePhoto)
             @change="selectPhoto"
           >
         </div>
+        <p
+          v-if="editing && photoError"
+          id="profile-photo-error"
+          class="ui-field__message ui-field__message--error"
+        >
+          {{ photoError }}
+        </p>
       </section>
 
       <div class="profile-details">
@@ -275,18 +315,21 @@ onBeforeUnmount(releasePhoto)
           >
             <UiField
               v-model="form.firstName"
+              name="firstName"
               label="Имя"
               maxlength="100"
               :errors="fieldErrors('firstName')"
             />
             <UiField
               v-model="form.patronymic"
+              name="patronymic"
               label="Отчество"
               maxlength="100"
               :errors="fieldErrors('patronymic')"
             />
             <UiField
               v-model="form.lastName"
+              name="lastName"
               label="Фамилия"
               maxlength="100"
               :errors="fieldErrors('lastName')"
@@ -313,6 +356,7 @@ onBeforeUnmount(releasePhoto)
           >
             <UiField
               v-model="form.inn"
+              name="inn"
               label="ИНН"
               inputmode="numeric"
               maxlength="12"
@@ -320,18 +364,21 @@ onBeforeUnmount(releasePhoto)
             />
             <UiField
               v-model="form.passportSeries"
+              name="passportSeries"
               label="Серия паспорта"
               maxlength="32"
               :errors="fieldErrors('passportSeries')"
             />
             <UiField
               v-model="form.passportNumber"
+              name="passportNumber"
               label="Номер паспорта"
               maxlength="32"
               :errors="fieldErrors('passportNumber')"
             />
             <UiField
               v-model="form.passportIssueDate"
+              name="passportIssueDate"
               label="Дата выдачи"
               type="date"
               :errors="fieldErrors('passportIssueDate')"
@@ -339,6 +386,7 @@ onBeforeUnmount(releasePhoto)
             <div class="profile-grid__wide">
               <UiField
                 v-model="form.passportIssuedBy"
+                name="passportIssuedBy"
                 label="Кем выдан"
                 multiline
                 :rows="2"
@@ -369,12 +417,14 @@ onBeforeUnmount(releasePhoto)
           >
             <UiField
               v-model="form.postalCode"
+              name="postalCode"
               label="Индекс"
               maxlength="20"
               :errors="fieldErrors('postalCode')"
             />
             <UiField
               v-model="form.city"
+              name="city"
               label="Регион, населённый пункт"
               maxlength="150"
               :errors="fieldErrors('city')"
@@ -382,6 +432,7 @@ onBeforeUnmount(releasePhoto)
             <div class="profile-grid__wide">
               <UiField
                 v-model="form.address"
+                name="address"
                 label="Адрес"
                 multiline
                 :rows="2"
