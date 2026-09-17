@@ -7,6 +7,8 @@ import { useValidationFocus, validationFields } from '../validationFocus.js'
 import { computed, onBeforeUnmount, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
+import FeaturedStores from '../components/FeaturedStores.vue'
+import StoreCatalogueNotice from '../components/StoreCatalogueNotice.vue'
 import PublicInfoBlock from '../components/PublicInfoBlock.vue'
 import UiAlert from '../components/ui/UiAlert.vue'
 import UiButton from '../components/ui/UiButton.vue'
@@ -137,6 +139,9 @@ const focusAfter = useValidationFocus(focusRoot, { context:() => null, ready:() 
         До расчёта нам не нужны ваши контактные данные.
       </p>
     </section>
+
+    <StoreCatalogueNotice class="page-container" />
+    <FeaturedStores />
 
     <section
       class="home-steps"
