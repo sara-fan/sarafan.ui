@@ -3,9 +3,11 @@
 // All rights reserved.
 // This file is a part of the Sarafan application
 
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, provide, ref, watch } from 'vue'
 import { RouterView, useRoute, useRouter } from 'vue-router'
 
+import { createPublicStores, PUBLIC_STORES, storeSort } from './stores/publicStores.js'
+import StoreCatalogueNotice from './components/StoreCatalogueNotice.vue'
 import AppHeader from './components/AppHeader.vue'
 import ConsentCenter from './components/ConsentCenter.vue'
 import PhoneAuthDialog from './components/PhoneAuthDialog.vue'
@@ -17,8 +19,16 @@ import { ACCESS } from './router.js'
 import { useConsents } from './stores/consents.js'
 import { useSession } from './stores/session.js'
 
+const catalogue = createPublicStores()
+provide(PUBLIC_STORES, catalogue)
+const { hasStores } = catalogue
 const route = useRoute()
 const router = useRouter()
+function refreshStores() { return catalogue.refresh(route.name === 'stores' ? storeSort(route.query.sort) : 'recommended', route.name === 'home') }
+function revisitStores() { if (document.visibilityState === 'visible') refreshStores() }
+watch(() => [route.fullPath, route.name], refreshStores, { immediate:true })
+onMounted(() => document.addEventListener('visibilitychange', revisitStores))
+onBeforeUnmount(() => { document.removeEventListener('visibilitychange', revisitStores); catalogue.invalidate() })
 const { customer, logout, restoreProblem, restoreSession, restoring } = useSession()
 const { noticeSuppressed:consentNoticeSuppressed } = useConsents()
 let sessionStarted = false
@@ -66,11 +76,16 @@ onMounted(async () => {
     <AppHeader
       :authenticated="Boolean(customer)"
       :authentication-available="true"
+      :stores-available="hasStores"
       @authenticate="openAuthentication"
       @logout="signOut"
     />
 
     <div class="app-content">
+      <StoreCatalogueNotice
+        v-if="!['home', 'stores'].includes(route.name)"
+        class="page-container"
+      />
       <ConsentCenter
         v-if="!consentRoute"
         :notice-suppressed="restoring || Boolean(restoreProblem) || authOpen || consentNoticeSuppressed"

@@ -5,6 +5,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 
 import ConsentsView from './views/ConsentsView.vue'
+import StoresView from './views/StoresView.vue'
 import HomeView from './views/HomeView.vue'
 import LegalDocumentView from './views/LegalDocumentView.vue'
 import NotFoundView from './views/NotFoundView.vue'
@@ -21,6 +22,7 @@ export const ACCESS = Object.freeze({
 })
 
 export const routes = [
+  { path:'/stores', name:'stores', component:StoresView, meta:{ access:ACCESS.PUBLIC, navigationSection:'stores' } },
   { path: '/', name: 'home', component: HomeView, meta: { access: ACCESS.PUBLIC, navigationSection: 'home' } },
   { path: '/product', name: 'product', component: ProductView, meta: { access: ACCESS.PUBLIC, navigationSection: 'product' } },
   { path: '/orders', name: 'orders', component: OrdersView, meta: { access: ACCESS.CUSTOMER, navigationSection: 'orders' } },
