@@ -2,32 +2,29 @@
 // Copyright (C) 2026 Maxim [maxirmx] Samsonov (www.sw.consulting)
 // All rights reserved.
 // This file is a part of the Sarafan application
+
 import StoreImage from './StoreImage.vue'
-import { storeWebsiteLabel } from '../stores/publicStores.js'
 defineProps({ store:{ type:Object, required:true } })
 </script>
 
 <template>
   <a
-    class="store-card"
+    class="featured-store-row"
     :href="store.officialUrl"
     target="_blank"
     rel="noopener noreferrer"
-    role="listitem"
     :aria-label="`${store.name} — открыть сайт в новой вкладке`"
+    :aria-describedby="`featured-store-description-${store.id}`"
   >
     <StoreImage
-      class="store-card__image"
+      class="featured-store-row__image"
       :name="store.name"
       :logo-url="store.logoUrl"
     />
-    <span class="store-card__identity">
-      <h3>{{ store.name }}</h3>
-      <span
-        class="store-card__website"
-        :title="storeWebsiteLabel(store.officialUrl)"
-      >{{ storeWebsiteLabel(store.officialUrl) }}</span>
-    </span>
-    <span class="store-card__description">{{ store.description }}</span>
+    <span
+      :id="`featured-store-description-${store.id}`"
+      class="featured-store-row__description"
+      :title="store.description"
+    >{{ store.description }}</span>
   </a>
 </template>

@@ -6,7 +6,7 @@
 import { computed, onBeforeUnmount, onMounted, provide, ref, watch } from 'vue'
 import { RouterView, useRoute, useRouter } from 'vue-router'
 
-import { createPublicStores, PUBLIC_STORES, storeSort } from './stores/publicStores.js'
+import { createPublicStores, PUBLIC_STORES, storeSearch, storeSort } from './stores/publicStores.js'
 import StoreCatalogueNotice from './components/StoreCatalogueNotice.vue'
 import AppHeader from './components/AppHeader.vue'
 import ConsentCenter from './components/ConsentCenter.vue'
@@ -24,7 +24,13 @@ provide(PUBLIC_STORES, catalogue)
 const { hasStores } = catalogue
 const route = useRoute()
 const router = useRouter()
-function refreshStores() { return catalogue.refresh(route.name === 'stores' ? storeSort(route.query.sort) : 'recommended', route.name === 'home') }
+function refreshStores() {
+  return catalogue.refresh(
+    route.name === 'stores' ? storeSort(route.query.sort) : 'recommended',
+    route.name === 'stores' ? storeSearch(route.query.search) : '',
+    route.name === 'home'
+  )
+}
 function revisitStores() { if (document.visibilityState === 'visible') refreshStores() }
 watch(() => [route.fullPath, route.name], refreshStores, { immediate:true })
 onMounted(() => document.addEventListener('visibilitychange', revisitStores))

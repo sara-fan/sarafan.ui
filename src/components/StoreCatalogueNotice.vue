@@ -12,8 +12,8 @@ import UiButton from './ui/UiButton.vue'
 const route = useRoute()
 const catalogue = usePublicStores()
 const home = computed(() => route.name === 'home')
-const problem = computed(() => catalogue.full.problem || (home.value && catalogue.featured.problem))
-const busy = computed(() => catalogue.full.loading || (home.value && catalogue.featured.loading))
+const problem = computed(() => catalogue.full.problem || catalogue.availability.problem || (home.value && catalogue.featured.problem))
+const busy = computed(() => catalogue.full.loading || catalogue.availability.loading || (home.value && catalogue.featured.loading))
 </script>
 <template>
   <UiAlert
@@ -24,7 +24,7 @@ const busy = computed(() => catalogue.full.loading || (home.value && catalogue.f
     <UiButton
       :loading="busy"
       variant="secondary"
-      @click="catalogue.refresh(catalogue.full.sort, home)"
+      @click="catalogue.refresh(catalogue.full.sort, catalogue.full.search, home)"
     >
       Повторить загрузку магазинов
     </UiButton>

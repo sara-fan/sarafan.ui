@@ -32,19 +32,25 @@ watch(() => route.fullPath, () => { menuOpen.value = false })
         aria-label="Основная навигация"
       >
         <RouterLink
-          v-if="storesAvailable"
-          :to="{ name: 'stores' }"
+          v-if="route.name !== 'home'"
+          :to="{ name: 'home' }"
         >
-          Магазины
+          Новый заказ
         </RouterLink>
         <RouterLink
-          v-if="authenticated"
+          v-if="authenticated && route.name !== 'orders'"
           :to="{ name: 'orders' }"
         >
           Мои заказы
         </RouterLink>
         <RouterLink
-          v-if="authenticated"
+          v-if="storesAvailable && route.name !== 'stores'"
+          :to="{ name: 'stores' }"
+        >
+          Магазины
+        </RouterLink>
+        <RouterLink
+          v-if="authenticated && route.name !== 'profile'"
           :to="{ name: 'profile' }"
         >
           Профиль
@@ -97,23 +103,26 @@ watch(() => route.fullPath, () => { menuOpen.value = false })
       class="app-header__mobile-nav"
       aria-label="Мобильная навигация"
     >
-      <RouterLink :to="{ name: 'home' }">
-        Главная
-      </RouterLink>
       <RouterLink
-        v-if="storesAvailable"
-        :to="{ name: 'stores' }"
+        v-if="route.name !== 'home'"
+        :to="{ name: 'home' }"
       >
-        Магазины
+        Новый заказ
       </RouterLink>
       <RouterLink
-        v-if="authenticated"
+        v-if="authenticated && route.name !== 'orders'"
         :to="{ name: 'orders' }"
       >
         Мои заказы
       </RouterLink>
       <RouterLink
-        v-if="authenticated"
+        v-if="storesAvailable && route.name !== 'stores'"
+        :to="{ name: 'stores' }"
+      >
+        Магазины
+      </RouterLink>
+      <RouterLink
+        v-if="authenticated && route.name !== 'profile'"
         :to="{ name: 'profile' }"
       >
         Профиль
