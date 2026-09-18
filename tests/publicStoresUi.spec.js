@@ -38,7 +38,7 @@ describe('public store journeys', () => {
     await router.isReady()
     await flushPromises()
     expect(h.request).toHaveBeenCalledWith('/api/v1/stores/featured')
-    expect(wrapper.findAll('.featured-stores .store-card')).toHaveLength(1)
+    expect(wrapper.findAll('.featured-store-row')).toHaveLength(1)
   })
   it('keeps purchase entry and hides all store affordances when both lists are empty', async () => {
     await render()
@@ -65,16 +65,17 @@ describe('public store journeys', () => {
     expect(wrapper.get('h1').text()).toBe('Магазины США')
     expect(wrapper.find('.app-header__mobile-nav').exists()).toBe(false)
   })
-  it.each([1,5,6])('renders exactly %s featured records as safe native cards', async count => {
+  it.each([1,5,6])('renders exactly %s featured records as safe compact links', async count => {
     const items = Array.from({ length:count }, (_,i) => item(i+1, `Магазин ${i}`))
     h.request.mockResolvedValue({ items })
     await render()
-    const cards = wrapper.findAll('.featured-stores .store-card')
-    expect(cards).toHaveLength(count)
-    expect(cards[0].attributes()).toMatchObject({ href:'https://example.com/', target:'_blank', rel:'noopener noreferrer', 'aria-label':'Магазин 0 — открыть сайт в новой вкладке' })
+    const rows = wrapper.findAll('.featured-store-row')
+    expect(rows).toHaveLength(count)
+    expect(rows[0].attributes()).toMatchObject({ href:'https://example.com/', target:'_blank', rel:'noopener noreferrer', 'aria-label':'Магазин 0 — открыть сайт в новой вкладке', 'aria-describedby':'featured-store-description-1' })
     expect(wrapper.get('.featured-stores h2').text()).toBe('Популярные магазины США')
     expect(wrapper.get('.featured-stores a[href="/stores"]').text()).toBe('Все магазины')
-    expect(wrapper.get('.store-card img').attributes('src')).toBe(items[0].logoUrl)
+    expect(wrapper.get('.featured-store-row img').attributes('src')).toBe(items[0].logoUrl)
+    expect(wrapper.get('.featured-store-row [role="tooltip"]').text()).toBe(items[0].description.trim())
   })
   it('preserves server ordering, query sorting, back/forward, and homepage selection', async () => {
     h.request.mockImplementation(async path => ({ items:path.includes('name-asc') ? [item(2,'Alpha'), item(1,'Альфа')] : [item(1,'Альфа'),item(2,'Alpha')] }))
@@ -91,7 +92,7 @@ describe('public store journeys', () => {
     expect(wrapper.get('#store-sort').element.value).toBe('name-desc')
     await router.push('/'); await flushPromises()
     expect(h.request).toHaveBeenCalledWith('/api/v1/stores/featured')
-    expect(wrapper.findAll('.featured-stores h3').map(node => node.text())).toEqual(['Альфа','Alpha'])
+    expect(wrapper.findAll('.featured-store-row__name').map(node => node.text())).toEqual(['Альфа','Alpha'])
   })
   it.each(['/stores?sort=bad','/stores?sort=','/stores?sort=name-asc&sort=name-desc'])('normalizes invalid sort URL %s', async path => {
     h.request.mockResolvedValue({ items:[item()] })
