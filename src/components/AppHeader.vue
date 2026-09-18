@@ -10,6 +10,7 @@ import BrandLockup from './BrandLockup.vue'
 
 defineProps({
   authenticated: { type: Boolean, default: false },
+  storesAvailable: { type:Boolean, default:false },
   authenticationAvailable: { type: Boolean, default: true }
 })
 defineEmits(['authenticate', 'logout'])
@@ -26,17 +27,30 @@ watch(() => route.fullPath, () => { menuOpen.value = false })
     />
     <div class="app-header__actions">
       <nav
-        v-if="authenticated"
+        v-if="authenticated || storesAvailable"
         class="app-header__desktop-nav"
         aria-label="Основная навигация"
       >
-        <RouterLink :to="{ name: 'orders' }">
+        <RouterLink
+          v-if="storesAvailable"
+          :to="{ name: 'stores' }"
+        >
+          Магазины
+        </RouterLink>
+        <RouterLink
+          v-if="authenticated"
+          :to="{ name: 'orders' }"
+        >
           Мои заказы
         </RouterLink>
-        <RouterLink :to="{ name: 'profile' }">
+        <RouterLink
+          v-if="authenticated"
+          :to="{ name: 'profile' }"
+        >
           Профиль
         </RouterLink>
         <button
+          v-if="authenticated"
           class="app-header__nav-action"
           type="button"
           @click="$emit('logout')"
@@ -64,7 +78,7 @@ watch(() => route.fullPath, () => { menuOpen.value = false })
         <span>Поддержка</span>
       </span>
       <button
-        v-if="authenticated"
+        v-if="authenticated || storesAvailable"
         class="app-header__menu-button"
         type="button"
         :aria-expanded="menuOpen"
@@ -78,7 +92,7 @@ watch(() => route.fullPath, () => { menuOpen.value = false })
       </button>
     </div>
     <nav
-      v-if="authenticated && menuOpen"
+      v-if="(authenticated || storesAvailable) && menuOpen"
       id="mobile-navigation"
       class="app-header__mobile-nav"
       aria-label="Мобильная навигация"
@@ -86,13 +100,26 @@ watch(() => route.fullPath, () => { menuOpen.value = false })
       <RouterLink :to="{ name: 'home' }">
         Главная
       </RouterLink>
-      <RouterLink :to="{ name: 'orders' }">
+      <RouterLink
+        v-if="storesAvailable"
+        :to="{ name: 'stores' }"
+      >
+        Магазины
+      </RouterLink>
+      <RouterLink
+        v-if="authenticated"
+        :to="{ name: 'orders' }"
+      >
         Мои заказы
       </RouterLink>
-      <RouterLink :to="{ name: 'profile' }">
+      <RouterLink
+        v-if="authenticated"
+        :to="{ name: 'profile' }"
+      >
         Профиль
       </RouterLink>
       <button
+        v-if="authenticated"
         type="button"
         @click="$emit('logout')"
       >

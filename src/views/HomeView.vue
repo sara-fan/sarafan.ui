@@ -7,6 +7,8 @@ import { useValidationFocus, validationFields } from '../validationFocus.js'
 import { computed, onBeforeUnmount, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
+import FeaturedStores from '../components/FeaturedStores.vue'
+import StoreCatalogueNotice from '../components/StoreCatalogueNotice.vue'
 import PublicInfoBlock from '../components/PublicInfoBlock.vue'
 import UiAlert from '../components/ui/UiAlert.vue'
 import UiButton from '../components/ui/UiButton.vue'
@@ -89,54 +91,59 @@ const focusAfter = useValidationFocus(focusRoot, { context:() => null, ready:() 
       class="home-hero"
       aria-labelledby="home-title"
     >
-      <div class="home-hero__copy">
-        <p class="page-kicker">
-          ПОКУПКИ ИЗ США
-        </p>
-        <h1 id="home-title">
-          Закажите товар — остальное сделаем мы
-        </h1>
-        <p class="home-hero__lead">
-          Вставьте ссылку на товар из американского интернет-магазина и получите предварительный расчёт.
+      <div class="home-hero__primary">
+        <div class="home-hero__copy">
+          <p class="page-kicker">
+            ПОКУПКИ ИЗ США
+          </p>
+          <h1 id="home-title">
+            Закажите товар — остальное сделаем мы
+          </h1>
+          <p class="home-hero__lead">
+            Вставьте ссылку на товар из американского интернет-магазина и получите предварительный расчёт.
+          </p>
+        </div>
+        <UiAlert
+          v-if="problem"
+          :title="errorTitle"
+        >
+          {{ error }}
+        </UiAlert>
+        <form
+          ref="focusRoot"
+          class="product-entry"
+          novalidate
+          @submit.prevent="begin"
+        >
+          <UiField
+            v-model="sourceUrl"
+            name="sourceUrl"
+            label="Ссылка на товар"
+            type="text"
+            placeholder="https://store.com/product"
+            autocomplete="url"
+            inputmode="url"
+            required
+            :disabled="loading"
+            :errors="sourceErrors"
+            @update:model-value="sourceProblem = ''; problem = null"
+          />
+          <UiButton
+            type="submit"
+            variant="primary"
+            :loading="loading"
+          >
+            Рассчитать стоимость
+          </UiButton>
+        </form>
+        <p class="product-entry__note">
+          До расчёта нам не нужны ваши контактные данные.
         </p>
       </div>
-      <UiAlert
-        v-if="problem"
-        :title="errorTitle"
-      >
-        {{ error }}
-      </UiAlert>
-      <form
-        ref="focusRoot"
-        class="product-entry"
-        novalidate
-        @submit.prevent="begin"
-      >
-        <UiField
-          v-model="sourceUrl"
-          name="sourceUrl"
-          label="Ссылка на товар"
-          type="text"
-          placeholder="https://store.com/product"
-          autocomplete="url"
-          inputmode="url"
-          required
-          :disabled="loading"
-          :errors="sourceErrors"
-          @update:model-value="sourceProblem = ''; problem = null"
-        />
-        <UiButton
-          type="submit"
-          variant="primary"
-          :loading="loading"
-        >
-          Рассчитать стоимость
-        </UiButton>
-      </form>
-      <p class="product-entry__note">
-        До расчёта нам не нужны ваши контактные данные.
-      </p>
+      <FeaturedStores />
     </section>
+
+    <StoreCatalogueNotice class="page-container" />
 
     <section
       class="home-steps"

@@ -163,7 +163,7 @@ describe('router and page shells', () => {
     await wrapper.get('input[inputmode="url"]').setValue('store.example.com/item')
     await wrapper.get('form').trigger('submit')
     await flushPromises()
-    const alert = wrapper.get('.home-hero > .ui-alert')
+    const alert = wrapper.get('.home-hero__primary > .ui-alert')
     expect(alert.text()).toBe(SERVICE_UNAVAILABLE_MESSAGE)
     expect(alert.find('strong').exists()).toBe(false)
     expect(wrapper.find('.product-entry .ui-alert').exists()).toBe(false)
