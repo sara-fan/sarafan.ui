@@ -12,7 +12,9 @@ export const STORE_SORTS = Object.freeze([
   { value:'name-asc', label:'По названию: А–Я / A–Z' },
   { value:'name-desc', label:'По названию: Я–А / Z–A' }
 ])
+export const STORE_SEARCH_MAX_LENGTH = 200
 export const storeSort = value => STORE_SORTS.some(item => item.value === value) ? value : 'recommended'
+export const storeSearch = value => typeof value === 'string' ? value.trim().slice(0, STORE_SEARCH_MAX_LENGTH) : ''
 
 function safeWebsite(value) {
   if (typeof value !== 'string' || value.length > 2048 || !/^https?:\/\//iu.test(value) || /[\s\\]/u.test(value)) return false
@@ -20,6 +22,12 @@ function safeWebsite(value) {
     const url = new globalThis.URL(value)
     return Boolean(url.hostname && !url.username && !url.password)
   } catch { return false }
+}
+
+export function storeWebsiteLabel(value) {
+  if (!safeWebsite(value)) return ''
+  const url = new globalThis.URL(value)
+  return `${url.host}${url.pathname === '/' ? '' : url.pathname}`
 }
 
 export function validatePublicStores(value, featured = false) {
@@ -30,7 +38,8 @@ export function validatePublicStores(value, featured = false) {
       || typeof item.name !== 'string' || !item.name.trim() || item.name.length > 200
       || typeof item.description !== 'string' || !item.description.trim() || item.description.length > 160
       || !safeWebsite(item.officialUrl)
-      || typeof item.logoUrl !== 'string' || !new RegExp(`^/api/v1/stores/${item.id}/logo\\?v=[a-f0-9]{64}$`, 'u').test(item.logoUrl)) {
+      || typeof item.logoUrl !== 'string'
+      || !new RegExp(`^/api/v1/stores/${item.id}/logo\\?v=[a-f0-9]{64}$`, 'u').test(item.logoUrl)) {
       throw createInternalProblem('protocolError')
     }
     ids.add(item.id)
@@ -39,8 +48,9 @@ export function validatePublicStores(value, featured = false) {
 }
 
 export function createPublicStores(client = createApiClient({})) {
-  const full = reactive({ items:null, loading:false, problem:null, sort:'recommended' })
+  const full = reactive({ items:null, loading:false, problem:null, sort:'recommended', search:'' })
   const featured = reactive({ items:null, loading:false, problem:null })
+  const availability = reactive({ loading:false, problem:null })
   const available = ref(null)
   const pending = new Map()
   let generation = 0
@@ -52,14 +62,14 @@ export function createPublicStores(client = createApiClient({})) {
     }
     return pending.get(path)
   }
-  async function load(state, path, current, isFeatured = false) {
+  async function load(state, path, current, isFeatured = false, determinesAvailability = false) {
     state.loading = true
     state.problem = null
     try {
       const items = await request(path, isFeatured)
       if (current !== generation) return
       state.items = items
-      if (!isFeatured) available.value = items.length > 0
+      if (determinesAvailability) available.value = items.length > 0
     } catch (value) {
       if (current !== generation) return
       state.problem = normalizeProblem(value)
@@ -68,20 +78,42 @@ export function createPublicStores(client = createApiClient({})) {
       if (current === generation) state.loading = false
     }
   }
-  function refresh(sort = 'recommended', includeFeatured = false) {
+  async function loadAvailability(current) {
+    availability.loading = true
+    availability.problem = null
+    try {
+      const items = await request('/api/v1/stores?sort=recommended', false)
+      if (current !== generation) return
+      available.value = items.length > 0
+    } catch (value) {
+      if (current !== generation) return
+      availability.problem = normalizeProblem(value)
+      throw availability.problem
+    } finally {
+      if (current === generation) availability.loading = false
+    }
+  }
+  function refresh(sort = 'recommended', search = '', includeFeatured = false) {
     const current = ++generation
     const normalized = storeSort(sort)
-    if (normalized !== full.sort) full.items = null
+    const normalizedSearch = storeSearch(search)
+    if (normalized !== full.sort || normalizedSearch !== full.search) full.items = null
     full.sort = normalized
+    full.search = normalizedSearch
     featured.loading = false
+    availability.loading = false
+    if (!normalizedSearch) availability.problem = null
+    const query = new globalThis.URLSearchParams({ sort:normalized })
+    if (normalizedSearch) query.set('search', normalizedSearch)
     // Each resource owns its recoverable error; allSettled observes both failures.
     return Promise.allSettled([
-      load(full, `/api/v1/stores?sort=${normalized}`, current),
+      load(full, `/api/v1/stores?${query}`, current, false, !normalizedSearch),
+      ...(normalizedSearch ? [loadAvailability(current)] : []),
       ...(includeFeatured ? [load(featured, '/api/v1/stores/featured', current, true)] : [])
     ])
   }
-  function invalidate() { ++generation; full.loading = false; featured.loading = false }
-  return { full, featured, available, hasStores:computed(() => available.value === true), refresh, invalidate }
+  function invalidate() { ++generation; full.loading = false; featured.loading = false; availability.loading = false }
+  return { full, featured, availability, available, hasStores:computed(() => available.value === true), refresh, invalidate }
 }
 
 // Standalone views can render before the application shell provides its catalogue.

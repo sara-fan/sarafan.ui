@@ -163,7 +163,7 @@ describe('router and page shells', () => {
     await wrapper.get('input[inputmode="url"]').setValue('store.example.com/item')
     await wrapper.get('form').trigger('submit')
     await flushPromises()
-    const alert = wrapper.get('.home-hero > .ui-alert')
+    const alert = wrapper.get('.home-hero__primary > .ui-alert')
     expect(alert.text()).toBe(SERVICE_UNAVAILABLE_MESSAGE)
     expect(alert.find('strong').exists()).toBe(false)
     expect(wrapper.find('.product-entry .ui-alert').exists()).toBe(false)
@@ -237,17 +237,27 @@ describe('shared application chrome and controls', () => {
     const router = await routerAt('/orders')
     const wrapper = mount(AppHeader, { props: { authenticated: true }, global: { plugins: [router] } })
     expect(wrapper.findAll('.global-support')).toHaveLength(1)
-    expect(wrapper.findAll('.app-header__desktop-nav a')).toHaveLength(2)
+    expect(wrapper.findAll('.app-header__desktop-nav a').map(link => [link.text(), link.attributes('href')])).toEqual([
+      ['Новый заказ', '/'],
+      ['Профиль', '/profile']
+    ])
     expect(wrapper.get('.app-header__nav-action').text()).toBe('Выйти')
     expect(wrapper.get('.brand-lockup__partner').attributes()).toMatchObject({ href: 'https://gtc.express/', target: '_blank', rel: 'noopener noreferrer' })
     await wrapper.get('.app-header__menu-button').trigger('click')
     expect(wrapper.get('.app-header__menu-button').attributes('aria-expanded')).toBe('true')
-    expect(wrapper.findAll('.app-header__mobile-nav a')).toHaveLength(3)
+    expect(wrapper.findAll('.app-header__mobile-nav a').map(link => [link.text(), link.attributes('href')])).toEqual([
+      ['Новый заказ', '/'],
+      ['Профиль', '/profile']
+    ])
     await wrapper.get('.app-header__mobile-nav button').trigger('click')
     expect(wrapper.emitted('logout')).toHaveLength(1)
     await router.push('/profile')
     await flushPromises()
     expect(wrapper.find('.app-header__mobile-nav').exists()).toBe(false)
+    expect(wrapper.findAll('.app-header__desktop-nav a').map(link => [link.text(), link.attributes('href')])).toEqual([
+      ['Новый заказ', '/'],
+      ['Мои заказы', '/orders']
+    ])
     await wrapper.setProps({ authenticated: false })
     const actions = wrapper.get('.app-header__actions').element.children
     expect(actions[0].classList.contains('app-header__login')).toBe(true)

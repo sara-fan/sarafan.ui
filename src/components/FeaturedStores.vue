@@ -4,30 +4,32 @@
 // This file is a part of the Sarafan application
 import { RouterLink } from 'vue-router'
 import { usePublicStores } from '../stores/publicStores.js'
-import StoreCard from './StoreCard.vue'
+import FeaturedStoreRow from './FeaturedStoreRow.vue'
 const catalogue = usePublicStores()
 </script>
 <template>
   <section
     v-if="catalogue.featured.items?.length"
-    class="featured-stores page-container"
+    class="featured-stores"
     aria-labelledby="featured-stores-title"
     :aria-busy="catalogue.featured.loading"
   >
-    <header class="stores-heading">
+    <header class="featured-stores__header">
       <h2 id="featured-stores-title">
-        Популярные магазины США
+        Подборка магазинов США
       </h2>
-      <RouterLink :to="{ name:'stores' }">
-        Все магазины
-      </RouterLink>
     </header>
-    <div class="store-grid">
-      <StoreCard
+    <div class="featured-stores__list">
+      <FeaturedStoreRow
         v-for="store in catalogue.featured.items"
         :key="store.id"
         :store="store"
       />
     </div>
+    <footer class="featured-stores__footer">
+      <RouterLink :to="{ name:'stores' }">
+        Смотреть другие магазины в подборке
+      </RouterLink>
+    </footer>
   </section>
 </template>
