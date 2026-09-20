@@ -49,6 +49,6 @@ defineExpose({ printDocument })
 <style>
 @media print {
   body:has(> #sarafan-print-document) > :not(#sarafan-print-document) { display:none !important; }
-  #sarafan-print-document { display:block !important; max-width:none; }
+  #sarafan-print-document, #sarafan-print-document .legal-document__body { display:block !important; width:100%; max-width:none; }
 }
 </style>
