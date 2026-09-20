@@ -600,12 +600,6 @@ const focusAfter = useValidationFocus(focusRoot, {
           {{ document?.title || 'Юридический документ' }}
         </component>
       </div>
-      <UiButton
-        variant="secondary"
-        @click="router.push({ name: 'home' })"
-      >
-        На главную
-      </UiButton>
     </header>
     <UiAlert
       v-if="message"

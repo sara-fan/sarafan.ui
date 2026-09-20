@@ -38,7 +38,7 @@
 .consent-page__loading { display: grid; min-height: 280px; place-items: center; align-content: center; color: var(--sarafan-muted); }
 .consent-page__loading .route-gate__spinner { margin-bottom: var(--sarafan-space-12); }
 .consent-page__loading p { margin: 0; }
-.legal-document-page__panel .legal-document__body { max-width: 82ch; }
+.legal-document-page__panel .legal-document__body { max-width: none; }
 
 .consent-recovery-notice { position: fixed; z-index: 1100; top: 16px; right: 24px; width: min(520px, calc(100% - 48px)); overflow: hidden; padding: 28px; border: 1px solid rgba(29, 62, 133, 0.1); border-radius: var(--sarafan-radius-28); background: linear-gradient(145deg, #ffffff 0%, #ffffff 72%, #eef9fe 100%); box-shadow: var(--sarafan-dialog-shadow); }
 .consent-recovery-notice::after { position: absolute; z-index: -1; right: -80px; bottom: -105px; width: 210px; height: 210px; border: 28px solid rgba(28, 163, 228, 0.06); border-radius: 50%; content: ""; }
