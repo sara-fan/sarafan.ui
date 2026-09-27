@@ -27,8 +27,11 @@ watch(() => props.pricing, pricing => {
 onUnmounted(() => globalThis.clearTimeout(timer))
 
 const state = computed(() => expiredNow.value ? 200 : props.pricing?.state ?? 0)
-const label = computed(() => props.ops?.pricingStates?.find(item => item.value === state.value)?.name ?? 'Стоимость заказа')
+const label = computed(() => props.pricing?.state === 0 ? 'Предварительная стоимость'
+  : props.ops?.pricingStates?.find(item => item.value === state.value)?.name ?? 'Стоимость заказа')
 const rubSymbol = computed(() => props.ops?.currencies?.find(item => item.routeAlias === 'rub')?.symbol ?? '₽')
+const excludedAmount = amount => amount === null || amount === undefined
+  ? 'Будет рассчитана позже' : formatRub(amount, rubSymbol.value)
 </script>
 
 <template>
@@ -41,38 +44,45 @@ const rubSymbol = computed(() => props.ops?.currencies?.find(item => item.routeA
       class="customer-cost__main"
       aria-live="polite"
     >
-      <span>{{ label }}</span>
-      <strong>{{ loading ? 'Рассчитываем стоимость…' : formatRub(pricing?.totalRub ?? null, rubSymbol) }}</strong>
-      <p v-if="state === 200">
-        Срок подтверждения истёк. Сохранённая стоимость показана для справки.
-      </p>
-      <p v-else-if="state === 100 && pricing?.validUntil">
-        Действует до {{ formatMoscow(pricing.validUntil) }}
-      </p>
-      <p v-else>
-        Предварительная стоимость будет проверена после отправки заявки.
-      </p>
+      <div class="customer-cost__headline">
+        <span>{{ label }}</span>
+        <strong>{{ loading ? 'Рассчитываем стоимость…' : formatRub(pricing?.totalRub ?? null, rubSymbol) }}</strong>
+      </div>
     </div>
-    <dl v-if="!compact">
-      <div><dt>Доставка по России</dt><dd>{{ formatRub(pricing?.domesticDeliveryRub ?? null, rubSymbol) }}</dd></div>
-      <div><dt>Таможенные платежи</dt><dd>{{ formatRub(pricing?.customsRub ?? null, rubSymbol) }}</dd></div>
-    </dl>
     <p
       v-if="!compact"
       class="customer-cost__note"
     >
       Доставка по России и таможенные платежи не входят в указанную стоимость.
     </p>
-    <div
-      v-if="!compact && state !== 0"
-      class="customer-cost__future"
+    <dl
+      v-if="!compact"
+      class="customer-cost__excluded"
     >
-      <p>Дополнительные услуги</p>
-      <ul>
-        <li>Фото на складе — В разработке</li>
-        <li>Проверка товара — В разработке</li>
-        <li>Страхование отправления — В разработке</li>
-      </ul>
-    </div>
+      <div>
+        <dt>Доставка по России</dt>
+        <dd>
+          {{ excludedAmount(pricing?.domesticDeliveryRub) }}
+        </dd>
+      </div>
+      <div>
+        <dt>Таможенные платежи</dt>
+        <dd>
+          {{ excludedAmount(pricing?.customsRub) }}
+        </dd>
+      </div>
+    </dl>
+    <p
+      v-if="state === 200"
+      class="customer-cost__status"
+    >
+      Сохранённая стоимость показана для справки.
+    </p>
+    <p
+      v-else-if="state === 100 && pricing?.validUntil"
+      class="customer-cost__status"
+    >
+      Действует до {{ formatMoscow(pricing.validUntil) }}
+    </p>
   </section>
 </template>

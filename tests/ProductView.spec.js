@@ -122,10 +122,16 @@ describe('ProductView product review', () => {
     await flushPromises()
 
     expect(wrapper.text()).toContain('Не получилось получить все данные о товаре автоматически')
-    expect(wrapper.get('.product-source-field a').attributes('href')).toBe('https://shop.example.com/canonical')
+    expect(wrapper.get('.order-item-fields__source a').attributes('href')).toBe('https://shop.example.com/canonical')
     expect(wrapper.get('input[name="quantity"]').element.value).toBe('1')
-    expect(wrapper.findAll('.product-review__fields .ui-field')).toHaveLength(8)
-    expect(wrapper.get('.product-review__summary').text()).toContain('Стоимость уточняется')
+    expect(wrapper.findAll('.product-review__form .order-item-fields .ui-field')).toHaveLength(8)
+    expect(wrapper.get('.order-item-fields').element.lastElementChild.classList.contains('order-item-fields__comment')).toBe(true)
+    expect(wrapper.get('textarea[name="comment"]').attributes('readonly')).toBeUndefined()
+    expect(wrapper.find('.product-review__summary').exists()).toBe(false)
+    expect(wrapper.get('.product-review__form button[type="submit"]').text()).toBe('Отправить на проверку')
+    await wrapper.get('input[name="sellerPrice"]').setValue('100,00')
+    await new Promise(resolve => globalThis.setTimeout(resolve, 350))
+    expect(h.session.forecastOrder).not.toHaveBeenCalled()
   })
 
   it('prefills recognized values with Russian money formatting without overwriting edits', async () => {
@@ -144,9 +150,28 @@ describe('ProductView product review', () => {
     expect(wrapper.get('input[name="productName"]').element.value).toBe('Моё название')
     expect(wrapper.get('input[name="sellerPrice"]').element.value).toBe('16,50')
     expect(wrapper.get('textarea[name="comment"]').element.value).toBe('Мой комментарий')
+    await vi.waitFor(() => expect(wrapper.find('.product-review__summary').exists()).toBe(true))
+    expect(wrapper.get('.product-review__summary').element.nextElementSibling).toBe(wrapper.get('.product-review__form').element)
+  })
+
+  it('does not forecast when recognition found no price', async () => {
+    h.session.previewOrder.mockImplementation(async (_sourceUrl, isCurrent, validate) => {
+      const value = { sourceUrl:'https://shop.example.com/item', outcome:'recognized', product:product({ sellerPrice:null }) }
+      if (isCurrent()) validate(value)
+      return value
+    })
+    const { wrapper } = await mountView()
+    await wrapper.get('input[name="sellerPrice"]').setValue('100,00')
+    expect(wrapper.find('.product-review__summary').exists()).toBe(false)
+    expect(h.session.forecastOrder).not.toHaveBeenCalled()
   })
 
   it('debounces price changes, discards stale forecasts, and ignores unrelated draft edits', async () => {
+    h.session.previewOrder.mockImplementation(async (_sourceUrl, isCurrent, validate) => {
+      const value = { sourceUrl:'https://shop.example.com/item', outcome:'recognized', product:product({ sellerPrice:{ amount:16.5, currency:840 } }) }
+      if (isCurrent()) validate(value)
+      return value
+    })
     const pending = []
     h.session.forecastOrder.mockImplementation((sellerPrice, quantity, isCurrent, validate) => new Promise(resolve => {
       pending.push(value => {
@@ -157,7 +182,7 @@ describe('ProductView product review', () => {
     const { wrapper } = await mountView()
     await wrapper.get('input[name="sellerPrice"]').setValue('100,00')
     await vi.waitFor(() => expect(h.session.forecastOrder).toHaveBeenCalledTimes(1))
-    expect(h.session.forecastOrder.mock.calls[0].slice(0, 2)).toEqual([{ amount:100, currency:840 }, 1])
+    expect(h.session.forecastOrder.mock.calls[0].slice(0, 2)).toEqual([{ amount:100, currency:840 }, 2])
     await wrapper.get('input[name="sellerPrice"]').setValue('200,00')
     await vi.waitFor(() => expect(h.session.forecastOrder).toHaveBeenCalledTimes(2))
     pending[0]({ ...forecastPricing, totalRub:12000, calculatedAt:forecastPricing.asOf })
@@ -177,6 +202,11 @@ describe('ProductView product review', () => {
   })
 
   it('shows structured forecast errors on the field and retries without losing the draft', async () => {
+    h.session.previewOrder.mockImplementation(async (_sourceUrl, isCurrent, validate) => {
+      const value = { sourceUrl:'https://shop.example.com/item', outcome:'recognized', product:product({ sellerPrice:{ amount:16.5, currency:840 } }) }
+      if (isCurrent()) validate(value)
+      return value
+    })
     h.session.forecastOrder.mockRejectedValueOnce(new ProblemError({
       type:CORE_PROBLEM_TYPES.validationFailed,
       title:'Некорректный запрос', status:400, detail:'Исправьте указанные поля',
@@ -188,7 +218,8 @@ describe('ProductView product review', () => {
     await vi.waitFor(() => expect(wrapper.text()).toContain('Проверьте цену'))
     expect(wrapper.get('input[name="sellerPrice"]').element.value).toBe('100,00')
     expect(wrapper.text()).toContain('Не удалось рассчитать стоимость')
-    await wrapper.get('.product-review__summary [role="alert"] button').trigger('click')
+    expect(wrapper.find('.product-review__summary').exists()).toBe(false)
+    await wrapper.get('.product-review__actions [role="alert"] button').trigger('click')
     await vi.waitFor(() => expect(wrapper.text()).toContain('12 000,00 ₽'))
     expect(wrapper.get('input[name="sellerPrice"]').attributes('aria-invalid')).toBeUndefined()
     wrapper.unmount()
@@ -264,9 +295,9 @@ describe('ProductView product review', () => {
     const { wrapper } = await mountView()
     expect(wrapper.text()).toContain('Проверка лимита временно недоступна')
     expect(wrapper.get('button[type="submit"]').attributes('disabled')).toBeDefined()
-    await wrapper.get('.product-review__summary .ui-alert button').trigger('click')
+    await wrapper.get('.product-review__actions .ui-alert button').trigger('click')
     await flushPromises()
-    expect(wrapper.find('.product-review__summary .ui-alert').exists()).toBe(false)
+    expect(wrapper.find('.product-review__actions .ui-alert').exists()).toBe(false)
   })
 
   it('keeps a failed rate retry recoverable', async () => {
@@ -284,7 +315,7 @@ describe('ProductView product review', () => {
       })
       .mockRejectedValueOnce(createInternalProblem('networkUnavailable'))
     const { wrapper } = await mountView()
-    await wrapper.get('.product-review__summary .ui-alert button').trigger('click')
+    await wrapper.get('.product-review__actions .ui-alert button').trigger('click')
     await flushPromises()
     expect(wrapper.get('.product-view > [role="alert"]').text()).toContain('Проверьте подключение к интернету')
   })

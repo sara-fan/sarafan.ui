@@ -222,7 +222,7 @@ describe('router and page shells', () => {
     expect(wrapper.text()).toContain('Mini Quilted Shoulder Bag')
     expect(wrapper.text()).toContain('На проверке')
     expect(wrapper.text()).toContain('Расчёт готов')
-    expect(wrapper.text()).toContain('Ориентировочная стоимость')
+    expect(wrapper.text()).toContain('Предварительная стоимость')
     expect(wrapper.text()).toContain('16 000,00 ₽')
     expect(wrapper.findAll('.order-card__price .customer-cost')).toHaveLength(2)
     expect(wrapper.findAll('[role="progressbar"]')).toHaveLength(2)

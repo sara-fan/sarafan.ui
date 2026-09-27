@@ -64,6 +64,7 @@ describe('order store', () => {
     protocolFailure(() => validateCustomerOrder(completeOrder({ pricing:invalid }), catalogue, '12345678-3'))
     protocolFailure(() => validateCreatedOrder(completeOrder({ pricing:invalid }), catalogue, { sourceUrl:'https://shop.example.com/item' }))
     protocolFailure(() => validateOrderOps({ ...ops, pricingStates:[] }))
+    protocolFailure(() => validateOrderOps({ ...ops, currencies:ops.currencies.filter(item => item.routeAlias !== 'rub') }))
     expect(validateCustomerOrders(orders, catalogue)[0].pricing).not.toBe(orders[0].pricing)
   })
 

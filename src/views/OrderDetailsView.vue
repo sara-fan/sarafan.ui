@@ -4,21 +4,19 @@
 // This file is a part of the Sarafan application
 
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { useRoute } from 'vue-router'
 
 import CustomerCostSummary from '../components/CustomerCostSummary.vue'
+import OrderItemFields from '../components/OrderItemFields.vue'
 import UiAlert from '../components/ui/UiAlert.vue'
 import UiButton from '../components/ui/UiButton.vue'
-import UiField from '../components/ui/UiField.vue'
 import { createInternalProblem, normalizeProblem, presentProblem, presentProblemTitle } from '../errors/problem.js'
 import { formatMoneyAmount } from '../moneyFormatting.js'
 import { isOrderNumber } from '../orderNumber.js'
-import { formatRub } from '../orders/customerPricing.js'
 import { validateCustomerOrder, validateOrderOps } from '../stores/orders.js'
 import { useSession } from '../stores/session.js'
 
 const route = useRoute()
-const router = useRouter()
 const session = useSession()
 const order = ref(null)
 const ops = ref(null)
@@ -31,8 +29,16 @@ const error = computed(() => presentProblem(problem.value))
 const errorTitle = computed(() => presentProblemTitle(problem.value))
 const status = computed(() => ops.value?.statuses.find(item => item.value === order.value?.status))
 const product = computed(() => order.value?.product)
+const reviewItem = computed(() => ({
+  productName:display(product.value?.productName),
+  storeName:display(product.value?.storeName),
+  sellerPrice:sellerPrice(product.value?.sellerPrice),
+  quantity:product.value?.quantity ?? '',
+  color:display(product.value?.color),
+  size:display(product.value?.size),
+  comment:display(product.value?.comment)
+}))
 const sourceHost = computed(() => new globalThis.URL(order.value.sourceUrl).hostname)
-const rubSymbol = computed(() => ops.value?.currencies.find(item => item.routeAlias === 'rub')?.symbol ?? '₽')
 
 function orderNumber() {
   const value = String(route.params.orderNumber ?? '')
@@ -53,10 +59,8 @@ function createdAt(value) {
 function sellerPrice(value) {
   if (!value) return 'Не указано'
   const currency = ops.value.currencies.find(item => item.value === value.currency)
-  return `${formatMoneyAmount(value.amount)} ${currency.name}`
+  return `${formatMoneyAmount(value.amount)} ${currency.symbol}`
 }
-function goBack() { return router.push({ name:'orders' }) }
-
 function load() {
   const key = `${session.customer.value?.id ?? ''}:${orderNumber() ?? ''}`
   if (inFlight?.key === key) return inFlight.promise
@@ -127,14 +131,6 @@ onBeforeUnmount(() => {
   <main class="page-container order-details-view">
     <header class="page-heading order-details-heading">
       <div>
-        <button
-          type="button"
-          class="product-back"
-          :disabled="loading"
-          @click="goBack"
-        >
-          ← Мои заказы
-        </button>
         <h1>{{ order ? `Заказ ${order.orderNumber}` : 'Заказ' }}</h1>
         <p v-if="order">
           {{ status?.name }} · создан {{ createdAt(order.createdAt) }}
@@ -176,6 +172,10 @@ onBeforeUnmount(() => {
     </section>
 
     <template v-else-if="order && product">
+      <CustomerCostSummary
+        :pricing="order.pricing"
+        :ops="ops"
+      />
       <section
         v-if="order.showReviewFields"
         class="order-review-card"
@@ -190,68 +190,15 @@ onBeforeUnmount(() => {
               Товар
             </h2>
           </div>
-          <a
-            :href="order.sourceUrl"
-            target="_blank"
-            rel="noopener noreferrer"
-          >Страница товара</a>
         </div>
         <p class="order-review-card__notice">
-          Проверим данные в течение двух часов. Предварительная стоимость указана ниже.
+          Проверим данные в течение двух часов.
         </p>
-        <div class="order-review-fields">
-          <UiField
-            :model-value="order.sourceUrl"
-            label="Исходная ссылка"
-            readonly
-            class="order-review-fields__wide"
-          />
-          <UiField
-            :model-value="display(product.productName)"
-            label="Название товара, как на сайте"
-            readonly
-            class="order-review-fields__wide"
-          />
-          <UiField
-            :model-value="display(product.storeName)"
-            label="Магазин"
-            readonly
-          />
-          <UiField
-            :model-value="sellerPrice(product.sellerPrice)"
-            label="Цена за единицу"
-            readonly
-          />
-          <UiField
-            :model-value="product.quantity"
-            label="Количество"
-            readonly
-          />
-          <UiField
-            :model-value="formatRub(order.pricing.totalRub, rubSymbol)"
-            label="Стоимость"
-            readonly
-          />
-          <UiField
-            :model-value="display(product.color)"
-            label="Цвет, как на сайте"
-            readonly
-          />
-          <UiField
-            :model-value="display(product.size)"
-            label="Размер"
-            readonly
-          />
-          <div class="order-review-fields__wide">
-            <UiField
-              :model-value="display(product.comment)"
-              label="Комментарий"
-              readonly
-              multiline
-              :rows="4"
-            />
-          </div>
-        </div>
+        <OrderItemFields
+          :source-url="order.sourceUrl"
+          :item="reviewItem"
+          readonly
+        />
       </section>
 
       <section
@@ -305,10 +252,6 @@ onBeforeUnmount(() => {
           </div>
         </dl>
       </section>
-      <CustomerCostSummary
-        :pricing="order.pricing"
-        :ops="ops"
-      />
     </template>
   </main>
 </template>
