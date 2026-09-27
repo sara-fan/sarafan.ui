@@ -73,7 +73,6 @@ a { color: var(--sarafan-secondary); }
 }
 
 .brand-lockup {
-  position: relative;
   display: inline-flex;
   min-height: 52px;
   align-items: center;
@@ -113,11 +112,7 @@ a { color: var(--sarafan-secondary); }
 .brand-lockup__mark::after { bottom: -11px; left: -7px; }
 .brand-lockup__mark img { position: relative; z-index: 1; display: block; width: 40px; height: 40px; border-radius: 12px; object-fit: cover; }
 .brand-lockup__name { color: #1d3e85; font: 750 22px/1 var(--sarafan-font-ui); letter-spacing: -0.03em; }
-.brand-lockup__partner { position: absolute; top: 39px; left: 55px; color: var(--sarafan-muted); font-size: 8px; font-weight: 650; letter-spacing: 0.06em; line-height: 11px; text-decoration: none; text-transform: uppercase; white-space: nowrap; transition: color 160ms ease; }
-.brand-lockup__partner:hover, .brand-lockup__partner:focus-visible { color: var(--sarafan-accent); text-decoration: underline; text-underline-offset: 2px; }
 .brand-lockup--inverse .brand-lockup__name { color: #ffffff; }
-.brand-lockup--inverse .brand-lockup__partner { color: rgba(229, 246, 255, 0.58); }
-.brand-lockup--inverse .brand-lockup__partner:hover, .brand-lockup--inverse .brand-lockup__partner:focus-visible { color: var(--sarafan-sky); }
 
 .app-header__actions, .app-header__desktop-nav { display: flex; align-items: center; gap: var(--sarafan-space-24); }
 .app-header__desktop-nav a, .app-header__nav-action { color: var(--sarafan-muted); font: 650 14px/20px var(--sarafan-font-ui); text-decoration: none; transition: color 160ms ease; }
@@ -376,7 +371,6 @@ a { color: var(--sarafan-secondary); }
   .app-header__brand .brand-lockup__mark { width: 38px; height: 38px; flex-basis: 38px; }
   .app-header__brand .brand-lockup__mark img { width: 35px; height: 35px; }
   .app-header__brand .brand-lockup__name { font-size: 20px; }
-  .app-header__brand .brand-lockup__partner { left: 49px; }
   .app-header__desktop-nav, .global-support > span:last-child { display: none; }
   .app-header__actions { gap: 10px; }
   .app-header__menu-button { display: block; }

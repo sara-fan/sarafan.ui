@@ -29,11 +29,5 @@ defineProps({ inverse: { type: Boolean, default: false } })
       </span>
       <span class="brand-lockup__name">Сарафан</span>
     </RouterLink>
-    <a
-      class="brand-lockup__partner"
-      href="https://gtc.express/"
-      target="_blank"
-      rel="noopener noreferrer"
-    >Совместно с GTC</a>
   </div>
 </template>
