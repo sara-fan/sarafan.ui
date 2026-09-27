@@ -58,19 +58,21 @@ describe('public store journeys', () => {
     await render()
     expect(wrapper.get('.app-header__desktop-nav a[href="/stores"]').text()).toBe('Магазины')
     expect(wrapper.findAll('.app-header__desktop-nav a').map(link => link.text())).toEqual(authenticated
-      ? ['Мои заказы', 'Магазины', 'Профиль']
-      : ['Магазины'])
+      ? ['Новый заказ', 'Мои заказы', 'Магазины', 'Профиль']
+      : ['Новый заказ', 'Магазины'])
+    expect(wrapper.get('.app-header__desktop-nav a[aria-current="page"]').text()).toBe('Новый заказ')
     expect(wrapper.find('.featured-stores').exists()).toBe(false)
     await wrapper.get('.app-header__menu-button').trigger('click')
     expect(wrapper.get('.app-header__mobile-nav a[href="/stores"]').text()).toBe('Магазины')
     expect(wrapper.findAll('.app-header__mobile-nav a').map(link => link.text())).toEqual(authenticated
-      ? ['Мои заказы', 'Магазины', 'Профиль']
-      : ['Магазины'])
+      ? ['Новый заказ', 'Мои заказы', 'Магазины', 'Профиль']
+      : ['Новый заказ', 'Магазины'])
+    expect(wrapper.get('.app-header__mobile-nav a[aria-current="page"]').text()).toBe('Новый заказ')
     expect(wrapper.find('.app-header__mobile-nav a[href="/orders"]').exists()).toBe(authenticated)
     await wrapper.get('.app-header__mobile-nav a[href="/stores"]').trigger('click'); await flushPromises()
     expect(wrapper.get('h1').text()).toBe('Магазины США')
     expect(wrapper.find('.app-header__mobile-nav').exists()).toBe(false)
-    expect(wrapper.find('.app-header__desktop-nav a[href="/stores"]').exists()).toBe(false)
+    expect(wrapper.get('.app-header__desktop-nav a[href="/stores"]').attributes('aria-current')).toBe('page')
   })
   it.each([1,5,6])('renders exactly %s featured records as safe compact links', async count => {
     const items = Array.from({ length:count }, (_,i) => item(i+1, `Магазин ${i}`))
@@ -124,7 +126,7 @@ describe('public store journeys', () => {
     expect(router.currentRoute.value.query.search).toBe('missing')
     expect(h.request).toHaveBeenCalledWith('/api/v1/stores?sort=recommended&search=missing')
     expect(wrapper.get('.stores-empty-search').text()).toBe('По вашему запросу магазины не найдены.')
-    expect(wrapper.find('.app-header__desktop-nav a[href="/stores"]').exists()).toBe(false)
+    expect(wrapper.get('.app-header__desktop-nav a[href="/stores"]').attributes('aria-current')).toBe('page')
     expect(router.currentRoute.value.name).toBe('stores')
     router.back(); await flushPromises()
     expect(router.currentRoute.value.query.search).toBeUndefined()

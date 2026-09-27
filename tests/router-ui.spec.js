@@ -237,36 +237,70 @@ describe('router and page shells', () => {
 describe('shared application chrome and controls', () => {
   it('renders authenticated navigation, toggles mobile links, and closes them after navigation', async () => {
     const router = await routerAt('/orders')
-    const wrapper = mount(AppHeader, { props: { authenticated: true }, global: { plugins: [router] } })
-    expect(wrapper.findAll('.global-support')).toHaveLength(1)
-    expect(wrapper.findAll('.app-header__desktop-nav a').map(link => [link.text(), link.attributes('href')])).toEqual([
+    const wrapper = mount(AppHeader, { props: { authenticated: true, storesAvailable: true }, global: { plugins: [router] } })
+    const links = [
       ['Новый заказ', '/'],
+      ['Мои заказы', '/orders'],
+      ['Магазины', '/stores'],
       ['Профиль', '/profile']
-    ])
+    ]
+    expect(wrapper.findAll('.global-support')).toHaveLength(1)
+    expect(wrapper.findAll('.app-header__desktop-nav a').map(link => [link.text(), link.attributes('href')])).toEqual(links)
+    expect(wrapper.findAll('.app-header__desktop-nav [aria-current="page"]').map(link => link.text())).toEqual(['Мои заказы'])
     expect(wrapper.get('.app-header__nav-action').text()).toBe('Выйти')
     expect(wrapper.get('.brand-lockup__home').attributes('aria-label')).toBe('Сарафан — главная')
     expect(wrapper.find('.brand-lockup__partner').exists()).toBe(false)
     await wrapper.get('.app-header__menu-button').trigger('click')
     expect(wrapper.get('.app-header__menu-button').attributes('aria-expanded')).toBe('true')
-    expect(wrapper.findAll('.app-header__mobile-nav a').map(link => [link.text(), link.attributes('href')])).toEqual([
-      ['Новый заказ', '/'],
-      ['Профиль', '/profile']
-    ])
+    expect(wrapper.findAll('.app-header__mobile-nav a').map(link => [link.text(), link.attributes('href')])).toEqual(links)
+    expect(wrapper.findAll('.app-header__mobile-nav [aria-current="page"]').map(link => link.text())).toEqual(['Мои заказы'])
+    await wrapper.get('.app-header__mobile-nav a[href="/orders"]').trigger('click')
+    expect(wrapper.find('.app-header__mobile-nav').exists()).toBe(false)
+    await wrapper.get('.app-header__menu-button').trigger('click')
     await wrapper.get('.app-header__mobile-nav button').trigger('click')
     expect(wrapper.emitted('logout')).toHaveLength(1)
     await router.push('/profile')
     await flushPromises()
     expect(wrapper.find('.app-header__mobile-nav').exists()).toBe(false)
-    expect(wrapper.findAll('.app-header__desktop-nav a').map(link => [link.text(), link.attributes('href')])).toEqual([
-      ['Новый заказ', '/'],
-      ['Мои заказы', '/orders']
-    ])
+    expect(wrapper.findAll('.app-header__desktop-nav a').map(link => [link.text(), link.attributes('href')])).toEqual(links)
+    expect(wrapper.findAll('.app-header__desktop-nav [aria-current="page"]').map(link => link.text())).toEqual(['Профиль'])
+    await wrapper.get('.app-header__menu-button').trigger('click')
+    await wrapper.get('.app-header__mobile-nav a[href="/profile"]').trigger('click')
+    expect(wrapper.find('.app-header__mobile-nav').exists()).toBe(false)
+    await wrapper.get('.app-header__menu-button').trigger('click')
+    await wrapper.get('.app-header__mobile-nav a[href="/"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.app-header__mobile-nav').exists()).toBe(false)
+    expect(wrapper.findAll('.app-header__desktop-nav [aria-current="page"]').map(link => link.text())).toEqual(['Новый заказ'])
     await wrapper.setProps({ authenticated: false })
-    const actions = wrapper.get('.app-header__actions').element.children
-    expect(actions[0].classList.contains('app-header__login')).toBe(true)
-    expect(actions[1].classList.contains('global-support')).toBe(true)
+    expect(wrapper.findAll('.app-header__desktop-nav a').map(link => link.text())).toEqual(['Новый заказ', 'Магазины'])
+    expect(wrapper.get('.app-header__login').exists()).toBe(true)
+    expect(wrapper.get('.global-support').exists()).toBe(true)
     await wrapper.get('.app-header__login').trigger('click')
     expect(wrapper.emitted('authenticate')).toHaveLength(1)
+  })
+
+  it('tracks the current navigation section across flows and leaves legal pages unselected', async () => {
+    const router = await routerAt('/')
+    const wrapper = mount(AppHeader, { props: { authenticated: true, storesAvailable: true }, global: { plugins: [router] } })
+    const active = () => wrapper.findAll('.app-header__desktop-nav [aria-current="page"]').map(link => link.text())
+    expect(active()).toEqual(['Новый заказ'])
+    for (const [path, label] of [
+      ['/product', 'Новый заказ'],
+      ['/orders/12345678-2', 'Мои заказы'],
+      ['/orders/12345678-2/payment', 'Мои заказы'],
+      ['/stores', 'Магазины']
+    ]) {
+      await router.push(path)
+      await flushPromises()
+      expect(active()).toEqual([label])
+    }
+    await router.push('/legal/privacy-policy')
+    await flushPromises()
+    expect(active()).toEqual([])
+    await router.push('/missing')
+    await flushPromises()
+    expect(active()).toEqual([])
   })
 
   it('uses server-provided legal aliases and gates the consent shortcut', async () => {
