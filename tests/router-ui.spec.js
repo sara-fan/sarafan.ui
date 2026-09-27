@@ -8,7 +8,6 @@ import { createMemoryHistory } from 'vue-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import AppHeader from '../src/components/AppHeader.vue'
-import PublicInfoBlock from '../src/components/PublicInfoBlock.vue'
 import SiteFooter from '../src/components/SiteFooter.vue'
 import UiAlert from '../src/components/ui/UiAlert.vue'
 import UiButton from '../src/components/ui/UiButton.vue'
@@ -121,7 +120,10 @@ describe('router and page shells', () => {
     expect(h.session.orderRequest).toHaveBeenCalledWith(
       '/api/v1/orders/ops', {}, expect.any(Function), expect.any(Function)
     )
-    expect(wrapper.findComponent(PublicInfoBlock).exists()).toBe(true)
+    expect(wrapper.find('.public-info').exists()).toBe(false)
+    const illustrations = wrapper.findAll('.home-steps__illustration')
+    expect(illustrations).toHaveLength(3)
+    expect(illustrations.every(image => image.attributes('src') && image.attributes('alt') === '')).toBe(true)
   })
 
   it('keeps empty and invalid product addresses on Home with exact SCN-03 copy', async () => {
@@ -164,7 +166,7 @@ describe('router and page shells', () => {
     await wrapper.get('input[inputmode="url"]').setValue('store.example.com/item')
     await wrapper.get('form').trigger('submit')
     await flushPromises()
-    const alert = wrapper.get('.home-hero__primary > .ui-alert')
+    const alert = wrapper.get('.home-hero__entry > .ui-alert')
     expect(alert.text()).toBe(SERVICE_UNAVAILABLE_MESSAGE)
     expect(alert.find('strong').exists()).toBe(false)
     expect(wrapper.find('.product-entry .ui-alert').exists()).toBe(false)
@@ -278,6 +280,20 @@ describe('shared application chrome and controls', () => {
     expect(wrapper.get('.global-support').exists()).toBe(true)
     await wrapper.get('.app-header__login').trigger('click')
     expect(wrapper.emitted('authenticate')).toHaveLength(1)
+  })
+
+  it('keeps New Order navigation on anonymous legal and fallback routes without a catalogue', async () => {
+    const router = await routerAt('/legal/privacy-policy')
+    const wrapper = mount(AppHeader, { props:{ authenticated:false, storesAvailable:false }, global:{ plugins:[router] } })
+    expect(wrapper.findAll('.app-header__desktop-nav a').map(link => link.text())).toEqual(['Новый заказ'])
+    expect(wrapper.find('.app-header__desktop-nav [aria-current="page"]').exists()).toBe(false)
+    await wrapper.get('.app-header__menu-button').trigger('click')
+    expect(wrapper.findAll('.app-header__mobile-nav a').map(link => link.text())).toEqual(['Новый заказ'])
+    await router.push('/missing')
+    await flushPromises()
+    expect(wrapper.get('.app-header__desktop-nav a').text()).toBe('Новый заказ')
+    expect(wrapper.find('.app-header__mobile-nav').exists()).toBe(false)
+    wrapper.unmount()
   })
 
   it('tracks the current navigation section across flows and leaves legal pages unselected', async () => {

@@ -8,6 +8,7 @@ import UiField from './ui/UiField.vue'
 defineProps({
   sourceUrl: { type: String, required: true },
   item: { type: Object, required: true },
+  totalPrice: { type: String, default: '' },
   readonly: { type: Boolean, default: false },
   disabled: { type: Boolean, default: false },
   errorsFor: { type: Function, default: () => [] }
@@ -77,6 +78,12 @@ const blur = name => emit('blur', name)
       :errors="errorsFor('quantity')"
       @update:model-value="update('quantity', $event)"
       @blur="blur('quantity')"
+    />
+    <UiField
+      v-if="totalPrice"
+      :model-value="totalPrice"
+      label="Общая цена"
+      readonly
     />
     <UiField
       :model-value="item.color"

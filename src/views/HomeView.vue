@@ -9,7 +9,6 @@ import { useRouter } from 'vue-router'
 
 import FeaturedStores from '../components/FeaturedStores.vue'
 import StoreCatalogueNotice from '../components/StoreCatalogueNotice.vue'
-import PublicInfoBlock from '../components/PublicInfoBlock.vue'
 import UiAlert from '../components/ui/UiAlert.vue'
 import UiButton from '../components/ui/UiButton.vue'
 import UiField from '../components/ui/UiField.vue'
@@ -97,48 +96,100 @@ const focusAfter = useValidationFocus(focusRoot, { context:() => null, ready:() 
             ПОКУПКИ ИЗ США
           </p>
           <h1 id="home-title">
-            Закажите товар — остальное сделаем мы
+            <span>Закажите товар — </span><span>остальное <span class="home-hero__headline-tail">сделаем мы</span></span>
           </h1>
           <p class="home-hero__lead">
-            Вставьте ссылку на товар из американского интернет-магазина и получите предварительный расчёт.
+            Вставьте ссылку на товар из американского интернет-магазина и получите предварительный расчёт
           </p>
         </div>
-        <UiAlert
-          v-if="problem"
-          :title="errorTitle"
-        >
-          {{ error }}
-        </UiAlert>
-        <form
-          ref="focusRoot"
-          class="product-entry"
-          novalidate
-          @submit.prevent="begin"
-        >
-          <UiField
-            v-model="sourceUrl"
-            name="sourceUrl"
-            label="Ссылка на товар"
-            type="text"
-            placeholder="https://store.com/product"
-            autocomplete="url"
-            inputmode="url"
-            required
-            :disabled="loading"
-            :errors="sourceErrors"
-            @update:model-value="sourceProblem = ''; problem = null"
-          />
-          <UiButton
-            type="submit"
-            variant="primary"
-            :loading="loading"
+        <div class="home-hero__entry">
+          <UiAlert
+            v-if="problem"
+            :title="errorTitle"
           >
-            Рассчитать стоимость
-          </UiButton>
-        </form>
-        <p class="product-entry__note">
-          До расчёта нам не нужны ваши контактные данные.
-        </p>
+            {{ error }}
+          </UiAlert>
+          <form
+            ref="focusRoot"
+            class="product-entry"
+            novalidate
+            @submit.prevent="begin"
+          >
+            <UiField
+              v-model="sourceUrl"
+              name="sourceUrl"
+              label="Ссылка на товар"
+              type="text"
+              placeholder="https://store.com/product"
+              autocomplete="url"
+              inputmode="url"
+              required
+              :disabled="loading"
+              :errors="sourceErrors"
+              @update:model-value="sourceProblem = ''; problem = null"
+            />
+            <UiButton
+              type="submit"
+              variant="primary"
+              :loading="loading"
+            >
+              Рассчитать стоимость
+            </UiButton>
+          </form>
+        </div>
+        <ul class="home-hero__benefits">
+          <li>
+            <svg
+              viewBox="0 0 48 48"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              aria-hidden="true"
+            >
+              <path d="M24 4 40 10v12c0 10-6 17-16 22C14 39 8 32 8 22V10L24 4Z" />
+              <path d="m17 24 5 5 10-11" />
+            </svg>
+            <span>Надёжная доставка<br>с трекингом</span>
+          </li>
+          <li>
+            <svg
+              viewBox="0 0 48 48"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              aria-hidden="true"
+            >
+              <rect
+                x="4"
+                y="9"
+                width="40"
+                height="30"
+                rx="5"
+              />
+              <path d="M4 19h40M10 29h11" />
+              <circle
+                cx="35"
+                cy="30"
+                r="5"
+              />
+              <path d="m33 30 2 2 3-4" />
+            </svg>
+            <span>Прозрачные условия<br>и честная стоимость</span>
+          </li>
+          <li>
+            <svg
+              viewBox="0 0 48 48"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              aria-hidden="true"
+            >
+              <path d="m24 4 18 10v20L24 44 6 34V14L24 4Z" />
+              <path d="M6 14 24 24l18-10M24 24v20M15 9l18 10" />
+            </svg>
+            <span>Тысячи товаров<br>из США</span>
+          </li>
+        </ul>
       </div>
       <FeaturedStores />
     </section>
@@ -149,19 +200,53 @@ const focusAfter = useValidationFocus(focusRoot, { context:() => null, ready:() 
       class="home-steps"
       aria-labelledby="steps-title"
     >
-      <p class="page-kicker">
-        КАК ЭТО РАБОТАЕТ
-      </p>
-      <h2 id="steps-title">
-        Три понятных шага
-      </h2>
+      <div class="home-steps__heading">
+        <h2 id="steps-title">
+          Три понятных шага
+        </h2>
+        <p>Лёгкий и прозрачный процесс — от ссылки до получения заказа.</p>
+      </div>
       <ol>
-        <li><span>1</span><div><strong>Отправьте ссылку</strong><p>На товар из интернет-магазина США.</p></div></li>
-        <li><span>2</span><div><strong>Уточните данные товара</strong><p>Покажем предварительную стоимость и проверим заказ.</p></div></li>
-        <li><span>3</span><div><strong>Получите заказ</strong><p>Организуем оплату, логистику и выдачу в России.</p></div></li>
+        <li>
+          <span class="home-steps__number">1</span>
+          <div class="home-steps__copy">
+            <strong>Отправьте ссылку</strong>
+            <p>На товар из американского интернет-магазина.</p>
+          </div>
+          <img
+            class="home-steps__illustration"
+            src="/step-link.svg"
+            alt=""
+            aria-hidden="true"
+          >
+        </li>
+        <li>
+          <span class="home-steps__number">2</span>
+          <div class="home-steps__copy">
+            <strong>Подтвердите расчёт</strong>
+            <p>Покажем стоимость товара, выкупа и доставки.</p>
+          </div>
+          <img
+            class="home-steps__illustration"
+            src="/step-confirm.svg"
+            alt=""
+            aria-hidden="true"
+          >
+        </li>
+        <li>
+          <span class="home-steps__number">3</span>
+          <div class="home-steps__copy">
+            <strong>Получите заказ</strong>
+            <p>Организуем оплату, логистику и выдачу в России.</p>
+          </div>
+          <img
+            class="home-steps__illustration"
+            src="/step-delivery.svg"
+            alt=""
+            aria-hidden="true"
+          >
+        </li>
       </ol>
     </section>
-
-    <PublicInfoBlock />
   </main>
 </template>

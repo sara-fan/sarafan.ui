@@ -28,7 +28,6 @@ watch(() => route.fullPath, () => { menuOpen.value = false })
     />
     <div class="app-header__actions">
       <nav
-        v-if="authenticated || storesAvailable"
         class="app-header__desktop-nav"
         aria-label="Основная навигация"
       >
@@ -92,7 +91,6 @@ watch(() => route.fullPath, () => { menuOpen.value = false })
         <span>Поддержка</span>
       </span>
       <button
-        v-if="authenticated || storesAvailable"
         class="app-header__menu-button"
         type="button"
         :aria-expanded="menuOpen"
@@ -106,7 +104,7 @@ watch(() => route.fullPath, () => { menuOpen.value = false })
       </button>
     </div>
     <nav
-      v-if="(authenticated || storesAvailable) && menuOpen"
+      v-if="menuOpen"
       id="mobile-navigation"
       class="app-header__mobile-nav"
       aria-label="Мобильная навигация"

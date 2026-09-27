@@ -15,6 +15,7 @@ import UiField from '../components/ui/UiField.vue'
 import { CORE_PROBLEM_TYPES, createInternalProblem, normalizeProblem, presentProblem, presentProblemTitle, problemFieldErrors } from '../errors/problem.js'
 import { formatMoneyAmount } from '../moneyFormatting.js'
 import { isOrderNumber } from '../orderNumber.js'
+import { priceCents } from '../orderProduct.js'
 import { validateCustomerOrder, validateOrderOps } from '../stores/orders.js'
 import { useSession } from '../stores/session.js'
 import { useValidationFocus, validationFields } from '../validationFocus.js'
@@ -31,7 +32,8 @@ const cancelReason = ref('')
 const cancelProblem = ref(null)
 const cancelledNotice = ref(false)
 const cancelFocusRoot = ref(null)
-let generation = 0
+let loadGeneration = 0
+let cancellationGeneration = 0
 let inFlight = null
 
 const error = computed(() => presentProblem(problem.value))
@@ -51,6 +53,7 @@ const cancelReasonErrors = computed(() => problemFieldErrors(cancelProblem.value
 const cancelError = computed(() => cancelProblem.value && cancelReasonErrors.value.length === 0 ? presentProblem(cancelProblem.value) : '')
 const cancelErrorTitle = computed(() => cancelProblem.value ? presentProblemTitle(cancelProblem.value) : '')
 const product = computed(() => order.value?.product)
+const totalPrice = computed(() => sellerPrice(product.value?.sellerPrice, product.value?.quantity))
 const reviewItem = computed(() => ({
   productName:display(product.value?.productName),
   storeName:display(product.value?.storeName),
@@ -60,8 +63,6 @@ const reviewItem = computed(() => ({
   size:display(product.value?.size),
   comment:display(product.value?.comment)
 }))
-const sourceHost = computed(() => new globalThis.URL(order.value.sourceUrl).hostname)
-
 function orderNumber() {
   const value = String(route.params.orderNumber ?? '')
   const rawSegment = route.path.startsWith('/orders/') ? route.path.slice('/orders/'.length) : ''
@@ -78,10 +79,11 @@ function createdAt(value) {
     day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit'
   }).format(new Date(value))
 }
-function sellerPrice(value) {
+function sellerPrice(value, quantity = 1) {
   if (!value) return 'Не указано'
   const currency = ops.value.currencies.find(item => item.value === value.currency)
-  return `${formatMoneyAmount(value.amount)} ${currency.symbol}`
+  const cents = priceCents(value.amount) * BigInt(quantity)
+  return `${formatMoneyAmount(Number(cents) / 100)} ${currency.symbol}`
 }
 function openCancellation() {
   cancelReason.value = ''
@@ -110,10 +112,10 @@ async function cancelAction() {
     })
     return
   }
-  const requestGeneration = ++generation
+  const requestGeneration = ++cancellationGeneration
   const customerId = session.customer.value?.id
   const expectedNumber = orderNumber()
-  const isCurrent = () => requestGeneration === generation && customerId === session.customer.value?.id
+  const isCurrent = () => requestGeneration === cancellationGeneration && customerId === session.customer.value?.id
     && expectedNumber === orderNumber()
   cancelBusy.value = true
   cancelProblem.value = null
@@ -140,10 +142,11 @@ async function cancelAction() {
       cancelOpen.value = false
       cancelBusy.value = false
       await load()
+      if (!isCurrent()) return
       if (!problem.value) problem.value = normalized
     } else cancelProblem.value = normalized
   } finally {
-    if (customerId === session.customer.value?.id && expectedNumber === orderNumber()) cancelBusy.value = false
+    if (isCurrent()) cancelBusy.value = false
   }
 }
 function load() {
@@ -156,10 +159,10 @@ function load() {
 }
 
 async function loadCurrent() {
-  const requestGeneration = ++generation
+  const requestGeneration = ++loadGeneration
   const customerId = session.customer.value?.id
   const expectedNumber = orderNumber()
-  const isCurrent = () => requestGeneration === generation
+  const isCurrent = () => requestGeneration === loadGeneration
     && customerId === session.customer.value?.id && expectedNumber === orderNumber()
   problem.value = null
   cancelledNotice.value = false
@@ -191,22 +194,23 @@ async function loadCurrent() {
   } catch (value) {
     if (isCurrent()) problem.value = normalizeProblem(value, { detail:'Не удалось загрузить заказ' })
   } finally {
-    if (requestGeneration === generation) loading.value = false
+    if (requestGeneration === loadGeneration) loading.value = false
   }
 }
 
-function revisit() { if (globalThis.document.visibilityState === 'visible') void load() }
+function revisit() { if (globalThis.document.visibilityState === 'visible' && !cancelBusy.value) void load() }
 
 const stopWatch = watch(
   [() => route.params.orderNumber, () => session.customer.value?.id],
-  () => { cancelOpen.value = false; cancelBusy.value = false; cancelReason.value = ''; cancelProblem.value = null; void load() },
+  () => { cancellationGeneration++; cancelOpen.value = false; cancelBusy.value = false; cancelReason.value = ''; cancelProblem.value = null; void load() },
   { immediate:true, flush:'sync' }
 )
 
 onMounted(() => globalThis.document.addEventListener('visibilitychange', revisit))
 
 onBeforeUnmount(() => {
-  generation++
+  loadGeneration++
+  cancellationGeneration++
   inFlight = null
   globalThis.document.removeEventListener('visibilitychange', revisit)
   stopWatch()
@@ -228,6 +232,7 @@ onBeforeUnmount(() => {
       >
         <UiButton
           :loading="loading"
+          :disabled="cancelBusy"
           @click="load"
         >
           Обновить
@@ -284,13 +289,15 @@ onBeforeUnmount(() => {
         :historical="status?.routeAlias === 'cancelled'"
       />
       <section
-        v-if="order.showReviewFields"
         class="order-review-card"
         aria-labelledby="order-product-title"
       >
         <div class="order-review-card__heading">
           <div>
-            <p class="page-kicker">
+            <p
+              v-if="order.showReviewFields"
+              class="page-kicker"
+            >
               НА ПРОВЕРКЕ
             </p>
             <h2 id="order-product-title">
@@ -298,66 +305,18 @@ onBeforeUnmount(() => {
             </h2>
           </div>
         </div>
-        <p class="order-review-card__notice">
+        <p
+          v-if="order.showReviewFields"
+          class="order-review-card__notice"
+        >
           Проверим данные в течение двух часов.
         </p>
         <OrderItemFields
           :source-url="order.sourceUrl"
           :item="reviewItem"
+          :total-price="totalPrice"
           readonly
         />
-      </section>
-
-      <section
-        v-else
-        class="order-summary-card"
-        aria-labelledby="order-product-title"
-      >
-        <div class="order-review-card__heading">
-          <div>
-            <p class="page-kicker">
-              ТОВАР
-            </p>
-            <h2 id="order-product-title">
-              {{ display(product.productName) }}
-            </h2>
-          </div>
-          <a
-            :href="order.sourceUrl"
-            target="_blank"
-            rel="noopener noreferrer"
-          >Страница товара</a>
-        </div>
-        <dl class="order-summary-grid">
-          <div>
-            <dt>Магазин</dt>
-            <dd>{{ display(product.storeName) }}</dd>
-          </div>
-          <div>
-            <dt>Цена за единицу</dt>
-            <dd>{{ sellerPrice(product.sellerPrice) }}</dd>
-          </div>
-          <div>
-            <dt>Количество</dt>
-            <dd>{{ product.quantity }}</dd>
-          </div>
-          <div>
-            <dt>Сайт продавца</dt>
-            <dd>{{ sourceHost }}</dd>
-          </div>
-          <div>
-            <dt>Цвет</dt>
-            <dd>{{ display(product.color) }}</dd>
-          </div>
-          <div>
-            <dt>Размер</dt>
-            <dd>{{ display(product.size) }}</dd>
-          </div>
-          <div class="order-summary-grid__wide">
-            <dt>Комментарий</dt>
-            <dd>{{ display(product.comment) }}</dd>
-          </div>
-        </dl>
       </section>
     </template>
 
@@ -370,6 +329,7 @@ onBeforeUnmount(() => {
         <p>Заказ будет отменён. Восстановить его нельзя.</p>
         <UiField
           v-model="cancelReason"
+          name="reason"
           label="Причина отмены (необязательно)"
           multiline
           :maxlength="2000"

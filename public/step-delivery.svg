@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 120" fill="none">
+  <!-- Copyright (C) 2026 Maxim [maxirmx] Samsonov (www.sw.consulting)
+       All rights reserved.
+       This file is a part of the Sarafan application -->
+  <defs>
+    <linearGradient id="left" x1="61" y1="43" x2="109" y2="117" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#d9efff"/>
+      <stop offset="1" stop-color="#9dd6fc"/>
+    </linearGradient>
+    <linearGradient id="right" x1="109" y1="55" x2="151" y2="106" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#b9e1ff"/>
+      <stop offset="1" stop-color="#7bc2fa"/>
+    </linearGradient>
+  </defs>
+  <path d="M5 43h36M5 68h28M5 93h36" stroke="#1980fa" stroke-width="2" stroke-linecap="round"/>
+  <path d="m44 40 50-25 52 25-50 25-52-25Z" fill="#d8eeff"/>
+  <path d="m44 40 52 25v51L44 91V40Z" fill="url(#left)"/>
+  <path d="m96 65 50-25v51l-50 25V65Z" fill="url(#right)"/>
+  <path d="m65 29 52 24 10-5-52-24-10 5Z" fill="#158bff"/>
+  <path d="m65 29 52 24v24l10-5V48L75 24l-10 5Z" fill="#147aef"/>
+  <path d="m117 53 10-5v24l-10 5V53Z" fill="#075ad9"/>
+</svg>
