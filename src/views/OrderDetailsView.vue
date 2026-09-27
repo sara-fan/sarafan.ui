@@ -10,11 +10,14 @@ import CustomerCostSummary from '../components/CustomerCostSummary.vue'
 import OrderItemFields from '../components/OrderItemFields.vue'
 import UiAlert from '../components/ui/UiAlert.vue'
 import UiButton from '../components/ui/UiButton.vue'
-import { createInternalProblem, normalizeProblem, presentProblem, presentProblemTitle } from '../errors/problem.js'
+import UiDialog from '../components/ui/UiDialog.vue'
+import UiField from '../components/ui/UiField.vue'
+import { CORE_PROBLEM_TYPES, createInternalProblem, normalizeProblem, presentProblem, presentProblemTitle, problemFieldErrors } from '../errors/problem.js'
 import { formatMoneyAmount } from '../moneyFormatting.js'
 import { isOrderNumber } from '../orderNumber.js'
 import { validateCustomerOrder, validateOrderOps } from '../stores/orders.js'
 import { useSession } from '../stores/session.js'
+import { useValidationFocus, validationFields } from '../validationFocus.js'
 
 const route = useRoute()
 const session = useSession()
@@ -22,12 +25,21 @@ const order = ref(null)
 const ops = ref(null)
 const problem = ref(null)
 const loading = ref(false)
+const cancelOpen = ref(false)
+const cancelBusy = ref(false)
+const cancelReason = ref('')
+const cancelProblem = ref(null)
+const cancelledNotice = ref(false)
+const cancelFocusRoot = ref(null)
 let generation = 0
 let inFlight = null
 
 const error = computed(() => presentProblem(problem.value))
 const errorTitle = computed(() => presentProblemTitle(problem.value))
 const status = computed(() => ops.value?.statuses.find(item => item.value === order.value?.status))
+const cancelReasonErrors = computed(() => problemFieldErrors(cancelProblem.value, 'reason'))
+const cancelError = computed(() => cancelProblem.value && cancelReasonErrors.value.length === 0 ? presentProblem(cancelProblem.value) : '')
+const cancelErrorTitle = computed(() => cancelProblem.value ? presentProblemTitle(cancelProblem.value) : '')
 const product = computed(() => order.value?.product)
 const reviewItem = computed(() => ({
   productName:display(product.value?.productName),
@@ -61,6 +73,69 @@ function sellerPrice(value) {
   const currency = ops.value.currencies.find(item => item.value === value.currency)
   return `${formatMoneyAmount(value.amount)} ${currency.symbol}`
 }
+function openCancellation() {
+  cancelReason.value = ''
+  cancelProblem.value = null
+  cancelOpen.value = true
+}
+function closeCancellation() {
+  if (cancelBusy.value) return
+  cancelOpen.value = false
+  cancelProblem.value = null
+}
+const focusAfterCancel = useValidationFocus(cancelFocusRoot, {
+  context:() => `${session.customer.value?.id ?? ''}:${orderNumber() ?? ''}`,
+  active:() => cancelOpen.value,
+  ready:() => !cancelBusy.value
+})
+function submitCancellation() {
+  return focusAfterCancel(cancelAction, () => validationFields(cancelProblem.value))
+}
+async function cancelAction() {
+  if (cancelBusy.value || !order.value?.canCancel) return
+  const reason = cancelReason.value.trim()
+  if (reason.length > 2000) {
+    cancelProblem.value = createInternalProblem('invalidInput', {
+      errors:{ reason:['Причина отмены не должна превышать 2000 символов.'] }
+    })
+    return
+  }
+  const requestGeneration = ++generation
+  const customerId = session.customer.value?.id
+  const expectedNumber = orderNumber()
+  const isCurrent = () => requestGeneration === generation && customerId === session.customer.value?.id
+    && expectedNumber === orderNumber()
+  cancelBusy.value = true
+  cancelProblem.value = null
+  try {
+    let validatedOrder
+    await session.orderRequest(`/api/v1/orders/${encodeURIComponent(expectedNumber)}/cancel`, {
+      method:'POST', headers:{ 'Content-Type':'application/json' },
+      body:JSON.stringify({ expectedUpdatedAt:order.value.updatedAt, reason:reason || null })
+    }, isCurrent, value => {
+      validatedOrder = validateCustomerOrder(value, ops.value, expectedNumber)
+      if (ops.value.statuses.find(item => item.value === validatedOrder.status)?.routeAlias !== 'cancelled'
+        || validatedOrder.canCancel || !validatedOrder.cancelledAt) throw createInternalProblem('protocolError')
+    })
+    if (!isCurrent()) return
+    order.value = validatedOrder
+    cancelOpen.value = false
+    cancelReason.value = ''
+    cancelledNotice.value = true
+  } catch (value) {
+    if (!isCurrent()) return
+    const normalized = normalizeProblem(value, { detail:'Не удалось отменить заказ' })
+    if (normalized.type === CORE_PROBLEM_TYPES.orderUpdateConflict
+      || normalized.type === CORE_PROBLEM_TYPES.orderNotCancellable) {
+      cancelOpen.value = false
+      cancelBusy.value = false
+      await load()
+      if (!problem.value) problem.value = normalized
+    } else cancelProblem.value = normalized
+  } finally {
+    if (customerId === session.customer.value?.id && expectedNumber === orderNumber()) cancelBusy.value = false
+  }
+}
 function load() {
   const key = `${session.customer.value?.id ?? ''}:${orderNumber() ?? ''}`
   if (inFlight?.key === key) return inFlight.promise
@@ -77,6 +152,7 @@ async function loadCurrent() {
   const isCurrent = () => requestGeneration === generation
     && customerId === session.customer.value?.id && expectedNumber === orderNumber()
   problem.value = null
+  cancelledNotice.value = false
   order.value = null
   ops.value = null
   if (expectedNumber === null) {
@@ -113,7 +189,7 @@ function revisit() { if (globalThis.document.visibilityState === 'visible') void
 
 const stopWatch = watch(
   [() => route.params.orderNumber, () => session.customer.value?.id],
-  () => { void load() },
+  () => { cancelOpen.value = false; cancelBusy.value = false; cancelReason.value = ''; cancelProblem.value = null; void load() },
   { immediate:true, flush:'sync' }
 )
 
@@ -136,14 +212,41 @@ onBeforeUnmount(() => {
           {{ status?.name }} · создан {{ createdAt(order.createdAt) }}
         </p>
       </div>
-      <UiButton
+      <div
         v-if="order"
-        :loading="loading"
-        @click="load"
+        class="order-details-heading__actions"
       >
-        Обновить
-      </UiButton>
+        <UiButton
+          :loading="loading"
+          @click="load"
+        >
+          Обновить
+        </UiButton>
+        <UiButton
+          v-if="order.canCancel"
+          variant="danger"
+          :disabled="loading || cancelBusy"
+          @click="openCancellation"
+        >
+          Отменить заказ
+        </UiButton>
+      </div>
     </header>
+
+    <UiAlert
+      v-if="cancelledNotice"
+      tone="success"
+      role="status"
+    >
+      Заказ отменён
+    </UiAlert>
+
+    <p
+      v-if="order?.cancelledAt"
+      class="order-details__cancelled-at"
+    >
+      Отменён {{ createdAt(order.cancelledAt) }}
+    </p>
 
     <UiAlert
       v-if="problem"
@@ -175,6 +278,7 @@ onBeforeUnmount(() => {
       <CustomerCostSummary
         :pricing="order.pricing"
         :ops="ops"
+        :historical="status?.routeAlias === 'cancelled'"
       />
       <section
         v-if="order.showReviewFields"
@@ -253,5 +357,44 @@ onBeforeUnmount(() => {
         </dl>
       </section>
     </template>
+
+    <UiDialog
+      v-model="cancelOpen"
+      :title="`Отменить заказ ${order?.orderNumber ?? ''}?`"
+      :persistent="cancelBusy"
+    >
+      <div ref="cancelFocusRoot">
+        <p>Заказ будет отменён. Восстановить его нельзя.</p>
+        <UiField
+          v-model="cancelReason"
+          label="Причина отмены (необязательно)"
+          multiline
+          :maxlength="2000"
+          :disabled="cancelBusy"
+          :errors="cancelReasonErrors"
+        />
+        <UiAlert
+          v-if="cancelError"
+          :title="cancelErrorTitle"
+        >
+          {{ cancelError }}
+        </UiAlert>
+      </div>
+      <template #actions>
+        <UiButton
+          :disabled="cancelBusy"
+          @click="closeCancellation"
+        >
+          Оставить заказ
+        </UiButton>
+        <UiButton
+          variant="danger"
+          :loading="cancelBusy"
+          @click="submitCancellation"
+        >
+          Отменить заказ
+        </UiButton>
+      </template>
+    </UiDialog>
   </main>
 </template>

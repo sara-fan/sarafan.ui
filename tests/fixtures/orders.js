@@ -89,6 +89,9 @@ export function completeOrder(overrides = {}) {
     appliedExchangeRate:null,
     pricing:{ ...forecastPricing },
     createdAt:'2026-09-15T10:00:00Z',
+    updatedAt:'2026-09-15T10:00:00Z',
+    canCancel:[0, 100, 200].includes(orderOverrides.status ?? 0),
+    cancelledAt:null,
     showReviewFields:true,
     ...orderOverrides,
     product:currentProduct

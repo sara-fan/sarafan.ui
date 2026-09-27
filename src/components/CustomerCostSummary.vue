@@ -10,6 +10,7 @@ const props = defineProps({
   pricing: { type: Object, default: null },
   ops: { type: Object, default: null },
   compact: { type: Boolean, default: false },
+  historical: { type: Boolean, default: false },
   loading: { type: Boolean, default: false }
 })
 
@@ -27,7 +28,8 @@ watch(() => props.pricing, pricing => {
 onUnmounted(() => globalThis.clearTimeout(timer))
 
 const state = computed(() => expiredNow.value ? 200 : props.pricing?.state ?? 0)
-const label = computed(() => props.pricing?.state === 0 ? 'Предварительная стоимость'
+const label = computed(() => props.historical ? 'Последняя рассчитанная стоимость'
+  : props.pricing?.state === 0 ? 'Предварительная стоимость'
   : props.ops?.pricingStates?.find(item => item.value === state.value)?.name ?? 'Стоимость заказа')
 const rubSymbol = computed(() => props.ops?.currencies?.find(item => item.routeAlias === 'rub')?.symbol ?? '₽')
 const excludedAmount = amount => amount === null || amount === undefined
@@ -73,7 +75,7 @@ const excludedAmount = amount => amount === null || amount === undefined
       </div>
     </dl>
     <p
-      v-if="state === 200"
+      v-if="historical || state === 200"
       class="customer-cost__status"
     >
       Сохранённая стоимость показана для справки.

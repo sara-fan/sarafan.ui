@@ -10,8 +10,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 const h = vi.hoisted(() => ({ session:{} }))
 vi.mock('../src/stores/session.js', () => ({ useSession:() => h.session }))
 
-import { createInternalProblem, SERVICE_UNAVAILABLE_MESSAGE } from '../src/errors/problem.js'
+import { CORE_PROBLEM_TYPES, ProblemError, createInternalProblem, SERVICE_UNAVAILABLE_MESSAGE } from '../src/errors/problem.js'
 import OrderDetailsView from '../src/views/OrderDetailsView.vue'
+import { createSarafanVuetify } from '../src/plugins/vuetify.js'
 import { completeOrder, forecastPricing, ops, product } from './fixtures/orders.js'
 
 const mountedViews = []
@@ -27,7 +28,7 @@ async function mountAt(path = '/orders/12345678-3') {
     ]
   })
   await router.push(path)
-  const wrapper = mount(OrderDetailsView, { global:{ plugins:[router] } })
+  const wrapper = mount(OrderDetailsView, { global:{ plugins:[router, createSarafanVuetify()] } })
   mountedViews.push(wrapper)
   await flushPromises()
   return { router, wrapper }
@@ -41,6 +42,149 @@ describe('OrderDetailsView', () => {
       if (isCurrent()) validate(value)
       return value
     })
+  })
+
+  it('confirms customer cancellation with an optional reason and shows its date', async () => {
+    h.session.orderRequest.mockImplementation(async (path, options, isCurrent, validate) => {
+      const value = path.endsWith('/ops') ? ops : path.endsWith('/cancel')
+        ? completeOrder({ status:500, showReviewFields:false, updatedAt:'2026-09-15T10:05:00Z', cancelledAt:'2026-09-15T10:05:00Z' })
+        : completeOrder()
+      if (path.endsWith('/cancel')) expect(JSON.parse(options.body)).toEqual({ expectedUpdatedAt:'2026-09-15T10:00:00Z', reason:'Передумал' })
+      if (isCurrent()) validate(value)
+      return value
+    })
+    const { wrapper } = await mountAt()
+    await wrapper.get('.order-details-heading .ui-button--danger').trigger('click')
+    await flushPromises()
+    expect(globalThis.document.body.textContent).toContain('Восстановить его нельзя')
+    const textarea = globalThis.document.body.querySelector('.ui-dialog textarea')
+    expect(textarea).not.toBeNull()
+    textarea.value = ' Передумал '
+    textarea.dispatchEvent(new globalThis.Event('input', { bubbles:true }))
+    globalThis.document.body.querySelector('.ui-dialog__actions .ui-button--danger').click()
+    await flushPromises()
+    expect(wrapper.text()).toContain('Заказ отменён')
+    expect(wrapper.text()).toContain('Отменён')
+    expect(wrapper.find('.order-details-heading .ui-button--danger').exists()).toBe(false)
+    expect(h.session.orderRequest.mock.calls.filter(([path]) => path.endsWith('/cancel'))).toHaveLength(1)
+  })
+
+  it('keeps the entered reason after a server validation error', async () => {
+    h.session.orderRequest.mockImplementation(async (path, _options, isCurrent, validate) => {
+      if (path.endsWith('/cancel')) throw new ProblemError({
+        type:CORE_PROBLEM_TYPES.validationFailed, title:'Ошибка проверки данных', status:400,
+        detail:'Проверьте данные', instance:'/api/v1/orders/test/cancel', code:'validation_failed',
+        errors:{ reason:['Сократите причину.'] }
+      })
+      const value = path.endsWith('/ops') ? ops : completeOrder()
+      if (isCurrent()) validate(value)
+      return value
+    })
+    const { wrapper } = await mountAt()
+    await wrapper.get('.order-details-heading .ui-button--danger').trigger('click')
+    await flushPromises()
+    const textarea = globalThis.document.body.querySelector('.ui-dialog textarea')
+    textarea.value = 'Причина'
+    textarea.dispatchEvent(new globalThis.Event('input', { bubbles:true }))
+    globalThis.document.body.querySelector('.ui-dialog__actions .ui-button--danger').click()
+    await flushPromises()
+    expect(textarea.value).toBe('Причина')
+    expect(globalThis.document.body.textContent).toContain('Сократите причину.')
+    expect(wrapper.text()).not.toContain('Заказ отменён')
+  })
+
+  it('reloads a changed order after a cancellation version conflict', async () => {
+    let current = completeOrder()
+    h.session.orderRequest.mockImplementation(async (path, _options, isCurrent, validate) => {
+      if (path.endsWith('/cancel')) {
+        current = completeOrder({ status:100, showReviewFields:false, updatedAt:'2026-09-15T10:01:00Z' })
+        throw new ProblemError({
+          type:CORE_PROBLEM_TYPES.orderUpdateConflict, title:'Заказ изменился', status:409,
+          detail:'Обновите карточку', instance:'/api/v1/orders/test/cancel', code:'order_update_conflict'
+        })
+      }
+      const value = path.endsWith('/ops') ? ops : current
+      if (isCurrent()) validate(value)
+      return value
+    })
+    const { wrapper } = await mountAt()
+    await wrapper.get('.order-details-heading .ui-button--danger').trigger('click')
+    await flushPromises()
+    globalThis.document.body.querySelector('.ui-dialog__actions .ui-button--danger').click()
+    await flushPromises()
+    expect(wrapper.text()).toContain('Расчёт готов')
+    expect(wrapper.text()).toContain('Обновите карточку')
+    expect(wrapper.vm.$.setupState.cancelOpen).toBe(false)
+    expect(h.session.orderRequest.mock.calls.filter(([path]) => path.endsWith('/ops'))).toHaveLength(2)
+  })
+
+  it('discards a cancellation reply after the customer changes', async () => {
+    let finishCancellation
+    h.session.orderRequest.mockImplementation(async (path, _options, isCurrent, validate) => {
+      if (path.endsWith('/cancel')) {
+        await new Promise(resolve => { finishCancellation = resolve })
+        const cancelled = completeOrder({ status:500, showReviewFields:false,
+          updatedAt:'2026-09-15T10:05:00Z', cancelledAt:'2026-09-15T10:05:00Z' })
+        if (isCurrent()) validate(cancelled)
+        return cancelled
+      }
+      const value = path.endsWith('/ops') ? ops : completeOrder()
+      if (isCurrent()) validate(value)
+      return value
+    })
+    const { wrapper } = await mountAt()
+    await wrapper.get('.order-details-heading .ui-button--danger').trigger('click')
+    await flushPromises()
+    globalThis.document.body.querySelector('.ui-dialog__actions .ui-button--danger').click()
+    await flushPromises()
+    h.session.customer.value = { id:8 }
+    await flushPromises()
+    finishCancellation()
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('Заказ отменён')
+    expect(wrapper.vm.$.setupState.cancelBusy).toBe(false)
+    expect(wrapper.vm.$.setupState.cancelOpen).toBe(false)
+  })
+
+  it('keeps cancellation open while submitting and closes on the leave action', async () => {
+    const { wrapper } = await mountAt()
+    await wrapper.get('.order-details-heading .ui-button--danger').trigger('click')
+    await flushPromises()
+    const state = wrapper.vm.$.setupState
+    state.cancelBusy = true
+    state.closeCancellation()
+    expect(state.cancelOpen).toBe(true)
+    state.cancelBusy = false
+    globalThis.document.body.querySelector('.ui-dialog__actions .ui-button--secondary').click()
+    await flushPromises()
+    expect(state.cancelOpen).toBe(false)
+    expect(h.session.orderRequest.mock.calls.filter(([path]) => path.endsWith('/cancel'))).toHaveLength(0)
+  })
+
+  it('rejects an overlong reason before sending it', async () => {
+    const { wrapper } = await mountAt()
+    await wrapper.get('.order-details-heading .ui-button--danger').trigger('click')
+    await flushPromises()
+    wrapper.vm.$.setupState.cancelReason = 'x'.repeat(2001)
+    globalThis.document.body.querySelector('.ui-dialog__actions .ui-button--danger').click()
+    await flushPromises()
+    expect(globalThis.document.body.textContent).toContain('не должна превышать 2000 символов')
+    expect(h.session.orderRequest.mock.calls.filter(([path]) => path.endsWith('/cancel'))).toHaveLength(0)
+  })
+
+  it('keeps the dialog open when cancellation returns an active order', async () => {
+    h.session.orderRequest.mockImplementation(async (path, _options, isCurrent, validate) => {
+      const value = path.endsWith('/ops') ? ops : completeOrder()
+      if (isCurrent()) validate(value)
+      return value
+    })
+    const { wrapper } = await mountAt()
+    await wrapper.get('.order-details-heading .ui-button--danger').trigger('click')
+    await flushPromises()
+    globalThis.document.body.querySelector('.ui-dialog__actions .ui-button--danger').click()
+    await flushPromises()
+    expect(wrapper.vm.$.setupState.cancelOpen).toBe(true)
+    expect(globalThis.document.body.textContent).toContain('Сервис временно недоступен')
   })
 
   it('loads the current product into the expanded read-only review card', async () => {
@@ -92,7 +236,7 @@ describe('OrderDetailsView', () => {
     expect(wrapper.get('.customer-cost__excluded').text()).toContain('Будет рассчитана позже')
 
     delivery = 1000
-    await wrapper.get('.order-details-heading > button').trigger('click')
+    await wrapper.get('.order-details-heading__actions > button').trigger('click')
     await flushPromises()
     expect(wrapper.get('.customer-cost__excluded').text()).toContain('Доставка по России1 000,00 ₽')
   })
@@ -284,7 +428,7 @@ describe('OrderDetailsView', () => {
     await wrapper.get('[role="alert"] button').trigger('click')
     await flushPromises()
     expect(wrapper.text()).toContain('Заказ 12345678-3')
-    await wrapper.get('.order-details-heading > button').trigger('click')
+    await wrapper.get('.order-details-heading__actions > button').trigger('click')
     await flushPromises()
     expect(h.session.orderRequest).toHaveBeenCalledTimes(5)
   })

@@ -15,3 +15,7 @@ export function isOrderDetailPath(path) {
     return false
   }
 }
+
+export function isOrderCancelPath(path) {
+  return typeof path === 'string' && path.endsWith('/cancel') && isOrderDetailPath(path.slice(0, -'/cancel'.length))
+}

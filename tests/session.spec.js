@@ -1114,6 +1114,7 @@ describe('session store', () => {
       if (url === '/api/v1/orders/ops') return Promise.resolve(response(200, orderOps))
       if (url === '/api/v1/orders') return Promise.resolve(response(200, []))
       if (url === '/api/v1/orders/01234567-17') return Promise.resolve(response(200, { orderNumber:'01234567-17' }))
+      if (url === '/api/v1/orders/01234567-17/cancel') return Promise.resolve(response(200, { orderNumber:'01234567-17', status:500 }))
       throw new Error(`Unexpected request: ${url}`)
     })
     vi.stubGlobal('fetch', fetch)
@@ -1129,6 +1130,8 @@ describe('session store', () => {
     const validateOrder = vi.fn()
     await expect(session.orderRequest('/api/v1/orders/01234567-17', {}, () => true, validateOrder)).resolves.toEqual({ orderNumber:'01234567-17' })
     expect(validateOrder).toHaveBeenCalledWith({ orderNumber:'01234567-17' })
+    await expect(session.orderRequest('/api/v1/orders/01234567-17/cancel', { method:'POST' }, () => true))
+      .resolves.toMatchObject({ status:500 })
     for (const segment of ['01234567-17/product', 'preview', 'PREVIEW', 'OPS', '%6f%70%73', '%70review', '..', '%2e%2e', '%FF', '%20', 'x'.repeat(65), 'number?query', 'number#hash', 'number\\path']) {
       await expect(session.orderRequest(`/api/v1/orders/${segment}`)).rejects.toMatchObject({
         type:INTERNAL_PROBLEM_TYPES.invalidInput
@@ -1141,6 +1144,8 @@ describe('session store', () => {
     expect(opsCall[1].headers.has('Authorization')).toBe(false)
     expect(listCall[1].headers.get('Authorization')).toBe('Bearer order-token')
     expect(detailCall[1].headers.get('Authorization')).toBe('Bearer order-token')
+    const cancelCall = fetch.mock.calls.find(([url]) => url === '/api/v1/orders/01234567-17/cancel')
+    expect(cancelCall[1].headers.get('Authorization')).toBe('Bearer order-token')
   })
 
   it('previews anonymously and creates with the retained idempotency key', async () => {

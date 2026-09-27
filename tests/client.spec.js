@@ -210,11 +210,16 @@ describe('RFC 9457 API client', () => {
     await expect(client.request('/api/v1/orders/01234567-17')).rejects.toMatchObject({ code:'service_unavailable' })
     await expect(client.request('/api/v1/orders/0')).rejects.toMatchObject({ code:'service_unavailable' })
     await expect(client.request('/api/v1/orders/not-an-id')).rejects.toMatchObject({ code:'service_unavailable' })
+    await expect(client.request('/api/v1/orders/01234567-17/cancel', {
+      method:'POST', body:JSON.stringify({ reason:'Секретная причина' })
+    })).rejects.toMatchObject({ code:'service_unavailable' })
 
     expect(logger.log.mock.calls[0][1]['http.route']).toBe('/api/v1/orders/{orderNumber}')
     expect(logger.log.mock.calls[1][1]['http.route']).toBe('/api/v1/orders/{orderNumber}')
     expect(logger.log.mock.calls[2][1]['http.route']).toBe('/api/v1/orders/{orderNumber}')
+    expect(logger.log.mock.calls[3][1]['http.route']).toBe('/api/v1/orders/{orderNumber}/cancel')
     expect(JSON.stringify(logger.log.mock.calls)).not.toContain('01234567-17')
+    expect(JSON.stringify(logger.log.mock.calls)).not.toContain('Секретная причина')
   })
 
   it('logs non-validation client failures', async () => {
