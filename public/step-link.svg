@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 120" fill="none">
+  <!-- Copyright (C) 2026 Maxim [maxirmx] Samsonov (www.sw.consulting)
+       All rights reserved.
+       This file is a part of the Sarafan application -->
+  <defs>
+    <linearGradient id="window" x1="13" y1="13" x2="151" y2="115" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#d9f2ff"/>
+      <stop offset="1" stop-color="#d8ebfa"/>
+    </linearGradient>
+    <filter id="shadow" x="0" y="0" width="160" height="120" filterUnits="userSpaceOnUse">
+      <feDropShadow dx="0" dy="5" stdDeviation="5" flood-color="#5498d7" flood-opacity=".17"/>
+    </filter>
+  </defs>
+  <g filter="url(#shadow)">
+    <rect x="7" y="8" width="146" height="102" rx="12" fill="url(#window)"/>
+    <path d="M7 21c0-7.18 5.82-13 13-13h120c7.18 0 13 5.82 13 13v14H7V21Z" fill="#cbe9ff"/>
+    <circle cx="20" cy="22" r="3.3" fill="#58b8ff"/>
+    <circle cx="32" cy="22" r="3.3" fill="#eff8ff"/>
+    <circle cx="44" cy="22" r="3.3" fill="#eff8ff"/>
+    <rect x="20" y="44" width="126" height="49" rx="10" fill="white"/>
+    <rect x="24" y="48" width="42" height="41" rx="10" fill="#f1faff"/>
+    <path d="m43.1 62.8-2.5 2.5a5.3 5.3 0 0 0 7.5 7.5l4-4a5.3 5.3 0 0 0-7.5-7.5l-1.2 1.2m-1.7 10.1 1.2-1.2a5.3 5.3 0 0 0-7.5-7.5l-4 4a5.3 5.3 0 0 0 7.5 7.5l2.5-2.5" stroke="#0565ed" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="70" y="74" fill="#0937aa" font-family="Arial, sans-serif" font-size="16" font-weight="600">https://...</text>
+  </g>
+</svg>

@@ -105,6 +105,8 @@ describe('OrderDetailsView', () => {
     globalThis.document.body.querySelector('.ui-dialog__actions .ui-button--danger').click()
     await flushPromises()
     expect(textarea.value).toBe('Причина')
+    expect(textarea.getAttribute('name')).toBe('reason')
+    expect(globalThis.document.activeElement).toBe(textarea)
     expect(globalThis.document.body.textContent).toContain('Сократите причину.')
     expect(wrapper.text()).not.toContain('Заказ отменён')
   })
@@ -132,6 +134,38 @@ describe('OrderDetailsView', () => {
     expect(wrapper.text()).toContain('Обновите карточку')
     expect(wrapper.vm.$.setupState.cancelOpen).toBe(false)
     expect(h.session.orderRequest.mock.calls.filter(([path]) => path.endsWith('/ops'))).toHaveLength(2)
+  })
+
+  it('does not show an old cancellation conflict after navigating during its reload', async () => {
+    let releaseReload
+    let opsCalls = 0
+    h.session.orderRequest.mockImplementation(async (path, _options, isCurrent, validate) => {
+      if (path.endsWith('/cancel')) throw new ProblemError({
+        type:CORE_PROBLEM_TYPES.orderUpdateConflict, title:'Заказ изменился', status:409,
+        detail:'Обновите карточку', instance:'/api/v1/orders/test/cancel', code:'order_update_conflict'
+      })
+      if (path.endsWith('/ops')) {
+        if (++opsCalls === 2) await new Promise(resolve => { releaseReload = resolve })
+        if (isCurrent()) validate(ops)
+        return ops
+      }
+      const value = completeOrder({ orderNumber:decodeURIComponent(path.split('/').at(-1)) })
+      if (isCurrent()) validate(value)
+      return value
+    })
+    const { router, wrapper } = await mountAt()
+    await wrapper.get('.order-details-heading .ui-button--danger').trigger('click')
+    await flushPromises()
+    globalThis.document.body.querySelector('.ui-dialog__actions .ui-button--danger').click()
+    await vi.waitFor(() => expect(releaseReload).toBeTypeOf('function'))
+
+    await router.push('/orders/12345678-4')
+    await flushPromises()
+    expect(wrapper.text()).toContain('Заказ 12345678-4')
+    releaseReload()
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('Обновите карточку')
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false)
   })
 
   it('discards a cancellation reply after the customer changes', async () => {
@@ -214,10 +248,12 @@ describe('OrderDetailsView', () => {
     expect(wrapper.get('.customer-cost__headline > span').text()).toBe('Предварительная стоимость')
     expect(wrapper.get('.customer-cost').element.nextElementSibling).toBe(wrapper.get('.order-review-card').element)
     expect(wrapper.findAll('.order-review-card .order-item-fields input').map(field => field.element.value)).toContain('12,34 $')
-    expect(wrapper.findAll('.order-review-card .order-item-fields .ui-field')).toHaveLength(8)
+    expect(wrapper.findAll('.order-review-card .order-item-fields .ui-field')).toHaveLength(9)
     expect(wrapper.get('.order-item-fields').element.lastElementChild.classList.contains('order-item-fields__comment')).toBe(true)
-    expect(wrapper.findAll('.order-review-card .order-item-fields input[readonly]')).toHaveLength(7)
-    expect(wrapper.get('.order-review-card').text()).not.toContain('Стоимость')
+    expect(wrapper.findAll('.order-review-card .order-item-fields input[readonly]')).toHaveLength(8)
+    const totalField = wrapper.findAll('.order-review-card .order-item-fields .ui-field')
+      .find(field => field.text().includes('Общая цена'))
+    expect(totalField.get('input').element.value).toBe('24,68 $')
     expect(wrapper.get('.order-review-card .order-item-fields textarea').attributes('readonly')).toBeDefined()
     expect(wrapper.get('.order-review-card .order-item-fields__source a').attributes('href')).toBe('https://shop.example.com/item')
   })
@@ -282,6 +318,39 @@ describe('OrderDetailsView', () => {
     wrapper.unmount()
   })
 
+  it('keeps a pending cancellation owned when the tab becomes visible', async () => {
+    let finishCancellation
+    h.session.orderRequest.mockImplementation((path, _options, isCurrent, validate) => {
+      if (path.endsWith('/cancel')) return new Promise(resolve => {
+        finishCancellation = () => {
+          const value = completeOrder({ status:500, showReviewFields:false,
+            updatedAt:'2026-09-15T10:05:00Z', cancelledAt:'2026-09-15T10:05:00Z' })
+          if (isCurrent()) validate(value)
+          resolve(value)
+        }
+      })
+      const value = path.endsWith('/ops') ? ops : completeOrder()
+      if (isCurrent()) validate(value)
+      return Promise.resolve(value)
+    })
+    const { wrapper } = await mountAt()
+    await wrapper.get('.order-details-heading .ui-button--danger').trigger('click')
+    await flushPromises()
+    globalThis.document.body.querySelector('.ui-dialog__actions .ui-button--danger').click()
+    await vi.waitFor(() => expect(finishCancellation).toBeTypeOf('function'))
+
+    globalThis.document.dispatchEvent(new globalThis.Event('visibilitychange'))
+    await flushPromises()
+    expect(h.session.orderRequest).toHaveBeenCalledTimes(3)
+    expect(wrapper.get('.order-details-heading__actions > button').attributes('disabled')).toBeDefined()
+    expect(wrapper.vm.$.setupState.cancelOpen).toBe(true)
+
+    finishCancellation()
+    await flushPromises()
+    expect(wrapper.text()).toContain('Заказ отменён')
+    expect(wrapper.vm.$.setupState.cancelBusy).toBe(false)
+  })
+
   it.each(['01234567-3', 'Заказ / 3'])('keeps %s opaque and encodes the API path', async number => {
     const { wrapper } = await mountAt(`/orders/${encodeURIComponent(number)}`)
     expect(h.session.orderRequest).toHaveBeenNthCalledWith(2,
@@ -300,7 +369,7 @@ describe('OrderDetailsView', () => {
     expect(wrapper.find('.order-review-card').exists()).toBe(false)
   })
 
-  it('renders a compact historical summary when review fields are hidden', async () => {
+  it('renders the same product fields and source URL for a completed order', async () => {
     h.session.orderRequest.mockImplementation(async (path, _options, isCurrent, validate) => {
       const value = path.endsWith('/ops') ? ops : completeOrder({
         status:400,
@@ -310,14 +379,22 @@ describe('OrderDetailsView', () => {
       return value
     })
     const { wrapper } = await mountAt()
-    expect(wrapper.find('.order-summary-card').exists()).toBe(true)
-    expect(wrapper.get('.customer-cost').element.nextElementSibling).toBe(wrapper.get('.order-summary-card').element)
-    expect(wrapper.find('.order-item-fields').exists()).toBe(false)
-    expect(wrapper.text()).toContain('shop.example.com')
-    expect(wrapper.get('.order-summary-card').text()).toContain('12,34 $')
+    expect(wrapper.get('.customer-cost').element.nextElementSibling).toBe(wrapper.get('.order-review-card').element)
+    expect(wrapper.find('.order-review-card__notice').exists()).toBe(false)
+    expect(wrapper.findAll('.order-item-fields .ui-field__label').map(field => field.text())).toEqual([
+      'Исходная ссылка', 'Название товара, как на сайте', 'Магазин', 'Цена за единицу',
+      'Количество', 'Общая цена', 'Цвет, как на сайте', 'Размер', 'Комментарий'
+    ])
+    expect(wrapper.get('.order-item-fields__source input').element.value).toBe('https://shop.example.com/item')
+    expect(wrapper.get('.order-item-fields__source a').attributes('href')).toBe('https://shop.example.com/item')
+    expect(wrapper.get('input[name="productName"]').element.value).toBe('Товар')
+    expect(wrapper.get('input[name="sellerPrice"]').element.value).toBe('12,34 $')
+    const totalField = wrapper.findAll('.order-item-fields .ui-field').find(field => field.text().includes('Общая цена'))
+    expect(totalField.get('input').element.value).toBe('24,68 $')
+    expect(wrapper.get('.order-item-fields').element.lastElementChild.classList.contains('order-item-fields__comment')).toBe(true)
     expect(wrapper.text()).toContain('Получен')
-    expect(wrapper.text()).toContain('синий')
-    expect(wrapper.text()).toContain('Комментарий')
+    expect(wrapper.get('input[name="color"]').element.value).toBe('синий')
+    expect(wrapper.get('textarea[name="comment"]').element.value).toBe('Комментарий')
   })
 
   it('renders missing historical product attributes as not specified', async () => {
@@ -337,9 +414,9 @@ describe('OrderDetailsView', () => {
       return value
     })
     const { wrapper } = await mountAt()
-    expect(wrapper.find('.order-summary-card').text()).toContain('ЦветНе указано')
-    expect(wrapper.find('.order-summary-card').text()).toContain('РазмерНе указано')
-    expect(wrapper.find('.order-summary-card').text()).toContain('КомментарийНе указано')
+    expect(wrapper.get('input[name="color"]').element.value).toBe('Не указано')
+    expect(wrapper.get('input[name="size"]').element.value).toBe('Не указано')
+    expect(wrapper.get('textarea[name="comment"]').element.value).toBe('Не указано')
   })
 
   it('uses explicit empty values for missing product attributes', async () => {
@@ -354,7 +431,7 @@ describe('OrderDetailsView', () => {
     })
     const { wrapper } = await mountAt()
     const values = wrapper.findAll('.order-review-card .order-item-fields input').map(field => field.element.value)
-    expect(values.filter(value => value === 'Не указано')).toHaveLength(5)
+    expect(values.filter(value => value === 'Не указано')).toHaveLength(6)
   })
 
   it('reloads for a changed order route and discards a stale completion', async () => {
