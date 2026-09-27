@@ -37,6 +37,16 @@ let inFlight = null
 const error = computed(() => presentProblem(problem.value))
 const errorTitle = computed(() => presentProblemTitle(problem.value))
 const status = computed(() => ops.value?.statuses.find(item => item.value === order.value?.status))
+const headingDetail = computed(() => {
+  if (!order.value) return ''
+  const creation = createdAt(order.value.createdAt)
+  if (status.value?.routeAlias === 'cancelled') {
+    return order.value.cancelledAt
+      ? `Создан ${creation} · Отменён ${createdAt(order.value.cancelledAt)}`
+      : `Создан ${creation} · Отменён`
+  }
+  return `${status.value?.name} · создан ${creation}`
+})
 const cancelReasonErrors = computed(() => problemFieldErrors(cancelProblem.value, 'reason'))
 const cancelError = computed(() => cancelProblem.value && cancelReasonErrors.value.length === 0 ? presentProblem(cancelProblem.value) : '')
 const cancelErrorTitle = computed(() => cancelProblem.value ? presentProblemTitle(cancelProblem.value) : '')
@@ -209,7 +219,7 @@ onBeforeUnmount(() => {
       <div>
         <h1>{{ order ? `Заказ ${order.orderNumber}` : 'Заказ' }}</h1>
         <p v-if="order">
-          {{ status?.name }} · создан {{ createdAt(order.createdAt) }}
+          {{ headingDetail }}
         </p>
       </div>
       <div
@@ -240,13 +250,6 @@ onBeforeUnmount(() => {
     >
       Заказ отменён
     </UiAlert>
-
-    <p
-      v-if="order?.cancelledAt"
-      class="order-details__cancelled-at"
-    >
-      Отменён {{ createdAt(order.cancelledAt) }}
-    </p>
 
     <UiAlert
       v-if="problem"

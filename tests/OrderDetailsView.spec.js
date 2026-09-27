@@ -64,9 +64,25 @@ describe('OrderDetailsView', () => {
     globalThis.document.body.querySelector('.ui-dialog__actions .ui-button--danger').click()
     await flushPromises()
     expect(wrapper.text()).toContain('Заказ отменён')
-    expect(wrapper.text()).toContain('Отменён')
+    expect(wrapper.get('.order-details-heading p').text())
+      .toMatch(/^Создан \d{2}\.\d{2}\.\d{4}, \d{2}:\d{2} · Отменён \d{2}\.\d{2}\.\d{4}, \d{2}:\d{2}$/u)
+    expect(wrapper.get('.customer-cost__excluded').findAll('dd').map(item => item.text()))
+      .toEqual(['Не рассчитывался', 'Не рассчитывался'])
     expect(wrapper.find('.order-details-heading .ui-button--danger').exists()).toBe(false)
     expect(h.session.orderRequest.mock.calls.filter(([path]) => path.endsWith('/cancel'))).toHaveLength(1)
+  })
+
+  it('keeps the cancelled status visible for an older order without a cancellation date', async () => {
+    h.session.orderRequest.mockImplementation(async (path, _options, isCurrent, validate) => {
+      const value = path.endsWith('/ops') ? ops
+        : completeOrder({ status:500, showReviewFields:false, cancelledAt:null })
+      if (isCurrent()) validate(value)
+      return value
+    })
+    const { wrapper } = await mountAt()
+    expect(wrapper.get('.order-details-heading p').text())
+      .toMatch(/^Создан \d{2}\.\d{2}\.\d{4}, \d{2}:\d{2} · Отменён$/u)
+    expect(wrapper.find('.order-details-heading .ui-button--danger').exists()).toBe(false)
   })
 
   it('keeps the entered reason after a server validation error', async () => {
