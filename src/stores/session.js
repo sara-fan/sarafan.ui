@@ -3,7 +3,7 @@
 // This file is a part of the Sarafan application
 
 import { readonly, ref } from 'vue'
-import { isOrderDetailPath } from '../orderNumber.js'
+import { isOrderCancelPath, isOrderDetailPath } from '../orderNumber.js'
 
 import { API_BASE_PATH } from '../api.js'
 import { createApiClient } from '../api/client.js'
@@ -279,7 +279,7 @@ async function orderRequest(path, options = {}, isCurrent = () => true, validate
   if (path === `${API_BASE_PATH}/orders/ops`) {
     return identityScopedRequest(path, options, {}, validateResponse, isCurrent, false)
   }
-  if (path !== `${API_BASE_PATH}/orders` && !isOrderDetailPath(path)) {
+  if (path !== `${API_BASE_PATH}/orders` && !isOrderDetailPath(path) && !isOrderCancelPath(path)) {
     throw createInternalProblem('invalidInput')
   }
   return authorizedRequest(path, options, {}, validateResponse, isCurrent)
