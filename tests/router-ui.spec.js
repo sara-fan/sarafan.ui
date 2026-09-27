@@ -244,7 +244,8 @@ describe('shared application chrome and controls', () => {
       ['Профиль', '/profile']
     ])
     expect(wrapper.get('.app-header__nav-action').text()).toBe('Выйти')
-    expect(wrapper.get('.brand-lockup__partner').attributes()).toMatchObject({ href: 'https://gtc.express/', target: '_blank', rel: 'noopener noreferrer' })
+    expect(wrapper.get('.brand-lockup__home').attributes('aria-label')).toBe('Сарафан — главная')
+    expect(wrapper.find('.brand-lockup__partner').exists()).toBe(false)
     await wrapper.get('.app-header__menu-button').trigger('click')
     expect(wrapper.get('.app-header__menu-button').attributes('aria-expanded')).toBe('true')
     expect(wrapper.findAll('.app-header__mobile-nav a').map(link => [link.text(), link.attributes('href')])).toEqual([
@@ -268,7 +269,7 @@ describe('shared application chrome and controls', () => {
     expect(wrapper.emitted('authenticate')).toHaveLength(1)
   })
 
-  it('uses server-provided legal aliases, gates the consent shortcut, and shows partner attribution', async () => {
+  it('uses server-provided legal aliases and gates the consent shortcut', async () => {
     const router = await routerAt()
     const wrapper = mount(SiteFooter, {
       props: { authenticated: true },
@@ -277,8 +278,8 @@ describe('shared application chrome and controls', () => {
     expect(wrapper.findAll('.site-footer__links a')).toHaveLength(3)
     expect(wrapper.get('a[href="/legal/privacy-policy"]').exists()).toBe(true)
     expect(wrapper.get('a[href="/consents"]').text()).toBe('Согласия')
-    expect(wrapper.get('a[href="https://gtc.express/"]').text()).toBe('Совместно с GTC')
-    expect(wrapper.get('.brand-lockup__partner').attributes('target')).toBe('_blank')
+    expect(wrapper.get('.brand-lockup__home').attributes('href')).toBe('/')
+    expect(wrapper.find('.brand-lockup__partner').exists()).toBe(false)
     h.store.ops.value = null
     await flushPromises()
     expect(wrapper.findAll('.site-footer__links a')).toHaveLength(1)

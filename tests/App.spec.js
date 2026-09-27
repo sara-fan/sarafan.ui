@@ -234,8 +234,8 @@ describe('App routing and privacy gates', () => {
     expect(wrapper.find('.phone-auth-stub').exists()).toBe(false)
     await wrapper.get('.app-header__login').trigger('click')
     expect(wrapper.find('.phone-auth-stub').exists()).toBe(true)
-    expect(wrapper.findAll('a[href="https://gtc.express/"]')).toHaveLength(2)
-    expect(wrapper.findAll('a[href="https://gtc.express/"]').every(link => link.text() === 'Совместно с GTC')).toBe(true)
+    expect(wrapper.findAll('.brand-lockup__home')).toHaveLength(2)
+    expect(wrapper.findAll('.brand-lockup__partner')).toHaveLength(0)
   })
 
   it('logs out from the shared header and returns home even when server logout fails', async () => {
