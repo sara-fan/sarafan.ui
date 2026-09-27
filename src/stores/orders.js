@@ -7,6 +7,7 @@ import { isOrderNumber } from '../orderNumber.js'
 
 import { isIsoDate, isRfc3339DateTime } from '../api/validation.js'
 import { createInternalProblem } from '../errors/problem.js'
+import { validatePricing, validatePricingStates } from '../orders/customerPricing.js'
 import { priceCents, validatePreviewProductDto, validateProductDto, validateProductLimits } from '../orderProduct.js'
 import { normalizeProductAddress } from '../productAddress.js'
 
@@ -67,11 +68,14 @@ export function validateOrderOps(value) {
   for (const item of value.currencies) {
     if (!item || !Number.isInteger(item.value) || item.value < 0
       || !validText(item.name, 200) || !validText(item.routeAlias, 100) || !ROUTE_ALIAS_PATTERN.test(item.routeAlias)
+      || !validText(item.symbol, 10)
       || currencyValues.has(item.value) || currencyAliases.has(item.routeAlias)) protocolError()
     currencyValues.add(item.value)
     currencyAliases.add(item.routeAlias)
   }
   const productLimits = validateProductLimits(value.productLimits, value.currencies)
+  const pricingStates = validatePricingStates(value.pricingStates)
+  if (!value.currencies.some(item => item.routeAlias === 'rub')) protocolError()
   const topLevelDomains = new Set()
   let previousTopLevelDomain = null
   for (const item of value.productSourceUrl.topLevelDomains) {
@@ -83,6 +87,7 @@ export function validateOrderOps(value) {
   return {
     statuses:value.statuses.map(item => ({ ...item })),
     currencies:value.currencies.map(item => ({ ...item })),
+    pricingStates,
     productSourceUrl:{
       ...value.productSourceUrl,
       topLevelDomains:[...value.productSourceUrl.topLevelDomains]
@@ -126,6 +131,7 @@ function validateCompleteOrder(value, ops) {
   const currencyValues = new Set(ops.currencies.map(item => item.value))
   validateOrderIdentityAndProduct(value, statusValues, currencyValues, ops.productLimits, ops.productSourceUrl.maximumLength)
   const product = validateProductDto(value.product, ops.currencies, ops.productLimits)
+  const pricing = validatePricing(value.pricing)
   if (!validNullableText(value.comment, ops.productLimits.commentMaximumLength)
     || !isRfc3339DateTime(value.createdAt)
     || typeof value.showReviewFields !== 'boolean'
@@ -153,6 +159,7 @@ function validateCompleteOrder(value, ops) {
     || value.sellerPrice?.currency !== product.sellerPrice?.currency) protocolError()
   return {
     ...value,
+    pricing,
     product,
     sellerPrice:value.sellerPrice ? { ...value.sellerPrice } : null,
     dimensions:value.dimensions ? { ...value.dimensions } : null,
@@ -181,13 +188,14 @@ export function validateCustomerOrders(value, ops) {
   let previous = null
   for (const item of value) {
     validateOrderIdentityAndProduct(item, statusValues, currencyValues, ops.productLimits, ops.productSourceUrl.maximumLength)
+    validatePricing(item.pricing)
     if (orderNumbers.has(item.orderNumber) || !isRfc3339DateTime(item.createdAt)) protocolError()
     const createdAt = Date.parse(item.createdAt)
     if (previous !== null && createdAt > previous) protocolError()
     orderNumbers.add(item.orderNumber)
     previous = createdAt
   }
-  return value.map(item => ({ ...item, sellerPrice:item.sellerPrice ? { ...item.sellerPrice } : null }))
+  return value.map(item => ({ ...item, pricing:{ ...item.pricing }, sellerPrice:item.sellerPrice ? { ...item.sellerPrice } : null }))
 }
 
 export function createOrderStore(session) {
@@ -195,8 +203,18 @@ export function createOrderStore(session) {
   const ops = ref(null)
   const loading = ref(false)
   let generation = 0
+  let inFlight = null
 
-  async function load() {
+  function load() {
+    const currentCustomerId = session.customer.value?.id
+    if (inFlight?.customerId === currentCustomerId) return inFlight.promise
+    const task = loadCurrent()
+    const promise = task.finally(() => { if (inFlight?.promise === promise) inFlight = null })
+    inFlight = { customerId:currentCustomerId, promise }
+    return promise
+  }
+
+  async function loadCurrent() {
     const requestGeneration = ++generation
     const customerId = session.customer.value?.id
     const isCurrent = () => requestGeneration === generation && session.customer.value?.id === customerId
@@ -223,7 +241,7 @@ export function createOrderStore(session) {
   function statusFor(value) { return ops.value?.statuses.find(item => item.value === value) }
   function currencyFor(value) { return ops.value?.currencies.find(item => item.value === value) }
   function progressFor(value) { return statusFor(value)?.progressPercent }
-  function reset() { generation++; loading.value = false; orders.value = []; ops.value = null }
+  function reset() { generation++; inFlight = null; loading.value = false; orders.value = []; ops.value = null }
   function dispose() { reset() }
 
   return {

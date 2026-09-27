@@ -8,6 +8,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
 import PhoneAuthDialog from '../components/PhoneAuthDialog.vue'
+import CustomerCostSummary from '../components/CustomerCostSummary.vue'
 import UiAlert from '../components/ui/UiAlert.vue'
 import UiButton from '../components/ui/UiButton.vue'
 import UiField from '../components/ui/UiField.vue'
@@ -22,6 +23,7 @@ import {
 } from '../errors/problem.js'
 import { formatMoneyInput } from '../moneyFormatting.js'
 import { PRODUCT_FIELDS, previewPrefill, priceCents, productFormErrors, productPayload } from '../orderProduct.js'
+import { validatePricing } from '../orders/customerPricing.js'
 import { normalizeProductAddress } from '../productAddress.js'
 import { useConsents } from '../stores/consents.js'
 import { showOrderCreated } from '../stores/orderNotices.js'
@@ -44,9 +46,14 @@ const submitting = ref(false)
 const authOpen = ref(false)
 const attempted = ref(false)
 const touched = ref(new Set())
+const pricing = ref(null)
+const forecastProblem = ref(null)
+const forecastLoading = ref(false)
 let mounted = false
 let previewOperation = 0
 let submissionOperation = 0
+let forecastOperation = 0
+let forecastTimer = null
 let resumeRunning = false
 let releaseConsentNoticeSuppression = null
 
@@ -62,9 +69,48 @@ const previewNotice = computed(() => draft.value?.previewOutcome === 'recognized
   ? 'Проверьте распознанные данные и при необходимости исправьте их.'
   : 'Не получилось получить все данные о товаре автоматически. Заполните их вручную.')
 
+function forecastInput() {
+  if (!ops.value) return null
+  const limits = ops.value.productLimits
+  const rawQuantity = quantity.value.trim()
+  if (!/^\d+$/u.test(rawQuantity)) return null
+  const count = Number(rawQuantity)
+  if (!Number.isSafeInteger(count) || count < limits.minimumQuantity || count > limits.maximumQuantity) return null
+  const rawPrice = sellerPrice.value.trim()
+  if (!rawPrice) return { sellerPrice:null, quantity:count }
+  const cents = priceCents(rawPrice)
+  if (cents === null || cents <= 0n || cents > priceCents(limits.maximumUnitPrice)) return null
+  return { sellerPrice:{ amount:Number(cents) / 100, currency:limits.sellerPriceCurrency }, quantity:count }
+}
+
+async function runForecast(operation, input) {
+  const isCurrent = () => mounted && operation === forecastOperation
+  try {
+    let validated
+    await session.forecastOrder(input.sellerPrice, input.quantity, isCurrent, value => {
+      validated = validatePricing(value)
+    })
+    if (isCurrent()) pricing.value = validated
+  } catch (value) {
+    if (isCurrent()) forecastProblem.value = normalizeProblem(value)
+  } finally {
+    if (isCurrent()) forecastLoading.value = false
+  }
+}
+
+function scheduleForecast(immediate = false) {
+  globalThis.clearTimeout(forecastTimer)
+  const operation = ++forecastOperation
+  pricing.value = null
+  forecastProblem.value = null
+  const input = forecastInput()
+  forecastLoading.value = Boolean(input)
+  if (input) forecastTimer = globalThis.setTimeout(() => { void runForecast(operation, input) }, immediate ? 0 : 300)
+}
+
 function fieldModel(name) {
   return computed({
-    get:() => draft.value[name],
+    get:() => draft.value?.[name] ?? '',
     set:value => {
       touched.value = new Set([...touched.value, name])
       problem.value = null
@@ -80,6 +126,8 @@ const quantity = fieldModel('quantity')
 const color = fieldModel('color')
 const size = fieldModel('size')
 const comment = fieldModel('comment')
+
+watch([sellerPrice, quantity, ops], () => scheduleForecast())
 
 function markTouched(name) {
   touched.value = new Set([...touched.value, name])
@@ -97,6 +145,8 @@ function blurSellerPrice() {
 function errorsFor(name) {
   const remote = problemFieldErrors(problem.value, name)
   if (remote.length) return remote
+  const forecast = problemFieldErrors(forecastProblem.value, name)
+  if (forecast.length) return forecast
   return attempted.value || touched.value.has(name) ? localErrors.value[name] ?? [] : []
 }
 
@@ -337,6 +387,8 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   mounted = false
+  ++forecastOperation
+  globalThis.clearTimeout(forecastTimer)
   previewOperation++
   submissionOperation++
   releaseConsentProblemOwnership()
@@ -364,7 +416,7 @@ const focusAfter = useValidationFocus(focusRoot, { context:() => session.custome
           ← Назад
         </button>
         <h1>Проверим товар по ссылке</h1>
-        <p>Укажите данные о товаре, мы все проверим и пришлем расчет стоимости заказа в SMS</p>
+        <p>Укажите данные о товаре, чтобы увидеть предварительную стоимость до отправки на проверку.</p>
       </div>
     </header>
 
@@ -500,9 +552,20 @@ const focusAfter = useValidationFocus(focusRoot, { context:() => session.custome
       </section>
 
       <aside class="product-review__summary">
-        <span>Стоимость</span>
-        <strong>Стоимость<br>уточняется</strong>
-        <p>Рассчитаем её после проверки</p>
+        <UiAlert
+          v-if="forecastProblem"
+          title="Не удалось рассчитать стоимость"
+        >
+          <p>{{ presentProblem(forecastProblem) }}</p>
+          <UiButton @click="scheduleForecast(true)">
+            Повторить
+          </UiButton>
+        </UiAlert>
+        <CustomerCostSummary
+          :pricing="pricing"
+          :ops="ops"
+          :loading="forecastLoading"
+        />
         <UiAlert
           v-if="ratesUnavailable"
           tone="info"

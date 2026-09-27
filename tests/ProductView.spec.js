@@ -5,7 +5,7 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { ref } from 'vue'
 import { createMemoryHistory, createRouter } from 'vue-router'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const h = vi.hoisted(() => ({ session:{}, consents:{}, showOrderCreated:vi.fn() }))
 vi.mock('../src/stores/session.js', () => ({ useSession:() => h.session }))
@@ -15,9 +15,11 @@ vi.mock('../src/stores/orderNotices.js', () => ({ showOrderCreated:h.showOrderCr
 import { CORE_PROBLEM_TYPES, ProblemError, createInternalProblem } from '../src/errors/problem.js'
 import { resetProductDraftForTests, useProductDraft } from '../src/stores/productDraft.js'
 import ProductView from '../src/views/ProductView.vue'
-import { completeOrder, ops, product } from './fixtures/orders.js'
+import { completeOrder, forecastPricing, ops, product } from './fixtures/orders.js'
 
 const IDEMPOTENCY_KEY = '11111111-1111-4111-8111-111111111111'
+const mountedViews = []
+afterEach(() => { for (const wrapper of mountedViews.splice(0)) wrapper.unmount() })
 
 function created(payload, overrides = {}) {
   return completeOrder({
@@ -58,6 +60,7 @@ async function mountView(attachTo) {
       }
     }
   })
+  mountedViews.push(wrapper)
   await flushPromises()
   return { router, wrapper }
 }
@@ -81,6 +84,11 @@ describe('ProductView product review', () => {
     h.session.isCurrentIdentityInvalidation = vi.fn().mockReturnValue(false)
     h.session.previewOrder = vi.fn(async (sourceUrl, isCurrent, validate) => {
       const value = { sourceUrl, outcome:'manual_review', product:null }
+      if (isCurrent()) validate(value)
+      return value
+    })
+    h.session.forecastOrder = vi.fn(async (_sellerPrice, _quantity, isCurrent, validate) => {
+      const value = { ...forecastPricing, totalRub:12000, calculatedAt:forecastPricing.asOf }
       if (isCurrent()) validate(value)
       return value
     })
@@ -117,7 +125,7 @@ describe('ProductView product review', () => {
     expect(wrapper.get('.product-source-field a').attributes('href')).toBe('https://shop.example.com/canonical')
     expect(wrapper.get('input[name="quantity"]').element.value).toBe('1')
     expect(wrapper.findAll('.product-review__fields .ui-field')).toHaveLength(8)
-    expect(wrapper.get('.product-review__summary').text()).toContain('Стоимостьуточняется')
+    expect(wrapper.get('.product-review__summary').text()).toContain('Стоимость уточняется')
   })
 
   it('prefills recognized values with Russian money formatting without overwriting edits', async () => {
@@ -136,6 +144,54 @@ describe('ProductView product review', () => {
     expect(wrapper.get('input[name="productName"]').element.value).toBe('Моё название')
     expect(wrapper.get('input[name="sellerPrice"]').element.value).toBe('16,50')
     expect(wrapper.get('textarea[name="comment"]').element.value).toBe('Мой комментарий')
+  })
+
+  it('debounces price changes, discards stale forecasts, and ignores unrelated draft edits', async () => {
+    const pending = []
+    h.session.forecastOrder.mockImplementation((sellerPrice, quantity, isCurrent, validate) => new Promise(resolve => {
+      pending.push(value => {
+        if (isCurrent()) validate(value)
+        resolve(value)
+      })
+    }))
+    const { wrapper } = await mountView()
+    await wrapper.get('input[name="sellerPrice"]').setValue('100,00')
+    await vi.waitFor(() => expect(h.session.forecastOrder).toHaveBeenCalledTimes(1))
+    expect(h.session.forecastOrder.mock.calls[0].slice(0, 2)).toEqual([{ amount:100, currency:840 }, 1])
+    await wrapper.get('input[name="sellerPrice"]').setValue('200,00')
+    await vi.waitFor(() => expect(h.session.forecastOrder).toHaveBeenCalledTimes(2))
+    pending[0]({ ...forecastPricing, totalRub:12000, calculatedAt:forecastPricing.asOf })
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('12 000,00 ₽')
+    pending[1]({ ...forecastPricing, totalRub:20000, calculatedAt:forecastPricing.asOf })
+    await flushPromises()
+    expect(wrapper.text()).toContain('20 000,00 ₽')
+    await wrapper.get('textarea[name="comment"]').setValue('Сохраните цвет')
+    await new Promise(resolve => globalThis.setTimeout(resolve, 350))
+    expect(h.session.forecastOrder).toHaveBeenCalledTimes(2)
+    await wrapper.get('input[name="sellerPrice"]').setValue('200,001')
+    expect(wrapper.text()).not.toContain('20 000,00 ₽')
+    await new Promise(resolve => globalThis.setTimeout(resolve, 350))
+    expect(h.session.forecastOrder).toHaveBeenCalledTimes(2)
+    wrapper.unmount()
+  })
+
+  it('shows structured forecast errors on the field and retries without losing the draft', async () => {
+    h.session.forecastOrder.mockRejectedValueOnce(new ProblemError({
+      type:CORE_PROBLEM_TYPES.validationFailed,
+      title:'Некорректный запрос', status:400, detail:'Исправьте указанные поля',
+      instance:'urn:sarafan:problem:4bf92f3577b34da6a3ce929d0e0e4736',
+      code:'validation_failed', errors:{ sellerPrice:['Проверьте цену'] }
+    }))
+    const { wrapper } = await mountView()
+    await wrapper.get('input[name="sellerPrice"]').setValue('100,00')
+    await vi.waitFor(() => expect(wrapper.text()).toContain('Проверьте цену'))
+    expect(wrapper.get('input[name="sellerPrice"]').element.value).toBe('100,00')
+    expect(wrapper.text()).toContain('Не удалось рассчитать стоимость')
+    await wrapper.get('.product-review__summary [role="alert"] button').trigger('click')
+    await vi.waitFor(() => expect(wrapper.text()).toContain('12 000,00 ₽'))
+    expect(wrapper.get('input[name="sellerPrice"]').attributes('aria-invalid')).toBeUndefined()
+    wrapper.unmount()
   })
 
   it('validates quantity and the dynamic total limit before authentication', async () => {

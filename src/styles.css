@@ -232,6 +232,21 @@ a { color: var(--sarafan-secondary); }
 .product-review__summary .ui-alert { padding: var(--sarafan-space-16); }
 .product-review__summary .ui-alert p { margin: 0; }
 .product-review__summary .ui-alert .ui-button { width: 100%; margin-top: var(--sarafan-space-12); }
+.customer-cost { color: var(--sarafan-ink); }
+.customer-cost__main { display: grid; gap: var(--sarafan-space-8); }
+.customer-cost__main > span { color: var(--sarafan-secondary); font-size: 13px; font-weight: 700; }
+.customer-cost__main > strong { color: var(--sarafan-ink); font: 500 28px/1.2 var(--sarafan-font-display); }
+.customer-cost__main p, .customer-cost__note { margin: 0; color: var(--sarafan-muted); font-size: 13px; line-height: 1.5; }
+.customer-cost dl { display: grid; gap: var(--sarafan-space-12); margin: var(--sarafan-space-20) 0; }
+.customer-cost dl > div { display: flex; justify-content: space-between; gap: var(--sarafan-space-12); }
+.customer-cost dt { color: var(--sarafan-muted); }
+.customer-cost dd { margin: 0; text-align: right; font-weight: 700; }
+.customer-cost__future { margin-top: var(--sarafan-space-20); padding-top: var(--sarafan-space-16); border-top: 1px solid var(--sarafan-line); font-size: 13px; }
+.customer-cost__future ul { display: grid; gap: var(--sarafan-space-8); margin: var(--sarafan-space-8) 0 0; padding-left: var(--sarafan-space-20); }
+.customer-cost--compact .customer-cost__main > strong { font-size: 20px; }
+.customer-cost--compact .customer-cost__main p { font-size: 11px; }
+.order-card__price .customer-cost { text-align: right; }
+.order-details-view > .customer-cost { margin-top: var(--sarafan-space-20); padding: var(--sarafan-space-24); border: 1px solid var(--sarafan-panel-border); border-radius: var(--sarafan-radius-20); background: var(--sarafan-accent-soft); }
 
 .order-details-view { padding-block: var(--sarafan-space-48) var(--sarafan-space-64); }
 .order-details-heading { padding-inline: var(--sarafan-space-8); }
@@ -401,6 +416,7 @@ a { color: var(--sarafan-secondary); }
   .order-card__price { grid-column: 1 / -1; min-width: 0; align-items: center; flex-direction: row; }
   .order-card__price small { margin-right: auto; }
   .order-card__price > strong { margin: 0 var(--sarafan-space-8) 0 0; font-size: 20px; }
+  .order-card__price .customer-cost { margin-right: auto; text-align: left; }
   .profile-view { padding-block: var(--sarafan-space-40) var(--sarafan-space-64); }
   .profile-layout { grid-template-columns: 1fr; }
   .profile-account-panel { position: relative; top: auto; padding: var(--sarafan-space-20); border-radius: var(--sarafan-radius-20); }

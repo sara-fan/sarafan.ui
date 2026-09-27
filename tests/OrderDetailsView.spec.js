@@ -5,14 +5,17 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { ref } from 'vue'
 import { createMemoryHistory, createRouter } from 'vue-router'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const h = vi.hoisted(() => ({ session:{} }))
 vi.mock('../src/stores/session.js', () => ({ useSession:() => h.session }))
 
 import { createInternalProblem, SERVICE_UNAVAILABLE_MESSAGE } from '../src/errors/problem.js'
 import OrderDetailsView from '../src/views/OrderDetailsView.vue'
-import { completeOrder, ops, product } from './fixtures/orders.js'
+import { completeOrder, forecastPricing, ops, product } from './fixtures/orders.js'
+
+const mountedViews = []
+afterEach(() => { for (const wrapper of mountedViews.splice(0)) wrapper.unmount() })
 
 async function mountAt(path = '/orders/12345678-3') {
   const empty = { template:'<main />' }
@@ -25,6 +28,7 @@ async function mountAt(path = '/orders/12345678-3') {
   })
   await router.push(path)
   const wrapper = mount(OrderDetailsView, { global:{ plugins:[router] } })
+  mountedViews.push(wrapper)
   await flushPromises()
   return { router, wrapper }
 }
@@ -50,6 +54,47 @@ describe('OrderDetailsView', () => {
     expect(wrapper.findAll('.order-review-fields input[readonly]')).toHaveLength(8)
     expect(wrapper.get('.order-review-fields textarea').attributes('readonly')).toBeDefined()
     expect(wrapper.get('.order-review-card__heading a').attributes('href')).toBe('https://shop.example.com/item')
+  })
+
+  it('shows the saved confirmed amount, deadline, and post-confirmation customs separately', async () => {
+    h.session.orderRequest.mockImplementation(async (path, _options, isCurrent, validate) => {
+      const value = path.endsWith('/ops') ? ops : completeOrder({ pricing:{
+        ...forecastPricing, state:100, totalRub:12000, calculatedAt:forecastPricing.asOf,
+        validUntil:'2026-09-15T11:00:00Z', customsRub:0
+      } })
+      if (isCurrent()) validate(value)
+      return value
+    })
+    const { wrapper } = await mountAt()
+    expect(wrapper.text()).toContain('12 000,00 ₽')
+    expect(wrapper.text()).toContain('Действует до')
+    expect(wrapper.text()).toContain('Таможенные платежи0,00 ₽')
+    expect(wrapper.text()).toContain('В разработке')
+  })
+
+  it('deduplicates an in-flight tab return and refreshes saved pricing after it settles', async () => {
+    let finishOps
+    h.session.orderRequest.mockImplementation((path, _options, isCurrent, validate) => {
+      if (path.endsWith('/ops')) {
+        if (!finishOps) return new Promise(resolve => { finishOps = () => { if (isCurrent()) validate(ops); resolve(ops) } })
+        if (isCurrent()) validate(ops)
+        return Promise.resolve(ops)
+      }
+      const value = completeOrder()
+      if (isCurrent()) validate(value)
+      return Promise.resolve(value)
+    })
+    const { wrapper } = await mountAt()
+    expect(h.session.orderRequest).toHaveBeenCalledOnce()
+    globalThis.document.dispatchEvent(new globalThis.Event('visibilitychange'))
+    expect(h.session.orderRequest).toHaveBeenCalledOnce()
+    finishOps()
+    await flushPromises()
+    expect(h.session.orderRequest).toHaveBeenCalledTimes(2)
+    globalThis.document.dispatchEvent(new globalThis.Event('visibilitychange'))
+    await flushPromises()
+    expect(h.session.orderRequest).toHaveBeenCalledTimes(4)
+    wrapper.unmount()
   })
 
   it.each(['01234567-3', 'Заказ / 3'])('keeps %s opaque and encodes the API path', async number => {

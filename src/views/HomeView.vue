@@ -157,7 +157,7 @@ const focusAfter = useValidationFocus(focusRoot, { context:() => null, ready:() 
       </h2>
       <ol>
         <li><span>1</span><div><strong>Отправьте ссылку</strong><p>На товар из интернет-магазина США.</p></div></li>
-        <li><span>2</span><div><strong>Подтвердите расчёт</strong><p>Покажем стоимость товара, выкупа и доставки.</p></div></li>
+        <li><span>2</span><div><strong>Уточните данные товара</strong><p>Покажем предварительную стоимость и проверим заказ.</p></div></li>
         <li><span>3</span><div><strong>Получите заказ</strong><p>Организуем оплату, логистику и выдачу в России.</p></div></li>
       </ol>
     </section>

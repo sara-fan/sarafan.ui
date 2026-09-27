@@ -3,15 +3,17 @@
 // All rights reserved.
 // This file is a part of the Sarafan application
 
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
+import CustomerCostSummary from '../components/CustomerCostSummary.vue'
 import UiAlert from '../components/ui/UiAlert.vue'
 import UiButton from '../components/ui/UiButton.vue'
 import UiField from '../components/ui/UiField.vue'
 import { createInternalProblem, normalizeProblem, presentProblem, presentProblemTitle } from '../errors/problem.js'
 import { formatMoneyAmount } from '../moneyFormatting.js'
 import { isOrderNumber } from '../orderNumber.js'
+import { formatRub } from '../orders/customerPricing.js'
 import { validateCustomerOrder, validateOrderOps } from '../stores/orders.js'
 import { useSession } from '../stores/session.js'
 
@@ -23,12 +25,14 @@ const ops = ref(null)
 const problem = ref(null)
 const loading = ref(false)
 let generation = 0
+let inFlight = null
 
 const error = computed(() => presentProblem(problem.value))
 const errorTitle = computed(() => presentProblemTitle(problem.value))
 const status = computed(() => ops.value?.statuses.find(item => item.value === order.value?.status))
 const product = computed(() => order.value?.product)
 const sourceHost = computed(() => new globalThis.URL(order.value.sourceUrl).hostname)
+const rubSymbol = computed(() => ops.value?.currencies.find(item => item.routeAlias === 'rub')?.symbol ?? '₽')
 
 function orderNumber() {
   const value = String(route.params.orderNumber ?? '')
@@ -53,7 +57,16 @@ function sellerPrice(value) {
 }
 function goBack() { return router.push({ name:'orders' }) }
 
-async function load() {
+function load() {
+  const key = `${session.customer.value?.id ?? ''}:${orderNumber() ?? ''}`
+  if (inFlight?.key === key) return inFlight.promise
+  const task = loadCurrent()
+  const promise = task.finally(() => { if (inFlight?.promise === promise) inFlight = null })
+  inFlight = { key, promise }
+  return promise
+}
+
+async function loadCurrent() {
   const requestGeneration = ++generation
   const customerId = session.customer.value?.id
   const expectedNumber = orderNumber()
@@ -92,14 +105,20 @@ async function load() {
   }
 }
 
+function revisit() { if (globalThis.document.visibilityState === 'visible') void load() }
+
 const stopWatch = watch(
   [() => route.params.orderNumber, () => session.customer.value?.id],
   () => { void load() },
   { immediate:true, flush:'sync' }
 )
 
+onMounted(() => globalThis.document.addEventListener('visibilitychange', revisit))
+
 onBeforeUnmount(() => {
   generation++
+  inFlight = null
+  globalThis.document.removeEventListener('visibilitychange', revisit)
   stopWatch()
 })
 </script>
@@ -178,7 +197,7 @@ onBeforeUnmount(() => {
           >Страница товара</a>
         </div>
         <p class="order-review-card__notice">
-          Проверим данные в течение двух часов. Стоимость заказа уточняется.
+          Проверим данные в течение двух часов. Предварительная стоимость указана ниже.
         </p>
         <div class="order-review-fields">
           <UiField
@@ -209,7 +228,7 @@ onBeforeUnmount(() => {
             readonly
           />
           <UiField
-            model-value="Стоимость уточняется"
+            :model-value="formatRub(order.pricing.totalRub, rubSymbol)"
             label="Стоимость"
             readonly
           />
@@ -286,6 +305,10 @@ onBeforeUnmount(() => {
           </div>
         </dl>
       </section>
+      <CustomerCostSummary
+        :pricing="order.pricing"
+        :ops="ops"
+      />
     </template>
   </main>
 </template>

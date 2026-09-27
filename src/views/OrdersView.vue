@@ -6,10 +6,10 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { RouterLink, useRouter } from 'vue-router'
 
+import CustomerCostSummary from '../components/CustomerCostSummary.vue'
 import UiAlert from '../components/ui/UiAlert.vue'
 import UiButton from '../components/ui/UiButton.vue'
 import { normalizeProblem, presentProblem } from '../errors/problem.js'
-import { formatMoneyAmount } from '../moneyFormatting.js'
 import { createOrderStore } from '../stores/orders.js'
 import { consumeOrderCreated } from '../stores/orderNotices.js'
 import { useSession } from '../stores/session.js'
@@ -48,25 +48,12 @@ function storeName(order) { return order.storeName?.trim() || 'Магазин у
 function createdAt(value) {
   return new Intl.DateTimeFormat('ru-RU', { day:'numeric', month:'long', year:'numeric' }).format(new Date(value))
 }
-function sellerPrice(order) {
-  if (!order.sellerPrice) return 'Уточняется'
-  const currency = store.currencyFor(order.sellerPrice.currency)
-  const formatted = formatMoneyAmount(order.sellerPrice.amount)
-  let symbol
-  try {
-    symbol = new Intl.NumberFormat('ru-RU', {
-      style:'currency', currency:currency.routeAlias.toUpperCase(), currencyDisplay:'narrowSymbol'
-    }).formatToParts(0).find(part => part.type === 'currency')?.value
-  } catch {
-    symbol = null
-  }
-  return symbol ? `${symbol} ${formatted}` : `${formatted} ${currency.name}`
-}
 function hasImage(order) { return Boolean(order.imageUrl) && !failedImages.value.has(order.orderNumber) }
 function markImageFailed(orderNumber) {
   failedImages.value = new Set([...failedImages.value, orderNumber])
 }
 function addProduct() { return router.push({ name:'home' }) }
+function revisit() { if (globalThis.document.visibilityState === 'visible') void load() }
 async function load() {
   problem.value = null
   try {
@@ -85,9 +72,13 @@ const stopCustomerWatch = watch(() => session.customer.value?.id, (customerId, p
   if (customerId) void load()
 }, { flush:'sync' })
 
-onMounted(load)
+onMounted(() => {
+  globalThis.document.addEventListener('visibilitychange', revisit)
+  void load()
+})
 onBeforeUnmount(() => {
   mounted = false
+  globalThis.document.removeEventListener('visibilitychange', revisit)
   stopCustomerWatch()
   store.dispose()
 })
@@ -236,12 +227,12 @@ onBeforeUnmount(() => {
 
           <div
             class="order-card__price"
-            :class="{ 'order-card__price--empty':!order.sellerPrice }"
           >
-            <template v-if="order.sellerPrice">
-              <small>Цена продавца</small>
-              <strong>{{ sellerPrice(order) }}</strong>
-            </template>
+            <CustomerCostSummary
+              :pricing="order.pricing"
+              :ops="store.ops.value"
+              compact
+            />
             <span
               class="order-card__action"
               aria-hidden="true"
@@ -306,12 +297,12 @@ onBeforeUnmount(() => {
           </div>
           <div
             class="order-card__price"
-            :class="{ 'order-card__price--empty':!order.sellerPrice }"
           >
-            <template v-if="order.sellerPrice">
-              <small>Цена продавца</small>
-              <strong>{{ sellerPrice(order) }}</strong>
-            </template>
+            <CustomerCostSummary
+              :pricing="order.pricing"
+              :ops="store.ops.value"
+              compact
+            />
             <span
               class="order-card__action"
               aria-hidden="true"

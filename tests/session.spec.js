@@ -1180,6 +1180,29 @@ describe('session store', () => {
     expect(createCall[1].headers.get('Idempotency-Key')).toBe('11111111-1111-4111-8111-111111111111')
   })
 
+  it('forecasts anonymously without storing or authorizing the request', async () => {
+    const pricing = {
+      state:0, totalRub:12000, calculatedAt:'2026-09-15T10:00:00Z', validUntil:null,
+      asOf:'2026-09-15T10:00:00Z', domesticDeliveryRub:null, customsRub:null
+    }
+    const fetch = vi.fn(url => {
+      if (url === '/api/v1/orders/forecast') return Promise.resolve(response(200, pricing))
+      throw new Error(`Unexpected request: ${url}`)
+    })
+    vi.stubGlobal('fetch', fetch)
+    const validate = vi.fn()
+    const session = useSession()
+    await expect(session.forecastOrder({ amount:100, currency:840 }, 2, () => true, validate)).resolves.toEqual(pricing)
+    expect(validate).toHaveBeenCalledWith(pricing)
+    expect(fetch).toHaveBeenCalledOnce()
+    const request = fetch.mock.calls[0][1]
+    expect(request.headers.has('Authorization')).toBe(false)
+    expect(request.cache).toBe('no-store')
+    expect(JSON.parse(request.body)).toEqual({ sellerPrice:{ amount:100, currency:840 }, quantity:2 })
+    expect(await session.forecastOrder(null, 1, () => false, validate)).toBeNull()
+    expect(fetch).toHaveBeenCalledOnce()
+  })
+
   it('keeps the customer session when order creation cannot obtain a common rate pair', async () => {
     const customer = customerDto({ id:7, phone:'+79990000007', state:0, profile:{ phone:'+79990000007' } })
     vi.stubGlobal('fetch', withOps(url => {

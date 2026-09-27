@@ -13,10 +13,10 @@ import {
   validateOrderOps,
   validateProductPreview
 } from '../src/stores/orders.js'
-import { completeOrder, currencies, ops, product, productLimits, productSourceUrl, statuses } from './fixtures/orders.js'
+import { completeOrder, currencies, forecastPricing, ops, product, productLimits, productSourceUrl, statuses } from './fixtures/orders.js'
 const orders = [
-  { orderNumber:'12345678-2', status:100, sourceUrl:'https://shop.example.com/two', productName:'Товар', storeName:'Магазин', imageUrl:'https://images.example/two.jpg', sellerPrice:{ amount:12.34, currency:840 }, quantity:2, createdAt:'2026-09-14T10:00:00Z' },
-  { orderNumber:'12345678-1', status:0, sourceUrl:'https://shop.example.com/one', productName:null, storeName:null, imageUrl:null, sellerPrice:null, quantity:1, createdAt:'2026-09-13T10:00:00Z' }
+  { orderNumber:'12345678-2', status:100, sourceUrl:'https://shop.example.com/two', productName:'Товар', storeName:'Магазин', imageUrl:'https://images.example/two.jpg', sellerPrice:{ amount:12.34, currency:840 }, quantity:2, createdAt:'2026-09-14T10:00:00Z', pricing:{ ...forecastPricing } },
+  { orderNumber:'12345678-1', status:0, sourceUrl:'https://shop.example.com/one', productName:null, storeName:null, imageUrl:null, sellerPrice:null, quantity:1, createdAt:'2026-09-13T10:00:00Z', pricing:{ ...forecastPricing } }
 ]
 
 function protocolFailure(action) {
@@ -53,6 +53,18 @@ describe('order store', () => {
       { sourceUrl:'https://shop.example.com/item', outcome:'unknown', product:null },
       { sourceUrl:'https://shop.example.com/item', outcome:'recognized', product:{} }
     ]) protocolFailure(() => validateProductPreview(value, validatedOps))
+  })
+
+  it('requires complete pricing on list, detail, and creation responses', () => {
+    const catalogue = validateOrderOps(ops)
+    expect(catalogue.pricingStates).toEqual(ops.pricingStates)
+    expect(catalogue.pricingStates).not.toBe(ops.pricingStates)
+    const invalid = { ...forecastPricing, state:100, validUntil:null }
+    protocolFailure(() => validateCustomerOrders([{ ...orders[0], pricing:invalid }], catalogue))
+    protocolFailure(() => validateCustomerOrder(completeOrder({ pricing:invalid }), catalogue, '12345678-3'))
+    protocolFailure(() => validateCreatedOrder(completeOrder({ pricing:invalid }), catalogue, { sourceUrl:'https://shop.example.com/item' }))
+    protocolFailure(() => validateOrderOps({ ...ops, pricingStates:[] }))
+    expect(validateCustomerOrders(orders, catalogue)[0].pricing).not.toBe(orders[0].pricing)
   })
 
   it('validates a complete created order against the submitted payload', () => {
@@ -180,7 +192,7 @@ describe('order store', () => {
     expect(store.ops.value).toBeNull()
   })
 
-  it('keeps the newest request authoritative', async () => {
+  it('deduplicates a concurrent read and refreshes after it settles', async () => {
     let resolveFirst
     let orderRequests = 0
     const session = {
@@ -202,9 +214,13 @@ describe('order store', () => {
     const first = store.load()
     await vi.waitFor(() => expect(orderRequests).toBe(1))
     const second = store.load()
-    await expect(second).resolves.toBe(true)
+    expect(second).toBe(first)
+    expect(orderRequests).toBe(1)
     resolveFirst(orders)
-    await expect(first).resolves.toBe(false)
+    await expect(first).resolves.toBe(true)
+    expect(store.orders.value).toEqual(orders)
+    await expect(store.load()).resolves.toBe(true)
+    expect(orderRequests).toBe(2)
     expect(store.orders.value).toEqual([])
   })
 
