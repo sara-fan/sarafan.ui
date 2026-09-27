@@ -301,6 +301,22 @@ async function previewOrder(sourceUrl, isCurrent = () => true, validateResponse)
   }
 }
 
+async function forecastOrder(sellerPrice, quantity, isCurrent = () => true, validateResponse) {
+  if (!isCurrent()) return null
+  try {
+    const result = await client.request(
+      `${API_BASE_PATH}/orders/forecast`,
+      { ...jsonOptions('POST', { sellerPrice, quantity }), cache:'no-store' }
+    )
+    if (!isCurrent()) return null
+    if (validateResponse) validateResponse(result)
+    return result
+  } catch (error) {
+    if (!isCurrent()) return null
+    throw error
+  }
+}
+
 async function createOrder(payload, idempotencyKey, isCurrent = () => true, validateResponse) {
   return authorizedRequest(
     `${API_BASE_PATH}/orders`,
@@ -457,7 +473,8 @@ export function useSession() {
     updateProfile,
     uploadPhoto,
     deletePhoto,
-    getPhoto
+    getPhoto,
+    forecastOrder
   }
 }
 

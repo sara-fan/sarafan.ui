@@ -32,6 +32,7 @@ const API_ROUTE_TEMPLATES = new Set([
   '/api/v1/orders',
   '/api/v1/orders/{orderNumber}',
   '/api/v1/orders/preview',
+  '/api/v1/orders/forecast',
   '/api/v1/orders/ops',
   '/api/v1/status/status'
 ])

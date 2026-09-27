@@ -5,7 +5,7 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { ref } from 'vue'
 import { createMemoryHistory } from 'vue-router'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const h = vi.hoisted(() => ({ store:{}, session:{} }))
 vi.mock('../src/stores/orders.js', () => ({ createOrderStore: () => h.store }))
@@ -15,6 +15,7 @@ import { createInternalProblem } from '../src/errors/problem.js'
 import { createAppRouter } from '../src/router.js'
 import { resetOrderNoticesForTests, showOrderCreated } from '../src/stores/orderNotices.js'
 import OrdersView from '../src/views/OrdersView.vue'
+import { forecastPricing, ops } from './fixtures/orders.js'
 
 const statusItems = new Map([
   [0, { value:0, name:'На проверке', routeAlias:'under_review', upperStatusName:'На проверке', upperStatusRouteAlias:'under_review', isTerminal:false, progressPercent:14 }],
@@ -22,11 +23,15 @@ const statusItems = new Map([
   [400, { value:400, name:'Получен', routeAlias:'received', upperStatusName:'Завершён', upperStatusRouteAlias:'completed', isTerminal:true, progressPercent:100 }],
   [500, { value:500, name:'Отменён', routeAlias:'cancelled', upperStatusName:'Отменён', upperStatusRouteAlias:'cancelled', isTerminal:true, progressPercent:100 }]
 ])
+const mountedViews = []
+afterEach(() => { for (const wrapper of mountedViews.splice(0)) wrapper.unmount() })
 
 async function mountView() {
   const router = createAppRouter(createMemoryHistory())
   await router.push('/orders')
-  return { router, wrapper:mount(OrdersView, { global:{ plugins:[router] } }) }
+  const wrapper = mount(OrdersView, { global:{ plugins:[router] } })
+  mountedViews.push(wrapper)
+  return { router, wrapper }
 }
 
 describe('OrdersView', () => {
@@ -34,6 +39,7 @@ describe('OrdersView', () => {
     resetOrderNoticesForTests()
     h.session = { customer:ref({ id:7 }) }
     h.store.orders = ref([])
+    h.store.ops = ref(ops)
     h.store.loading = ref(false)
     h.store.load = vi.fn().mockResolvedValue(true)
     h.store.reset = vi.fn(() => { h.store.orders.value = [] })
@@ -67,9 +73,9 @@ describe('OrdersView', () => {
 
   it('renders active and historical cards with honest fallbacks and resilient images', async () => {
     h.store.orders.value = [
-      { orderNumber:'12345678-4', status:310, productName:'Куртка', storeName:'Магазин', imageUrl:'https://images.example/item.jpg', sellerPrice:{ amount:85, currency:840 }, quantity:2, createdAt:'2026-09-14T10:00:00Z' },
-      { orderNumber:'12345678-3', status:0, productName:'', storeName:null, imageUrl:null, sellerPrice:null, quantity:11, createdAt:'2026-09-13T10:00:00Z' },
-      { orderNumber:'12345678-2', status:400, productName:'Сумка', storeName:'Бутик', imageUrl:'https://images.example/history.jpg', sellerPrice:{ amount:10, currency:978 }, quantity:1, createdAt:'2026-09-12T10:00:00Z' }
+      { orderNumber:'12345678-4', status:310, productName:'Куртка', storeName:'Магазин', imageUrl:'https://images.example/item.jpg', sellerPrice:{ amount:85, currency:840 }, quantity:2, createdAt:'2026-09-14T10:00:00Z', pricing:{ ...forecastPricing, totalRub:12000, calculatedAt:forecastPricing.asOf } },
+      { orderNumber:'12345678-3', status:0, productName:'', storeName:null, imageUrl:null, sellerPrice:null, quantity:11, createdAt:'2026-09-13T10:00:00Z', pricing:{ ...forecastPricing } },
+      { orderNumber:'12345678-2', status:400, productName:'Сумка', storeName:'Бутик', imageUrl:'https://images.example/history.jpg', sellerPrice:{ amount:10, currency:978 }, quantity:1, createdAt:'2026-09-12T10:00:00Z', pricing:{ ...forecastPricing } }
     ]
     const { router, wrapper } = await mountView()
     await flushPromises()
@@ -82,10 +88,9 @@ describe('OrdersView', () => {
     expect(wrapper.text()).toContain('Товар уточняется')
     expect(wrapper.text()).toContain('Магазин уточняется · 11 товаров')
     expect(wrapper.text()).toContain('Срок доставки уточняется')
-    expect(wrapper.text()).toContain('$ 85,00')
-    expect(wrapper.text()).toContain('€ 10,00')
-    expect(wrapper.findAll('.order-card__price small')).toHaveLength(2)
-    expect(wrapper.findAll('.order-card__price--empty')).toHaveLength(1)
+    expect(wrapper.text()).toContain('12 000,00 ₽')
+    expect(wrapper.text()).toContain('Стоимость уточняется')
+    expect(wrapper.findAll('.order-card__price .customer-cost')).toHaveLength(3)
     expect(wrapper.text()).toContain('14 сентября 2026')
     const progress = wrapper.findAll('[role="progressbar"]')
     expect(progress).toHaveLength(2)
@@ -119,6 +124,16 @@ describe('OrdersView', () => {
     const second = await mountView()
     await flushPromises()
     expect(second.wrapper.text()).not.toContain('Номер заказа 12345678-9.')
+  })
+
+  it('refreshes the saved list on tab return', async () => {
+    const { wrapper } = await mountView()
+    await flushPromises()
+    expect(h.store.load).toHaveBeenCalledOnce()
+    globalThis.document.dispatchEvent(new globalThis.Event('visibilitychange'))
+    await flushPromises()
+    expect(h.store.load).toHaveBeenCalledTimes(2)
+    wrapper.unmount()
   })
 
   it('gives a list-load failure precedence over the creation notice', async () => {
@@ -171,7 +186,7 @@ describe('OrdersView', () => {
     expect(wrapper.text()).toContain('11 заказов')
     expect(wrapper.get('.order-card__status').classes()).toEqual(['order-card__status'])
     expect(wrapper.get('.order-card__progress-track span').attributes('style')).toContain('width: 63%')
-    expect(wrapper.text()).toContain('₽ 100,00')
+    expect(wrapper.text()).toContain('Стоимость уточняется')
     statusItems.delete(999)
   })
 

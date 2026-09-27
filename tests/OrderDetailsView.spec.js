@@ -5,14 +5,17 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { ref } from 'vue'
 import { createMemoryHistory, createRouter } from 'vue-router'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const h = vi.hoisted(() => ({ session:{} }))
 vi.mock('../src/stores/session.js', () => ({ useSession:() => h.session }))
 
 import { createInternalProblem, SERVICE_UNAVAILABLE_MESSAGE } from '../src/errors/problem.js'
 import OrderDetailsView from '../src/views/OrderDetailsView.vue'
-import { completeOrder, ops, product } from './fixtures/orders.js'
+import { completeOrder, forecastPricing, ops, product } from './fixtures/orders.js'
+
+const mountedViews = []
+afterEach(() => { for (const wrapper of mountedViews.splice(0)) wrapper.unmount() })
 
 async function mountAt(path = '/orders/12345678-3') {
   const empty = { template:'<main />' }
@@ -25,6 +28,7 @@ async function mountAt(path = '/orders/12345678-3') {
   })
   await router.push(path)
   const wrapper = mount(OrderDetailsView, { global:{ plugins:[router] } })
+  mountedViews.push(wrapper)
   await flushPromises()
   return { router, wrapper }
 }
@@ -44,12 +48,78 @@ describe('OrderDetailsView', () => {
     expect(h.session.orderRequest).toHaveBeenNthCalledWith(1, '/api/v1/orders/ops', {}, expect.any(Function), expect.any(Function))
     expect(h.session.orderRequest).toHaveBeenNthCalledWith(2, '/api/v1/orders/12345678-3', {}, expect.any(Function), expect.any(Function))
     expect(wrapper.text()).toContain('Заказ 12345678-3')
+    expect(wrapper.text()).not.toContain('← Мои заказы')
     expect(wrapper.text()).toContain('Проверим данные в течение двух часов')
-    expect(wrapper.findAll('.order-review-fields input').map(field => field.element.value)).toContain('12,34 USD')
-    expect(wrapper.findAll('.order-review-fields .ui-field')).toHaveLength(9)
-    expect(wrapper.findAll('.order-review-fields input[readonly]')).toHaveLength(8)
-    expect(wrapper.get('.order-review-fields textarea').attributes('readonly')).toBeDefined()
-    expect(wrapper.get('.order-review-card__heading a').attributes('href')).toBe('https://shop.example.com/item')
+    expect(wrapper.text()).not.toContain('Предварительная стоимость указана ниже')
+    expect(wrapper.get('.customer-cost__headline > span').text()).toBe('Предварительная стоимость')
+    expect(wrapper.get('.customer-cost').element.nextElementSibling).toBe(wrapper.get('.order-review-card').element)
+    expect(wrapper.findAll('.order-review-card .order-item-fields input').map(field => field.element.value)).toContain('12,34 $')
+    expect(wrapper.findAll('.order-review-card .order-item-fields .ui-field')).toHaveLength(8)
+    expect(wrapper.get('.order-item-fields').element.lastElementChild.classList.contains('order-item-fields__comment')).toBe(true)
+    expect(wrapper.findAll('.order-review-card .order-item-fields input[readonly]')).toHaveLength(7)
+    expect(wrapper.get('.order-review-card').text()).not.toContain('Стоимость')
+    expect(wrapper.get('.order-review-card .order-item-fields textarea').attributes('readonly')).toBeDefined()
+    expect(wrapper.get('.order-review-card .order-item-fields__source a').attributes('href')).toBe('https://shop.example.com/item')
+  })
+
+  it('shows the saved confirmed amount, deadline, and post-confirmation customs separately', async () => {
+    h.session.orderRequest.mockImplementation(async (path, _options, isCurrent, validate) => {
+      const value = path.endsWith('/ops') ? ops : completeOrder({ pricing:{
+        ...forecastPricing, state:100, totalRub:12000, calculatedAt:forecastPricing.asOf,
+        validUntil:'2026-09-15T11:00:00Z', customsRub:0
+      } })
+      if (isCurrent()) validate(value)
+      return value
+    })
+    const { wrapper } = await mountAt()
+    expect(wrapper.text()).toContain('12 000,00 ₽')
+    expect(wrapper.text()).toContain('Действует до')
+    expect(wrapper.text()).toContain('Таможенные платежи0,00 ₽')
+    expect(wrapper.text()).not.toContain('В разработке')
+  })
+
+  it('shows a staff-saved domestic delivery amount after refreshing the order', async () => {
+    let delivery = null
+    h.session.orderRequest.mockImplementation(async (path, _options, isCurrent, validate) => {
+      const value = path.endsWith('/ops') ? ops : completeOrder({ pricing:{
+        ...forecastPricing, state:100, totalRub:5228.31, calculatedAt:forecastPricing.asOf,
+        validUntil:'2026-09-28T19:41:00Z', domesticDeliveryRub:delivery
+      } })
+      if (isCurrent()) validate(value)
+      return value
+    })
+    const { wrapper } = await mountAt()
+    expect(wrapper.get('.customer-cost__excluded').text()).toContain('Будет рассчитана позже')
+
+    delivery = 1000
+    await wrapper.get('.order-details-heading > button').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('.customer-cost__excluded').text()).toContain('Доставка по России1 000,00 ₽')
+  })
+
+  it('deduplicates an in-flight tab return and refreshes saved pricing after it settles', async () => {
+    let finishOps
+    h.session.orderRequest.mockImplementation((path, _options, isCurrent, validate) => {
+      if (path.endsWith('/ops')) {
+        if (!finishOps) return new Promise(resolve => { finishOps = () => { if (isCurrent()) validate(ops); resolve(ops) } })
+        if (isCurrent()) validate(ops)
+        return Promise.resolve(ops)
+      }
+      const value = completeOrder()
+      if (isCurrent()) validate(value)
+      return Promise.resolve(value)
+    })
+    const { wrapper } = await mountAt()
+    expect(h.session.orderRequest).toHaveBeenCalledOnce()
+    globalThis.document.dispatchEvent(new globalThis.Event('visibilitychange'))
+    expect(h.session.orderRequest).toHaveBeenCalledOnce()
+    finishOps()
+    await flushPromises()
+    expect(h.session.orderRequest).toHaveBeenCalledTimes(2)
+    globalThis.document.dispatchEvent(new globalThis.Event('visibilitychange'))
+    await flushPromises()
+    expect(h.session.orderRequest).toHaveBeenCalledTimes(4)
+    wrapper.unmount()
   })
 
   it.each(['01234567-3', 'Заказ / 3'])('keeps %s opaque and encodes the API path', async number => {
@@ -81,8 +151,10 @@ describe('OrderDetailsView', () => {
     })
     const { wrapper } = await mountAt()
     expect(wrapper.find('.order-summary-card').exists()).toBe(true)
-    expect(wrapper.find('.order-review-fields').exists()).toBe(false)
+    expect(wrapper.get('.customer-cost').element.nextElementSibling).toBe(wrapper.get('.order-summary-card').element)
+    expect(wrapper.find('.order-item-fields').exists()).toBe(false)
     expect(wrapper.text()).toContain('shop.example.com')
+    expect(wrapper.get('.order-summary-card').text()).toContain('12,34 $')
     expect(wrapper.text()).toContain('Получен')
     expect(wrapper.text()).toContain('синий')
     expect(wrapper.text()).toContain('Комментарий')
@@ -121,7 +193,7 @@ describe('OrderDetailsView', () => {
       return value
     })
     const { wrapper } = await mountAt()
-    const values = wrapper.findAll('.order-review-fields input').map(field => field.element.value)
+    const values = wrapper.findAll('.order-review-card .order-item-fields input').map(field => field.element.value)
     expect(values.filter(value => value === 'Не указано')).toHaveLength(5)
   })
 
@@ -218,13 +290,10 @@ describe('OrderDetailsView', () => {
   })
 
   it.each(['%20', 'ops', 'OPS', 'preview', 'Preview', '%6f%70%73'])('rejects invalid route %s before Ops loading and preserves identity', async segment => {
-    const { router, wrapper } = await mountAt(`/orders/${segment}`)
+    const { wrapper } = await mountAt(`/orders/${segment}`)
     expect(h.session.orderRequest).not.toHaveBeenCalled()
     expect(h.session.customer.value).toEqual({ id:7 })
     expect(wrapper.get('[role="alert"]').exists()).toBe(true)
-    await wrapper.get('.product-back').trigger('click')
-    await flushPromises()
-    expect(router.currentRoute.value.name).toBe('orders')
   })
 
   it('clears loading when a pending valid route changes to an invalid route', async () => {
@@ -236,7 +305,7 @@ describe('OrderDetailsView', () => {
 
     await router.push('/orders/%20')
     await flushPromises()
-    expect(wrapper.get('.product-back').attributes('disabled')).toBeUndefined()
+    expect(wrapper.find('[aria-label="Загрузка заказа"]').exists()).toBe(false)
     expect(wrapper.get('[role="alert"]').exists()).toBe(true)
 
     finishOps(ops)

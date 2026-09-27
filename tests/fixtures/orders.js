@@ -12,10 +12,21 @@ export const statuses = [
 ]
 
 export const currencies = [
-  { value:643, name:'RUB', routeAlias:'rub' },
-  { value:840, name:'USD', routeAlias:'usd' },
-  { value:978, name:'EUR', routeAlias:'eur' }
+  { value:643, name:'RUB', routeAlias:'rub', symbol:'₽' },
+  { value:840, name:'USD', routeAlias:'usd', symbol:'$' },
+  { value:978, name:'EUR', routeAlias:'eur', symbol:'€' }
 ]
+
+export const pricingStates = [
+  { value:0, name:'Ориентировочная стоимость', routeAlias:'forecast' },
+  { value:100, name:'Подтверждённая стоимость', routeAlias:'confirmed' },
+  { value:200, name:'Срок подтверждения истёк', routeAlias:'expired' }
+]
+
+export const forecastPricing = {
+  state:0, totalRub:null, calculatedAt:null, validUntil:null,
+  asOf:'2026-09-15T10:00:00Z', domesticDeliveryRub:null, customsRub:null
+}
 
 export const productSourceUrl = {
   maximumLength:2048,
@@ -45,7 +56,7 @@ export const productLimits = {
   }
 }
 
-export const ops = { statuses, currencies, productSourceUrl, productLimits }
+export const ops = { statuses, currencies, pricingStates, productSourceUrl, productLimits }
 
 export function product(overrides = {}) {
   return {
@@ -76,6 +87,7 @@ export function completeOrder(overrides = {}) {
     quantity:currentProduct.quantity,
     comment:currentProduct.comment,
     appliedExchangeRate:null,
+    pricing:{ ...forecastPricing },
     createdAt:'2026-09-15T10:00:00Z',
     showReviewFields:true,
     ...orderOverrides,

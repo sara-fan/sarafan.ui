@@ -26,7 +26,7 @@ import NotFoundView from '../src/views/NotFoundView.vue'
 import OrdersView from '../src/views/OrdersView.vue'
 import PendingView from '../src/views/PendingView.vue'
 import OrderDetailsView from '../src/views/OrderDetailsView.vue'
-import { ops } from './fixtures/orders.js'
+import { forecastPricing, ops } from './fixtures/orders.js'
 
 const h = vi.hoisted(() => ({ store: {}, orderStore: {}, session:{} }))
 vi.mock('../src/stores/consents.js', () => ({ useConsents: () => h.store }))
@@ -61,9 +61,10 @@ beforeEach(() => {
     [100, { value:100, name:'Расчёт готов', routeAlias:'quote_ready', upperStatusName:'Расчёт готов', upperStatusRouteAlias:'quote_ready', isTerminal:false, progressPercent:32 }]
   ])
   h.orderStore.orders = ref([
-    { orderNumber:'12345678-2', status:0, sourceUrl:'https://nike.com/item', productName:'Nike Air Max 90 Essential', storeName:'nike.com', imageUrl:null, sellerPrice:null, quantity:1, createdAt:'2026-09-14T10:00:00Z' },
-    { orderNumber:'12345678-1', status:100, sourceUrl:'https://cos.com/item', productName:'Mini Quilted Shoulder Bag', storeName:'cos.com', imageUrl:null, sellerPrice:{ amount:85, currency:840 }, quantity:2, createdAt:'2026-09-13T10:00:00Z' }
+    { orderNumber:'12345678-2', status:0, sourceUrl:'https://nike.com/item', productName:'Nike Air Max 90 Essential', storeName:'nike.com', imageUrl:null, sellerPrice:null, quantity:1, createdAt:'2026-09-14T10:00:00Z', pricing:{ ...forecastPricing } },
+    { orderNumber:'12345678-1', status:100, sourceUrl:'https://cos.com/item', productName:'Mini Quilted Shoulder Bag', storeName:'cos.com', imageUrl:null, sellerPrice:{ amount:85, currency:840 }, quantity:2, createdAt:'2026-09-13T10:00:00Z', pricing:{ ...forecastPricing, totalRub:16000, calculatedAt:forecastPricing.asOf } }
   ])
+  h.orderStore.ops = ref(ops)
   h.orderStore.loading = ref(false)
   h.orderStore.load = vi.fn().mockResolvedValue(true)
   h.orderStore.reset = vi.fn()
@@ -221,8 +222,9 @@ describe('router and page shells', () => {
     expect(wrapper.text()).toContain('Mini Quilted Shoulder Bag')
     expect(wrapper.text()).toContain('На проверке')
     expect(wrapper.text()).toContain('Расчёт готов')
-    expect(wrapper.text()).toContain('Цена продавца')
-    expect(wrapper.findAll('.order-card__price small')).toHaveLength(1)
+    expect(wrapper.text()).toContain('Предварительная стоимость')
+    expect(wrapper.text()).toContain('16 000,00 ₽')
+    expect(wrapper.findAll('.order-card__price .customer-cost')).toHaveLength(2)
     expect(wrapper.findAll('[role="progressbar"]')).toHaveLength(2)
     expect(h.orderStore.load).toHaveBeenCalledOnce()
 

@@ -1180,6 +1180,64 @@ describe('session store', () => {
     expect(createCall[1].headers.get('Idempotency-Key')).toBe('11111111-1111-4111-8111-111111111111')
   })
 
+  it('forecasts anonymously without storing or authorizing the request', async () => {
+    const pricing = {
+      state:0, totalRub:12000, calculatedAt:'2026-09-15T10:00:00Z', validUntil:null,
+      asOf:'2026-09-15T10:00:00Z', domesticDeliveryRub:null, customsRub:null
+    }
+    const fetch = vi.fn(url => {
+      if (url === '/api/v1/orders/forecast') return Promise.resolve(response(200, pricing))
+      throw new Error(`Unexpected request: ${url}`)
+    })
+    vi.stubGlobal('fetch', fetch)
+    const validate = vi.fn()
+    const session = useSession()
+    await expect(session.forecastOrder({ amount:100, currency:840 }, 2, () => true, validate)).resolves.toEqual(pricing)
+    expect(validate).toHaveBeenCalledWith(pricing)
+    expect(fetch).toHaveBeenCalledOnce()
+    const request = fetch.mock.calls[0][1]
+    expect(request.headers.has('Authorization')).toBe(false)
+    expect(request.cache).toBe('no-store')
+    expect(JSON.parse(request.body)).toEqual({ sellerPrice:{ amount:100, currency:840 }, quantity:2 })
+    expect(await session.forecastOrder(null, 1, () => false, validate)).toBeNull()
+    expect(fetch).toHaveBeenCalledOnce()
+  })
+
+  it.each(['success', 'failure'])('discards a stale forecast %s without validating it', async outcome => {
+    let resolveRequest
+    let rejectRequest
+    vi.stubGlobal('fetch', vi.fn(() => new Promise((resolve, reject) => {
+      resolveRequest = resolve
+      rejectRequest = reject
+    })))
+    let current = true
+    const validate = vi.fn()
+    const request = useSession().forecastOrder(null, 1, () => current, validate)
+    current = false
+    if (outcome === 'success') resolveRequest(response(200, { stale:true }))
+    else rejectRequest(new TypeError('private transport detail'))
+    await expect(request).resolves.toBeNull()
+    expect(validate).not.toHaveBeenCalled()
+    expect(useSession().notice.value).toBe('')
+  })
+
+  it('returns a forecast without an optional validator', async () => {
+    const pricing = { state:0, totalRub:null }
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response(200, pricing)))
+    await expect(useSession().forecastOrder(null, 1)).resolves.toEqual(pricing)
+  })
+
+  it('propagates current forecast transport and validation failures', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValueOnce(new TypeError('private transport detail'))
+      .mockResolvedValueOnce(response(200, {})))
+    await expect(useSession().forecastOrder(null, 1)).rejects.toMatchObject({
+      type:INTERNAL_PROBLEM_TYPES.networkUnavailable
+    })
+    const problem = createInternalProblem('protocolError')
+    await expect(useSession().forecastOrder(null, 1, () => true, () => { throw problem })).rejects.toBe(problem)
+    expect(useSession().notice.value).toBe('')
+  })
+
   it('keeps the customer session when order creation cannot obtain a common rate pair', async () => {
     const customer = customerDto({ id:7, phone:'+79990000007', state:0, profile:{ phone:'+79990000007' } })
     vi.stubGlobal('fetch', withOps(url => {

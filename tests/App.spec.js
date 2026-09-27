@@ -12,6 +12,7 @@ import AppHeader from '../src/components/AppHeader.vue'
 import { createInternalProblem } from '../src/errors/problem.js'
 import { createSarafanVuetify } from '../src/plugins/vuetify.js'
 import { createAppRouter } from '../src/router.js'
+import { forecastPricing, ops } from './fixtures/orders.js'
 
 const h = vi.hoisted(() => ({ session: {}, consents: {}, orders:{} }))
 vi.mock('../src/stores/session.js', () => ({ useSession: () => h.session }))
@@ -63,7 +64,8 @@ describe('App routing and privacy gates', () => {
       noticeSuppressed:ref(false)
     })
     Object.assign(h.orders, {
-      orders:ref([{ id:17, orderNumber:'12345678-1', status:0, productName:'Nike Air Max 90 Essential', storeName:'nike.com', imageUrl:null, sellerPrice:null, quantity:1, createdAt:'2026-09-14T10:00:00Z' }]),
+      orders:ref([{ id:17, orderNumber:'12345678-1', status:0, productName:'Nike Air Max 90 Essential', storeName:'nike.com', imageUrl:null, sellerPrice:null, quantity:1, createdAt:'2026-09-14T10:00:00Z', pricing:{ ...forecastPricing } }]),
+      ops:ref(ops),
       loading:ref(false),
       load:vi.fn().mockResolvedValue(true),
       reset:vi.fn(),
