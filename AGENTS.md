@@ -58,6 +58,7 @@ For other comment-capable formats, use the same three lines with that format's n
 ## Shared infrastructure and UI behavior
 
 - Keep GTC references out of customer UI chrome and copy; legal-document content is the only exception.
+- Keep eligible top-level navigation links visible on every route. Use `navigationSection` route metadata for the current section: product entry belongs to New Order, order details and payment belong to Orders, and legal/consent/fallback pages select none. Give desktop and mobile links matching idle, hover, and active states with `aria-current` on the active link.
 
 - Customer order cancellation uses Core's `canCancel`, `updatedAt`, and `cancelledAt` detail fields. Confirm a cancellation in the shared dialog; send the optional reason only in the authenticated request, never in route state, storage, or logs. Refresh after version conflicts and keep historical cancelled costs out of payable actions.
 

@@ -3,7 +3,7 @@
 // All rights reserved.
 // This file is a part of the Sarafan application
 
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
 
 import BrandLockup from './BrandLockup.vue'
@@ -16,6 +16,7 @@ defineProps({
 defineEmits(['authenticate', 'logout'])
 
 const route = useRoute()
+const activeSection = computed(() => route.meta.navigationSection)
 const menuOpen = ref(false)
 watch(() => route.fullPath, () => { menuOpen.value = false })
 </script>
@@ -32,26 +33,33 @@ watch(() => route.fullPath, () => { menuOpen.value = false })
         aria-label="Основная навигация"
       >
         <RouterLink
-          v-if="route.name !== 'home'"
           :to="{ name: 'home' }"
+          :class="{ 'app-header__nav-link--active': activeSection === 'home' }"
+          :aria-current="activeSection === 'home' ? 'page' : undefined"
         >
           Новый заказ
         </RouterLink>
         <RouterLink
-          v-if="authenticated && route.name !== 'orders'"
+          v-if="authenticated"
           :to="{ name: 'orders' }"
+          :class="{ 'app-header__nav-link--active': activeSection === 'orders' }"
+          :aria-current="activeSection === 'orders' ? 'page' : undefined"
         >
           Мои заказы
         </RouterLink>
         <RouterLink
-          v-if="storesAvailable && route.name !== 'stores'"
+          v-if="storesAvailable"
           :to="{ name: 'stores' }"
+          :class="{ 'app-header__nav-link--active': activeSection === 'stores' }"
+          :aria-current="activeSection === 'stores' ? 'page' : undefined"
         >
           Магазины
         </RouterLink>
         <RouterLink
-          v-if="authenticated && route.name !== 'profile'"
+          v-if="authenticated"
           :to="{ name: 'profile' }"
+          :class="{ 'app-header__nav-link--active': activeSection === 'profile' }"
+          :aria-current="activeSection === 'profile' ? 'page' : undefined"
         >
           Профиль
         </RouterLink>
@@ -104,26 +112,37 @@ watch(() => route.fullPath, () => { menuOpen.value = false })
       aria-label="Мобильная навигация"
     >
       <RouterLink
-        v-if="route.name !== 'home'"
         :to="{ name: 'home' }"
+        :class="{ 'app-header__nav-link--active': activeSection === 'home' }"
+        :aria-current="activeSection === 'home' ? 'page' : undefined"
+        @click="menuOpen = false"
       >
         Новый заказ
       </RouterLink>
       <RouterLink
-        v-if="authenticated && route.name !== 'orders'"
+        v-if="authenticated"
         :to="{ name: 'orders' }"
+        :class="{ 'app-header__nav-link--active': activeSection === 'orders' }"
+        :aria-current="activeSection === 'orders' ? 'page' : undefined"
+        @click="menuOpen = false"
       >
         Мои заказы
       </RouterLink>
       <RouterLink
-        v-if="storesAvailable && route.name !== 'stores'"
+        v-if="storesAvailable"
         :to="{ name: 'stores' }"
+        :class="{ 'app-header__nav-link--active': activeSection === 'stores' }"
+        :aria-current="activeSection === 'stores' ? 'page' : undefined"
+        @click="menuOpen = false"
       >
         Магазины
       </RouterLink>
       <RouterLink
-        v-if="authenticated && route.name !== 'profile'"
+        v-if="authenticated"
         :to="{ name: 'profile' }"
+        :class="{ 'app-header__nav-link--active': activeSection === 'profile' }"
+        :aria-current="activeSection === 'profile' ? 'page' : undefined"
+        @click="menuOpen = false"
       >
         Профиль
       </RouterLink>
