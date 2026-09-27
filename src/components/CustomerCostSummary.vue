@@ -33,7 +33,8 @@ const label = computed(() => props.historical ? 'Последняя рассчи
   : props.ops?.pricingStates?.find(item => item.value === state.value)?.name ?? 'Стоимость заказа')
 const rubSymbol = computed(() => props.ops?.currencies?.find(item => item.routeAlias === 'rub')?.symbol ?? '₽')
 const excludedAmount = amount => amount === null || amount === undefined
-  ? 'Будет рассчитана позже' : formatRub(amount, rubSymbol.value)
+  ? props.historical ? 'Не рассчитывался' : 'Будет рассчитана позже'
+  : formatRub(amount, rubSymbol.value)
 </script>
 
 <template>
