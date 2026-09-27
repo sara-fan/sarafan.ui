@@ -134,6 +134,13 @@ function validateCompleteOrder(value, ops) {
   const pricing = validatePricing(value.pricing)
   if (!validNullableText(value.comment, ops.productLimits.commentMaximumLength)
     || !isRfc3339DateTime(value.createdAt)
+    || !isRfc3339DateTime(value.updatedAt) || Date.parse(value.updatedAt) < Date.parse(value.createdAt)
+    || typeof value.canCancel !== 'boolean'
+    || value.cancelledAt !== null && (!isRfc3339DateTime(value.cancelledAt)
+      || Date.parse(value.cancelledAt) < Date.parse(value.createdAt)
+      || Date.parse(value.cancelledAt) > Date.parse(value.updatedAt))
+    || value.cancelledAt !== null && ops.statuses.find(item => item.value === value.status)?.routeAlias !== 'cancelled'
+    || value.canCancel && (value.cancelledAt !== null || ops.statuses.find(item => item.value === value.status)?.isTerminal)
     || typeof value.showReviewFields !== 'boolean'
     || value.dimensions !== null && (!value.dimensions
       || ['lengthCm', 'widthCm', 'heightCm'].some(field => typeof value.dimensions[field] !== 'number'

@@ -230,6 +230,7 @@ onBeforeUnmount(() => {
           >
             <CustomerCostSummary
               :pricing="order.pricing"
+              :historical="status(order)?.routeAlias === 'cancelled'"
               :ops="store.ops.value"
               compact
             />
@@ -300,6 +301,7 @@ onBeforeUnmount(() => {
           >
             <CustomerCostSummary
               :pricing="order.pricing"
+              :historical="status(order)?.routeAlias === 'cancelled'"
               :ops="store.ops.value"
               compact
             />

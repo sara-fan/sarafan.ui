@@ -249,6 +249,7 @@ a { color: var(--sarafan-secondary); }
 
 .order-details-view { padding-block: var(--sarafan-space-48) var(--sarafan-space-64); }
 .order-details-heading { padding-inline: var(--sarafan-space-8); }
+.order-details-heading__actions { display:flex; gap:var(--sarafan-space-8); flex-wrap:wrap; }
 .order-details-view > .ui-alert { margin-bottom: var(--sarafan-space-20); }
 .order-details-view > .ui-alert .ui-button { margin-top: var(--sarafan-space-12); }
 .order-review-card, .order-summary-card { padding: var(--sarafan-space-28); border: 1px solid var(--sarafan-panel-border); border-radius: var(--sarafan-radius-28); background: var(--sarafan-paper); box-shadow: var(--sarafan-card-shadow); }

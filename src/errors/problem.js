@@ -18,6 +18,8 @@ export const CORE_PROBLEM_TYPES = Object.freeze({
   loginFailed: `${PROBLEM_TYPE_ROOT}login-failed`,
   onboardingConsentExpired: `${PROBLEM_TYPE_ROOT}onboarding-consent-expired`,
   orderLimitRatesUnavailable: `${PROBLEM_TYPE_ROOT}order-limit-rates-unavailable`,
+  orderNotCancellable: `${PROBLEM_TYPE_ROOT}order-not-cancellable`,
+  orderUpdateConflict: `${PROBLEM_TYPE_ROOT}order-update-conflict`,
   orderValueLimitExceeded: `${PROBLEM_TYPE_ROOT}order-value-limit-exceeded`,
   personalDataConsentRequired: `${PROBLEM_TYPE_ROOT}personal-data-consent-required`,
   validationFailed: `${PROBLEM_TYPE_ROOT}validation-failed`
