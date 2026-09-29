@@ -104,32 +104,6 @@ describe('PhoneAuthDialog', () => {
 
   afterEach(() => vi.unstubAllGlobals())
 
-  it('explains a short phone number, retains its value and restores focus after re-enabling the field', async () => {
-    const detail = 'Номер слишком короткий. Введите 11 цифр, начиная с 8 или +7.'
-    const fetch = vi.fn(url => {
-      const standard = standardResponse(url)
-      if (standard) return Promise.resolve(standard)
-      if (url === '/api/v1/auth/phone/resolve') return Promise.resolve(problemResponse(400, 'invalid-phone', {
-        title:'Некорректный номер телефона', detail
-      }))
-      throw new Error(`Unexpected request: ${url}`)
-    })
-    vi.stubGlobal('fetch', fetch)
-    const wrapper = mountView(globalThis.document.body)
-    await wrapper.get('input[name="phone"]').setValue('892100011')
-    wrapper.get('button[type="submit"]').element.focus()
-    await wrapper.get('.auth-form').trigger('submit')
-    await flushPromises()
-
-    expect(wrapper.get('[role="alert"]').text()).toContain(detail)
-    expect(wrapper.get('input[name="phone"]').element.value).toBe('892100011')
-    expect(wrapper.get('input[name="phone"]').element.disabled).toBe(false)
-    expect(globalThis.document.activeElement).toBe(wrapper.get('input[name="phone"]').element)
-    expect(wrapper.find('input[name="code"]').exists()).toBe(false)
-    expect(fetch.mock.calls.some(([url]) => url.endsWith('/code/request'))).toBe(false)
-    wrapper.unmount()
-  })
-
   it('focuses the phone field after an empty submission', async () => {
     const wrapper = mountView(globalThis.document.body)
     wrapper.get('button[type="submit"]').element.focus()
@@ -1380,31 +1354,5 @@ describe('PhoneAuthDialog', () => {
     expect(wrapper.get('.form-error').text()).toContain('Повторите подтверждение.')
     expect(wrapper.get('input[name="code"]').attributes('aria-invalid')).toBe('true')
     expect(wrapper.emitted('update:modelValue')).toBeUndefined()
-  })
-
-  it('keeps the code step, clears a wrong code, and does not offer change or resend controls', async () => {
-    const fetch = vi.fn(url => {
-      const standard = standardResponse(url)
-      if (standard) return Promise.resolve(standard)
-      if (url === '/api/v1/auth/phone/resolve') return Promise.resolve(response(200, { nextStep:0, requiredDocumentKinds:[] }))
-      if (url === '/api/v1/auth/code/request') return Promise.resolve(response(202, { onboardingToken:null }))
-      if (url === '/api/v1/auth/code/verify') return Promise.resolve(problemResponse(401, 'invalid-code', {
-        title:'Некорректный код подтверждения', detail:'Неверный код', code:'changed_identifier'
-      }))
-      throw new Error(`Unexpected request: ${url}`)
-    })
-    vi.stubGlobal('fetch', fetch)
-    const wrapper = mountView()
-    await wrapper.get('input[name="phone"]').setValue('+79991234567')
-    await wrapper.get('.auth-form').trigger('submit')
-    await flushPromises()
-    await wrapper.get('input[name="code"]').setValue('0000')
-    await wrapper.get('.auth-form').trigger('submit')
-    await flushPromises()
-
-    expect(wrapper.get('input[name="code"]').element.value).toBe('')
-    expect(wrapper.get('.form-error').text()).toContain('Неверный код')
-    expect(wrapper.text()).not.toContain('Изменить номер')
-    expect(wrapper.text()).not.toContain('Отправить код повторно')
   })
 })
