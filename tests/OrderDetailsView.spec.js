@@ -431,7 +431,10 @@ describe('OrderDetailsView', () => {
     })
     const { wrapper } = await mountAt()
     const values = wrapper.findAll('.order-review-card .order-item-fields input').map(field => field.element.value)
-    expect(values.filter(value => value === 'Не указано')).toHaveLength(6)
+    expect(values.filter(value => value === 'Не указано')).toHaveLength(5)
+    const totalField = wrapper.findAll('.order-review-card .order-item-fields .ui-field')
+      .find(field => field.text().includes('Общая цена'))
+    expect(totalField.get('input').element.value).toBe('')
   })
 
   it('reloads for a changed order route and discards a stale completion', async () => {

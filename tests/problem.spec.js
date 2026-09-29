@@ -5,6 +5,7 @@
 import { describe, expect, it, vi } from 'vitest'
 
 import {
+  CORE_PROBLEM_TYPES,
   INTERNAL_PROBLEM_TYPES,
   ProblemError,
   asServiceUnavailableProblem,
@@ -140,6 +141,11 @@ describe('shared problem model', () => {
     })
 
     expect(isServiceUnavailableProblem(server)).toBe(true)
+    expect(isServiceUnavailableProblem(new ProblemError({
+      type:CORE_PROBLEM_TYPES.anonymousApiTimeout,
+      title:'Время ожидания истекло', status:503, detail:'Повторите позже',
+      instance:'urn:sarafan:problem:4bf92f3577b34da6a3ce929d0e0e4736', code:'anonymous_api_timeout'
+    }))).toBe(false)
     expect(isServiceUnavailableProblem({ status:503 })).toBe(false)
     expect(isServiceUnavailableProblem({ status:409 })).toBe(false)
     expect(isServiceUnavailableProblem(null)).toBe(false)

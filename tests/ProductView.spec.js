@@ -124,14 +124,25 @@ describe('ProductView product review', () => {
     expect(wrapper.text()).toContain('Не получилось получить все данные о товаре автоматически')
     expect(wrapper.get('.order-item-fields__source a').attributes('href')).toBe('https://shop.example.com/canonical')
     expect(wrapper.get('input[name="quantity"]').element.value).toBe('1')
-    expect(wrapper.findAll('.product-review__form .order-item-fields .ui-field')).toHaveLength(8)
+    expect(wrapper.findAll('.product-review__form .order-item-fields .ui-field')).toHaveLength(9)
+    expect(wrapper.get('input[name="sellerPrice"]').element.closest('.ui-field').textContent).toContain('Цена за единицу, $')
+    const totalField = wrapper.findAll('.order-item-fields .ui-field').find(field => field.text().includes('Общая цена'))
+    expect(totalField.get('input').element.value).toBe('')
     expect(wrapper.get('.order-item-fields').element.lastElementChild.classList.contains('order-item-fields__comment')).toBe(true)
     expect(wrapper.get('textarea[name="comment"]').attributes('readonly')).toBeUndefined()
     expect(wrapper.find('.product-review__summary').exists()).toBe(false)
     expect(wrapper.get('.product-review__form button[type="submit"]').text()).toBe('Отправить на проверку')
     await wrapper.get('input[name="sellerPrice"]').setValue('100,00')
-    await new Promise(resolve => globalThis.setTimeout(resolve, 350))
-    expect(h.session.forecastOrder).not.toHaveBeenCalled()
+    expect(totalField.get('input').element.value).toBe('100,00 $')
+    await wrapper.get('input[name="quantity"]').setValue('2')
+    expect(totalField.get('input').element.value).toBe('200,00 $')
+    await wrapper.get('input[name="sellerPrice"]').setValue('')
+    expect(totalField.get('input').element.value).toBe('')
+    await wrapper.get('input[name="sellerPrice"]').setValue('100,00')
+    expect(totalField.get('input').element.value).toBe('200,00 $')
+    await vi.waitFor(() => expect(h.session.forecastOrder).toHaveBeenCalledOnce())
+    expect(wrapper.get('.product-review__summary').text()).toContain('Прогнозная стоимость')
+    expect(wrapper.get('.product-review__summary').text()).toContain('не является офертой')
   })
 
   it('prefills recognized values with Russian money formatting without overwriting edits', async () => {
@@ -149,12 +160,14 @@ describe('ProductView product review', () => {
     expect(wrapper.text()).toContain('Проверьте распознанные данные')
     expect(wrapper.get('input[name="productName"]').element.value).toBe('Моё название')
     expect(wrapper.get('input[name="sellerPrice"]').element.value).toBe('16,50')
+    const totalField = wrapper.findAll('.order-item-fields .ui-field').find(field => field.text().includes('Общая цена'))
+    expect(totalField.get('input').element.value).toBe('33,00 $')
     expect(wrapper.get('textarea[name="comment"]').element.value).toBe('Мой комментарий')
     await vi.waitFor(() => expect(wrapper.find('.product-review__summary').exists()).toBe(true))
     expect(wrapper.get('.product-review__summary').element.nextElementSibling).toBe(wrapper.get('.product-review__form').element)
   })
 
-  it('does not forecast when recognition found no price', async () => {
+  it('forecasts when the customer supplies a missing recognized price', async () => {
     h.session.previewOrder.mockImplementation(async (_sourceUrl, isCurrent, validate) => {
       const value = { sourceUrl:'https://shop.example.com/item', outcome:'recognized', product:product({ sellerPrice:null }) }
       if (isCurrent()) validate(value)
@@ -162,8 +175,8 @@ describe('ProductView product review', () => {
     })
     const { wrapper } = await mountView()
     await wrapper.get('input[name="sellerPrice"]').setValue('100,00')
-    expect(wrapper.find('.product-review__summary').exists()).toBe(false)
-    expect(h.session.forecastOrder).not.toHaveBeenCalled()
+    await vi.waitFor(() => expect(h.session.forecastOrder).toHaveBeenCalledOnce())
+    expect(wrapper.find('.product-review__summary').exists()).toBe(true)
   })
 
   it('debounces price changes, discards stale forecasts, and ignores unrelated draft edits', async () => {
@@ -218,11 +231,141 @@ describe('ProductView product review', () => {
     await vi.waitFor(() => expect(wrapper.text()).toContain('Проверьте цену'))
     expect(wrapper.get('input[name="sellerPrice"]').element.value).toBe('100,00')
     expect(wrapper.text()).toContain('Не удалось рассчитать стоимость')
-    expect(wrapper.find('.product-review__summary').exists()).toBe(false)
+    expect(wrapper.find('.product-review__summary').exists()).toBe(true)
     await wrapper.get('.product-review__actions [role="alert"] button').trigger('click')
     await vi.waitFor(() => expect(wrapper.text()).toContain('12 000,00 ₽'))
     expect(wrapper.get('input[name="sellerPrice"]').attributes('aria-invalid')).toBeUndefined()
     wrapper.unmount()
+  })
+
+  it('waits for the latest manually entered forecast before opening authentication', async () => {
+    let finishForecast
+    h.session.forecastOrder.mockImplementation((_price, _quantity, isCurrent, validate) => new Promise(resolve => {
+      finishForecast = value => { if (isCurrent()) validate(value); resolve(value) }
+    }))
+    const { wrapper } = await mountView()
+    await wrapper.get('input[name="productName"]').setValue('Товар')
+    await wrapper.get('input[name="sellerPrice"]').setValue('10,00')
+    await wrapper.get('form').trigger('submit')
+    await vi.waitFor(() => expect(finishForecast).toBeTypeOf('function'))
+    expect(wrapper.getComponent({ name:'PhoneAuthDialog' }).props('modelValue')).toBe(false)
+    finishForecast({ ...forecastPricing, totalRub:12000, calculatedAt:forecastPricing.asOf })
+    await vi.waitFor(() => expect(wrapper.getComponent({ name:'PhoneAuthDialog' }).props('modelValue')).toBe(true))
+  })
+
+  it('opens authentication without recalculating a settled forecast', async () => {
+    const { wrapper } = await mountView()
+    await wrapper.get('input[name="productName"]').setValue('Товар')
+    await wrapper.get('input[name="sellerPrice"]').setValue('10,00')
+    await vi.waitFor(() => expect(wrapper.text()).toContain('12 000,00 ₽'))
+    await flushPromises()
+    await wrapper.get('form').trigger('submit')
+    await vi.waitFor(() => expect(wrapper.getComponent({ name:'PhoneAuthDialog' }).props('modelValue')).toBe(true))
+    expect(h.session.forecastOrder).toHaveBeenCalledOnce()
+  })
+
+  it('waits for a replacement forecast when price changes during submission', async () => {
+    const requests = []
+    h.session.forecastOrder.mockImplementation((sellerPrice, _quantity, isCurrent, validate, signal) => new Promise((resolve, reject) => {
+      signal.addEventListener('abort', () => reject(new globalThis.DOMException('Aborted', 'AbortError')), { once:true })
+      requests.push({ sellerPrice, complete:value => { if (isCurrent()) validate(value); resolve(value) } })
+    }))
+    const { wrapper } = await mountView()
+    await wrapper.get('input[name="productName"]').setValue('Товар')
+    await wrapper.get('input[name="sellerPrice"]').setValue('10,00')
+    await vi.waitFor(() => expect(requests).toHaveLength(1))
+
+    await wrapper.get('form').trigger('submit')
+    await wrapper.get('input[name="sellerPrice"]').setValue('20,00')
+    await flushPromises()
+    expect(wrapper.getComponent({ name:'PhoneAuthDialog' }).props('modelValue')).toBe(false)
+    await vi.waitFor(() => expect(requests).toHaveLength(2))
+    expect(requests[1].sellerPrice.amount).toBe(20)
+    expect(wrapper.getComponent({ name:'PhoneAuthDialog' }).props('modelValue')).toBe(false)
+
+    requests[1].complete({ ...forecastPricing, totalRub:20000, calculatedAt:forecastPricing.asOf })
+    await vi.waitFor(() => expect(wrapper.getComponent({ name:'PhoneAuthDialog' }).props('modelValue')).toBe(true))
+    expect(wrapper.text()).toContain('20 000,00 ₽')
+  })
+
+  it('ignores an obsolete completion while awaiting a newer forecast', async () => {
+    const requests = []
+    h.session.forecastOrder.mockImplementation((sellerPrice, _quantity, isCurrent, validate) => new Promise(resolve => {
+      requests.push({ sellerPrice, complete:value => { if (isCurrent()) validate(value); resolve(value) } })
+    }))
+    const { wrapper } = await mountView()
+    await wrapper.get('input[name="productName"]').setValue('Товар')
+    await wrapper.get('input[name="sellerPrice"]').setValue('10,00')
+    await wrapper.get('form').trigger('submit')
+    await vi.waitFor(() => expect(requests).toHaveLength(1))
+    await wrapper.get('input[name="sellerPrice"]').setValue('20,00')
+    await vi.waitFor(() => expect(requests).toHaveLength(2))
+
+    requests[0].complete({ ...forecastPricing, totalRub:10000, calculatedAt:forecastPricing.asOf })
+    await flushPromises()
+    expect(wrapper.getComponent({ name:'PhoneAuthDialog' }).props('modelValue')).toBe(false)
+    expect(wrapper.text()).not.toContain('10 000,00 ₽')
+    requests[1].complete({ ...forecastPricing, totalRub:20000, calculatedAt:forecastPricing.asOf })
+    await vi.waitFor(() => expect(wrapper.getComponent({ name:'PhoneAuthDialog' }).props('modelValue')).toBe(true))
+  })
+
+  it('does not open authentication after the review form unmounts during a forecast', async () => {
+    let aborted = false
+    h.session.forecastOrder.mockImplementation((_price, _quantity, _isCurrent, _validate, signal) => new Promise((_resolve, reject) => {
+      signal.addEventListener('abort', () => {
+        aborted = true
+        reject(new globalThis.DOMException('Aborted', 'AbortError'))
+      }, { once:true })
+    }))
+    const { wrapper } = await mountView()
+    await wrapper.get('input[name="productName"]').setValue('Товар')
+    await wrapper.get('input[name="sellerPrice"]').setValue('10,00')
+    await vi.waitFor(() => expect(h.session.forecastOrder).toHaveBeenCalledOnce())
+    await wrapper.get('form').trigger('submit')
+    wrapper.unmount()
+    await vi.waitFor(() => expect(aborted).toBe(true))
+    await flushPromises()
+    expect(useProductDraft().draft.value.resumeMode).toBe('none')
+  })
+
+  it('keeps the forecast rejection visible through price changes during cooldown', async () => {
+    h.session.previewOrder.mockImplementation(async (_sourceUrl, isCurrent, validate) => {
+      const value = { sourceUrl:'https://shop.example.com/item', outcome:'recognized', product:product({ sellerPrice:{ amount:16.5, currency:840 } }) }
+      if (isCurrent()) validate(value)
+      return value
+    })
+    const throttled = new ProblemError({
+      type:CORE_PROBLEM_TYPES.rateLimited, title:'Слишком много запросов', status:429,
+      detail:'Повторите позже', code:'rate_limited'
+    })
+    Object.defineProperty(throttled, 'retryAfterSeconds', { value:2 })
+    h.session.forecastOrder.mockRejectedValueOnce(throttled)
+    const { wrapper } = await mountView()
+    await vi.waitFor(() => expect(wrapper.text()).toContain('Повторите позже'))
+    await wrapper.get('input[name="sellerPrice"]').setValue('18,00')
+    expect(wrapper.text()).toContain('Повторите позже')
+    expect(wrapper.get('.product-review__actions [role="alert"] button').attributes('disabled')).toBeDefined()
+    await wrapper.get('input[name="productName"]').setValue('Товар')
+    await wrapper.get('form').trigger('submit')
+    await vi.waitFor(() => expect(wrapper.getComponent({ name:'PhoneAuthDialog' }).props('modelValue')).toBe(true))
+    expect(h.session.forecastOrder).toHaveBeenCalledOnce()
+    await new Promise(resolve => globalThis.setTimeout(resolve, 1100))
+    expect(wrapper.get('.product-review__actions [role="alert"] button').attributes('disabled')).toBeDefined()
+    await vi.waitFor(() => expect(wrapper.get('.product-review__actions [role="alert"] button').attributes('disabled')).toBeUndefined(),
+      { timeout:3000 })
+    await wrapper.get('.product-review__actions [role="alert"] button').trigger('click')
+    await vi.waitFor(() => expect(h.session.forecastOrder).toHaveBeenCalledTimes(2))
+  })
+
+  it('uses a short cooldown when a rate limit has no retry hint', async () => {
+    h.session.forecastOrder.mockRejectedValueOnce(new ProblemError({
+      type:CORE_PROBLEM_TYPES.rateLimited, title:'Слишком много запросов', status:429,
+      detail:'Повторите позже', code:'rate_limited'
+    }))
+    const { wrapper } = await mountView()
+    await wrapper.get('input[name="sellerPrice"]').setValue('10,00')
+    await vi.waitFor(() => expect(wrapper.text()).toContain('Повторите позже'))
+    expect(wrapper.get('.product-review__actions [role="alert"] button').attributes('disabled')).toBeDefined()
   })
 
   it('validates quantity and the dynamic total limit before authentication', async () => {
@@ -400,6 +543,7 @@ describe('ProductView product review', () => {
     await wrapper.get('input[name="productName"]').setValue('Товар')
     await wrapper.get('input[name="sellerPrice"]').setValue('10,00')
     await wrapper.get('form').trigger('submit')
+    await vi.waitFor(() => expect(useProductDraft().draft.value.resumeMode).toBe('authentication'))
     expect(useProductDraft().draft.value.resumeMode).toBe('authentication')
     const dialog = wrapper.getComponent({ name:'PhoneAuthDialog' })
     expect(dialog.props('modelValue')).toBe(true)

@@ -27,12 +27,17 @@ const accessToken = ref('')
 const customer = ref(null)
 const restoring = ref(true)
 const restoreProblem = ref(null)
+const refreshCooldownSeconds = ref(0)
 const notice = ref('')
 const identityInvalidations = new WeakMap()
 let identityGeneration = 0
 let refreshPromise = null
 let refreshPromiseGeneration = null
 let refreshAbortController = null
+let refreshCooldownUntil = 0
+let refreshCooldownTimer = null
+let refreshCooldownProblem = null
+let refreshCooldownRequiresRenewal = false
 let opsPromise = null
 const authenticationOps = ref(null)
 const customerOps = ref(null)
@@ -65,6 +70,28 @@ function invalidateIdentity() {
   refreshAbortController = null
 }
 
+function clearRefreshCooldown() {
+  if (refreshCooldownTimer) globalThis.clearInterval(refreshCooldownTimer)
+  refreshCooldownTimer = null
+  refreshCooldownUntil = 0
+  refreshCooldownProblem = null
+  refreshCooldownRequiresRenewal = false
+  refreshCooldownSeconds.value = 0
+}
+
+function setRefreshCooldown(problem, requiresRenewal) {
+  clearRefreshCooldown()
+  refreshCooldownProblem = problem
+  refreshCooldownRequiresRenewal = requiresRenewal
+  refreshCooldownUntil = Date.now() + Math.min(3600, Math.max(1, problem.retryAfterSeconds ?? 1)) * 1000
+  const update = () => {
+    refreshCooldownSeconds.value = Math.max(0, Math.ceil((refreshCooldownUntil - Date.now()) / 1000))
+    if (!refreshCooldownSeconds.value) clearRefreshCooldown()
+  }
+  update()
+  refreshCooldownTimer = globalThis.setInterval(update, 250)
+}
+
 function staleRefreshProblem(cause) {
   const problem = createInternalProblem('operationCancelled', { cause })
   suppressProblem(problem, { operation:'session.refresh.stale' })
@@ -79,6 +106,7 @@ function applySession(session, replaceIdentity = false) {
   }
   if (replaceIdentity || customer.value?.id !== session.customer.id || customer.value?.phone !== session.customer.phone) invalidateIdentity()
   accessToken.value = session.accessToken
+  clearRefreshCooldown()
   customer.value = session.customer
   restoreProblem.value = null
   notice.value = ''
@@ -127,6 +155,7 @@ function clearNotice() {
 
 function clearSession(message = '') {
   invalidateIdentity()
+  clearRefreshCooldown()
   accessToken.value = ''
   customer.value = null
   notice.value = message
@@ -150,6 +179,7 @@ const client = createApiClient({
 })
 
 async function refreshSession(operationTrace) {
+  if (Date.now() < refreshCooldownUntil) throw refreshCooldownProblem
   if (!refreshPromise || refreshPromiseGeneration !== identityGeneration) {
     const generation = identityGeneration
     refreshAbortController?.abort()
@@ -178,6 +208,11 @@ async function refreshSession(operationTrace) {
           clearSession(SERVICE_UNAVAILABLE_MESSAGE)
           identityInvalidations.set(problem, identityGeneration)
           throw problem
+        }
+        if (error?.type === CORE_PROBLEM_TYPES.rateLimited
+          || error?.type === CORE_PROBLEM_TYPES.anonymousApiTimeout) {
+          setRefreshCooldown(error, Boolean(operationTrace))
+          throw error
         }
         clearSession()
         identityInvalidations.set(error, identityGeneration)
@@ -301,12 +336,12 @@ async function previewOrder(sourceUrl, isCurrent = () => true, validateResponse)
   }
 }
 
-async function forecastOrder(sellerPrice, quantity, isCurrent = () => true, validateResponse) {
+async function forecastOrder(sellerPrice, quantity, isCurrent = () => true, validateResponse, signal) {
   if (!isCurrent()) return null
   try {
     const result = await client.request(
       `${API_BASE_PATH}/orders/forecast`,
-      { ...jsonOptions('POST', { sellerPrice, quantity }), cache:'no-store' }
+      { ...jsonOptions('POST', { sellerPrice, quantity }), cache:'no-store', signal }
     )
     if (!isCurrent()) return null
     if (validateResponse) validateResponse(result)
@@ -363,6 +398,7 @@ async function logout() {
 
 async function identityScopedRequest(path, options, policy, validateResponse, isCurrent, authorize) {
   try {
+    if (authorize && refreshCooldownRequiresRenewal && Date.now() < refreshCooldownUntil) throw refreshCooldownProblem
     const result = await client.request(path, options, authorize ? { ...policy, authorize:true } : policy)
     if (!isCurrent()) return null
     if (validateResponse) validateResponse(result)
@@ -373,6 +409,8 @@ async function identityScopedRequest(path, options, policy, validateResponse, is
     if (!isCurrent() && invalidationGeneration !== identityGeneration) return null
     if (invalidationGeneration === identityGeneration) throw error
     if (error?.type === CORE_PROBLEM_TYPES.orderLimitRatesUnavailable) throw error
+    if (error?.type === CORE_PROBLEM_TYPES.rateLimited
+      || error?.type === CORE_PROBLEM_TYPES.anonymousApiTimeout) throw error
     if (isServiceUnavailableProblem(error)) {
       const problem = asServiceUnavailableProblem(error)
       clearSession(SERVICE_UNAVAILABLE_MESSAGE)
@@ -455,6 +493,7 @@ export function useSession() {
     customer: readonly(customer),
     restoring: readonly(restoring),
     restoreProblem: readonly(restoreProblem),
+    refreshCooldownSeconds: readonly(refreshCooldownSeconds),
     notice: readonly(notice),
     clearNotice,
     restoreSession,

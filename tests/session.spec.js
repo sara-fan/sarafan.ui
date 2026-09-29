@@ -1063,6 +1063,60 @@ describe('session store', () => {
     expect(session.restoreProblem.value).not.toHaveProperty('status')
   })
 
+  it('retains identity and blocks refresh requests during a throttling cooldown', async () => {
+    const customer = customerDto({ id:3, phone:'+79990000003', state:0, profile:{ phone:'+79990000003' } })
+    let refreshCount = 0
+    const fetch = withOps(url => {
+      if (url === '/api/v1/auth/refresh') {
+        refreshCount++
+        return Promise.resolve(refreshCount !== 2
+          ? response(200, { accessToken:'restored-token', expiresAt:'2026-08-30T00:15:00Z', customer })
+          : problemResponse(429, 'rate-limited'))
+      }
+      if (url === '/api/v1/customers/me/photo') return Promise.resolve(response(200, 'existing-photo'))
+      throw new Error(`Unexpected request: ${url}`)
+    })
+    vi.stubGlobal('fetch', fetch)
+    const session = useSession()
+    await session.restoreSession()
+    await session.restoreSession()
+    expect(session.customer.value).toEqual(customer)
+    expect(session.restoreProblem.value).toMatchObject({ type:INTERNAL_PROBLEM_TYPES.sessionRestoreUnavailable })
+    expect(session.refreshCooldownSeconds.value).toBeGreaterThan(0)
+    await session.restoreSession()
+    expect(refreshCount).toBe(2)
+    expect(session.customer.value).toEqual(customer)
+    await expect(session.getPhoto()).resolves.toBe('existing-photo')
+    expect(fetch.mock.calls.filter(([url]) => url === '/api/v1/customers/me/photo')).toHaveLength(1)
+    await vi.waitFor(() => expect(session.refreshCooldownSeconds.value).toBe(0), { timeout:2500 })
+    await session.restoreSession()
+    expect(refreshCount).toBe(3)
+    expect(session.restoreProblem.value).toBeNull()
+  })
+
+  it('blocks requests known to need renewal until the refresh cooldown ends', async () => {
+    const customer = customerDto({ id:3, phone:'+79990000003', state:0, profile:{ phone:'+79990000003' } })
+    let refreshCount = 0
+    const fetch = withOps(url => {
+      if (url === '/api/v1/auth/refresh') {
+        refreshCount++
+        return Promise.resolve(refreshCount === 1
+          ? response(200, { accessToken:'restored-token', expiresAt:'2026-08-30T00:15:00Z', customer })
+          : problemResponse(429, 'rate-limited'))
+      }
+      if (url === '/api/v1/customers/me/photo') return Promise.resolve(problemResponse(401, 'invalid-access-token'))
+      throw new Error(`Unexpected request: ${url}`)
+    })
+    vi.stubGlobal('fetch', fetch)
+    const session = useSession()
+    await session.restoreSession()
+    await expect(session.getPhoto()).rejects.toMatchObject({ type:CORE_PROBLEM_TYPES.rateLimited })
+    await expect(session.getPhoto()).rejects.toMatchObject({ type:CORE_PROBLEM_TYPES.rateLimited })
+    expect(refreshCount).toBe(2)
+    expect(fetch.mock.calls.filter(([url]) => url === '/api/v1/customers/me/photo')).toHaveLength(1)
+    expect(session.customer.value).toEqual(customer)
+  })
+
   it('keeps a server restore failure recoverable without exposing its transport detail', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
       problemResponse(503, 'service-unavailable')

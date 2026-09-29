@@ -35,7 +35,7 @@ function revisitStores() { if (document.visibilityState === 'visible') refreshSt
 watch(() => [route.fullPath, route.name], refreshStores, { immediate:true })
 onMounted(() => document.addEventListener('visibilitychange', revisitStores))
 onBeforeUnmount(() => { document.removeEventListener('visibilitychange', revisitStores); catalogue.invalidate() })
-const { customer, logout, restoreProblem, restoreSession, restoring } = useSession()
+const { customer, logout, restoreProblem, restoreSession, restoring, refreshCooldownSeconds } = useSession()
 const { noticeSuppressed:consentNoticeSuppressed } = useConsents()
 let sessionStarted = false
 const authOpen = ref(false)
@@ -107,9 +107,10 @@ onMounted(async () => {
             <p>{{ restoreMessage }}</p>
             <UiButton
               variant="secondary"
+              :disabled="refreshCooldownSeconds > 0"
               @click="startSession(true)"
             >
-              Повторить
+              {{ refreshCooldownSeconds > 0 ? `Повторить через ${refreshCooldownSeconds} с` : 'Повторить' }}
             </UiButton>
           </UiAlert>
         </div>
@@ -134,9 +135,10 @@ onMounted(async () => {
             <div class="route-gate__actions">
               <UiButton
                 variant="primary"
+                :disabled="refreshCooldownSeconds > 0"
                 @click="startSession(true)"
               >
-                Повторить
+                {{ refreshCooldownSeconds > 0 ? `Повторить через ${refreshCooldownSeconds} с` : 'Повторить' }}
               </UiButton>
               <UiButton
                 variant="secondary"

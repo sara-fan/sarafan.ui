@@ -53,7 +53,9 @@ const cancelReasonErrors = computed(() => problemFieldErrors(cancelProblem.value
 const cancelError = computed(() => cancelProblem.value && cancelReasonErrors.value.length === 0 ? presentProblem(cancelProblem.value) : '')
 const cancelErrorTitle = computed(() => cancelProblem.value ? presentProblemTitle(cancelProblem.value) : '')
 const product = computed(() => order.value?.product)
-const totalPrice = computed(() => sellerPrice(product.value?.sellerPrice, product.value?.quantity))
+const totalPrice = computed(() => product.value?.sellerPrice
+  ? sellerPrice(product.value.sellerPrice, product.value.quantity)
+  : '')
 const reviewItem = computed(() => ({
   productName:display(product.value?.productName),
   storeName:display(product.value?.storeName),

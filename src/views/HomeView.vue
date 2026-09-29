@@ -215,7 +215,7 @@ const focusAfter = useValidationFocus(focusRoot, { context:() => null, ready:() 
           </div>
           <img
             class="home-steps__illustration"
-            src="/step-link.svg"
+            :src="'/step-link.svg'"
             alt=""
             aria-hidden="true"
           >
@@ -228,7 +228,7 @@ const focusAfter = useValidationFocus(focusRoot, { context:() => null, ready:() 
           </div>
           <img
             class="home-steps__illustration"
-            src="/step-confirm.svg"
+            :src="'/step-confirm.svg'"
             alt=""
             aria-hidden="true"
           >
@@ -241,7 +241,7 @@ const focusAfter = useValidationFocus(focusRoot, { context:() => null, ready:() 
           </div>
           <img
             class="home-steps__illustration"
-            src="/step-delivery.svg"
+            :src="'/step-delivery.svg'"
             alt=""
             aria-hidden="true"
           >

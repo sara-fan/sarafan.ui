@@ -56,6 +56,7 @@ describe('App routing and privacy gates', () => {
       logout: vi.fn().mockResolvedValue(),
       notice: ref(''),
       restoreProblem: ref(null),
+      refreshCooldownSeconds: ref(0),
       restoring: ref(false),
       restoreSession: vi.fn().mockResolvedValue()
     })
@@ -139,6 +140,28 @@ describe('App routing and privacy gates', () => {
     h.session.customer.value = { id: 7, phone: '+79990000007', hasPhoto: false, profile: {} }
     await flushPromises()
     expect(wrapper.text()).toContain('Nike Air Max 90 Essential')
+  })
+
+  it('shows the refresh cooldown on public and protected restore retries', async () => {
+    h.session.restoreProblem.value = createInternalProblem('sessionRestoreUnavailable')
+    h.session.refreshCooldownSeconds.value = 2
+    const { router, wrapper } = await mountApp()
+    await flushPromises()
+    const publicRetry = wrapper.find('.session-notice button')
+    expect(publicRetry.text()).toBe('Повторить через 2 с')
+    expect(publicRetry.attributes('disabled')).toBeDefined()
+    await publicRetry.trigger('click')
+    expect(h.session.restoreSession).toHaveBeenCalledOnce()
+
+    await router.push('/orders')
+    await flushPromises()
+    const protectedRetry = wrapper.find('.route-gate__actions button')
+    expect(protectedRetry.text()).toBe('Повторить через 2 с')
+    expect(protectedRetry.attributes('disabled')).toBeDefined()
+    h.session.refreshCooldownSeconds.value = 0
+    await flushPromises()
+    expect(protectedRetry.text()).toBe('Повторить')
+    expect(protectedRetry.attributes('disabled')).toBeUndefined()
   })
 
   it('redirects an unauthenticated protected bookmark to the public home route', async () => {

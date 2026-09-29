@@ -11,6 +11,7 @@ const props = defineProps({
   ops: { type: Object, default: null },
   compact: { type: Boolean, default: false },
   historical: { type: Boolean, default: false },
+  preview: { type: Boolean, default: false },
   loading: { type: Boolean, default: false }
 })
 
@@ -29,6 +30,7 @@ onUnmounted(() => globalThis.clearTimeout(timer))
 
 const state = computed(() => expiredNow.value ? 200 : props.pricing?.state ?? 0)
 const label = computed(() => props.historical ? 'Последняя рассчитанная стоимость'
+  : props.preview ? 'Прогнозная стоимость'
   : props.pricing?.state === 0 ? 'Предварительная стоимость'
   : props.ops?.pricingStates?.find(item => item.value === state.value)?.name ?? 'Стоимость заказа')
 const rubSymbol = computed(() => props.ops?.currencies?.find(item => item.routeAlias === 'rub')?.symbol ?? '₽')
@@ -51,6 +53,12 @@ const excludedAmount = amount => amount === null || amount === undefined
         <span>{{ label }}</span>
         <strong>{{ loading ? 'Рассчитываем стоимость…' : formatRub(pricing?.totalRub ?? null, rubSymbol) }}</strong>
       </div>
+      <p
+        v-if="preview"
+        class="customer-cost__preview-notice"
+      >
+        Расчёт ориентировочный и не является офертой.
+      </p>
     </div>
     <p
       v-if="!compact"
