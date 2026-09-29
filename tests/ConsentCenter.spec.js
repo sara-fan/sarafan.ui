@@ -38,12 +38,16 @@ let router
 const state = () => wrapper.vm.$.setupState
 const button = text => wrapper.findAll('button').find(x => x.text() === text)
 async function click(text) { expect(button(text), text).toBeTruthy(); await button(text).trigger('click'); await flushPromises() }
-async function mountCenter(path = '/') {
+async function mountCenter(path = '/', attachToDocument = false) {
   router = createAppRouter(createMemoryHistory())
   await router.push(path)
   const mode = path.startsWith('/legal/') ? 'legal' : path.startsWith('/consents') ? 'consents' : 'notice'
   const section = path === '/consents/personal-data' ? 'personal' : 'auto'
-  wrapper = mount(ConsentCenter, { props:{ mode, section }, global:{ plugins:[createSarafanVuetify(), router] } })
+  wrapper = mount(ConsentCenter, {
+    props:{ mode, section },
+    ...(attachToDocument ? { attachTo:globalThis.document.body } : {}),
+    global:{ plugins:[createSarafanVuetify(), router] }
+  })
   return wrapper
 }
 beforeEach(() => {
@@ -248,6 +252,33 @@ it('renews personal consent and shows the latest manual request', async () => {
   h.session.customer.value = null; await flushPromises()
   expect(wrapper.text()).not.toContain('Покупатель')
   expect(h.store.resetCustomer).toHaveBeenCalledTimes(2)
+})
+it('links the current document from the renewal sentence without selecting consent', async () => {
+  h.session.customer.value = { id:7 }
+  h.store.kindName.mockImplementation(kind => kind === LEGAL_DOCUMENT_KIND.PERSONAL_DATA_CONSENT
+    ? 'Согласие из каталога'
+    : kinds.find(item => item.value === kind)?.name)
+  h.store.mine.value = {
+    statuses:[{ kind:LEGAL_DOCUMENT_KIND.PERSONAL_DATA_CONSENT, status:'renewal-required' }],
+    history:[], withdrawalRequest:null
+  }
+  await mountCenter('/consents', true); await flushPromises()
+
+  const checkbox = wrapper.get('.consent-renewal input[name="personalDataConsent"]')
+  const link = wrapper.get('#personal-consent-document')
+  expect(wrapper.get('.consent-inline-acceptance').text().replace(/\s+/gu, ' ').trim())
+    .toBe('Я даю отдельное Согласие из каталога')
+  expect(checkbox.attributes('aria-labelledby')).toBe('personal-consent-label personal-consent-document')
+  expect(link.attributes('href')).toBe(`/legal/${id}`)
+  expect(link.element.closest('label')).toBeNull()
+  expect(link.element.tabIndex).toBe(0)
+  link.element.focus()
+  expect(globalThis.document.activeElement).toBe(link.element)
+  await link.trigger('click')
+  await flushPromises()
+  expect(router.currentRoute.value.fullPath).toBe(`/legal/${id}`)
+  expect(checkbox.element.checked).toBe(false)
+  expect(h.store.grant).not.toHaveBeenCalled()
 })
 it('shows consent history newest first without ordinal markers', async () => {
   h.session.customer.value = { id:7 }

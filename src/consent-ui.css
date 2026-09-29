@@ -51,7 +51,9 @@
 .consent-recovery-notice__links { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--sarafan-line); }
 
 .consent-registration { display: flex; gap: 12px; flex-direction: column; padding: 14px; border: 1px solid var(--sarafan-line); border-radius: var(--sarafan-radius-16); background: linear-gradient(135deg, var(--sarafan-soft), #ffffff); }
-.consent-registration .consent-document-link { display: inline-block; margin: 2px 0 0 36px; font-size: 12px; font-weight: 650; }
+.consent-inline-acceptance { display: flex; align-items: flex-start; gap: 4px; min-width: 0; }
+.consent-inline-acceptance .ui-selection { flex: 0 0 auto; padding-right: 0; }
+.consent-inline-acceptance .consent-document-link { min-width: 0; margin: 4px 0 0; font: 400 14px/20px var(--sarafan-font-ui); overflow-wrap: anywhere; }
 .consent-registration__item + .consent-registration__item { padding-top: 12px; border-top: 1px solid var(--sarafan-line); }
 .consent-field-error { margin: 5px 0 0 36px !important; color: var(--sarafan-danger) !important; font-size: 12px !important; }
 

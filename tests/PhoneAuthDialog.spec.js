@@ -24,7 +24,7 @@ const customerOps = { states:[
   { value:2, name:'Отключённый', routeAlias:'disabled' }
 ] }
 const legalOps = { kinds:[
-  { value:1, name:'Согласие на обработку персональных данных', routeAlias:'personal-data-consent' },
+  { value:1, name:'Согласие на хранение и обработку персональных данных', routeAlias:'personal-data-consent' },
   { value:2, name:'Пользовательское соглашение', routeAlias:'user-agreement' },
   { value:3, name:'Правила заказа товаров', routeAlias:'order-rules' },
   { value:4, name:'Политика обработки персональных данных', routeAlias:'privacy-policy' }
@@ -60,7 +60,10 @@ function legalDocument(url) {
 function testRouter() {
   return createRouter({
     history:createMemoryHistory(),
-    routes:[{ path:'/:pathMatch(.*)*', component:{ template:'<main />' } }]
+    routes:[
+      { path:'/legal/:documentRef', name:'legal-document', component:{ template:'<main />' } },
+      { path:'/:pathMatch(.*)*', component:{ template:'<main />' } }
+    ]
   })
 }
 
@@ -71,7 +74,6 @@ function mountView(attachTo, modelValue = true, router = testRouter()) {
     global: {
       plugins: [createSarafanVuetify(), router],
       stubs: {
-        RouterLink: { template:'<a><slot /></a>' },
         VDialog: { props:['modelValue'], template:'<section v-if="modelValue"><slot /></section>' }
       }
     }
@@ -642,13 +644,16 @@ describe('PhoneAuthDialog', () => {
     await wrapper.get('.auth-form').trigger('submit')
     await flushPromises()
 
-    expect(wrapper.findAll('.consent-registration small').map(item => item.text())).toEqual([
-      agreementName + ' · версия 1', personalDataName + ' · версия 1'
-    ])
+    expect(wrapper.get('h2').text()).toBe('Регистрация')
+    expect(wrapper.find('.auth-form > p').exists()).toBe(false)
+    expect(wrapper.find('.consent-registration small').exists()).toBe(false)
     expect(wrapper.findAll('.consent-document-link').map(item => item.text())).toEqual([
-      `Открыть ${agreementName.toLowerCase()}`,
-      `Открыть ${personalDataName.toLowerCase()}`
+      agreementName, personalDataName
     ])
+    expect(wrapper.get('.consent-registration__agreement').text().replace(/\s+/gu, ' ').trim()).toBe(`Я принимаю ${agreementName}`)
+    expect(wrapper.get('#authentication-personal-data').attributes('aria-labelledby'))
+      .toBe('authentication-personal-label authentication-personal-document')
+    expect(wrapper.get('#authentication-personal-document').element.closest('label')).toBeNull()
   })
 
   it('uses the Core Ops agreement name in the login consent text and link', async () => {
@@ -671,10 +676,77 @@ describe('PhoneAuthDialog', () => {
     await wrapper.get('.auth-form').trigger('submit')
     await flushPromises()
 
-    expect(wrapper.text()).toContain(
-      `Чтобы продолжить вход для +79991234567, примите актуальное ${agreementName.toLowerCase()}.`
-    )
-    expect(wrapper.get('.consent-document-link').text()).toBe(`Открыть ${agreementName.toLowerCase()}`)
+    expect(wrapper.get('h2').text()).toBe('Подтверждение соглашения')
+    expect(wrapper.find('.auth-form > p').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('Версия 1')
+    expect(wrapper.get('.consent-document-link').text()).toBe(agreementName)
+  })
+
+  it('opens the current agreement from a focusable link without accepting it', async () => {
+    const router = testRouter()
+    await router.push('/')
+    const fetch = vi.fn(url => {
+      const standard = standardResponse(url)
+      if (standard) return Promise.resolve(standard)
+      if (url === '/api/v1/auth/phone/resolve') {
+        return Promise.resolve(response(200, { nextStep:1, requiredDocumentKinds:[2] }))
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    })
+    vi.stubGlobal('fetch', fetch)
+    const wrapper = mountView(document.body, true, router)
+    await wrapper.get('input[name="phone"]').setValue('+79991234567')
+    await wrapper.get('.auth-form').trigger('submit')
+    await flushPromises()
+
+    const checkbox = wrapper.get('#authentication-terms')
+    const link = wrapper.get('#authentication-terms-document')
+    expect(checkbox.attributes('aria-labelledby')).toBe('authentication-terms-label authentication-terms-document')
+    expect(checkbox.attributes('aria-describedby')).toBeUndefined()
+    expect(link.attributes('href')).toBe(`/legal/${documentIds[2]}`)
+    expect(link.element.closest('label')).toBeNull()
+    expect(link.element.tabIndex).toBe(0)
+    link.element.focus()
+    expect(document.activeElement).toBe(link.element)
+    await link.trigger('click')
+    await flushPromises()
+    expect(router.currentRoute.value.params.documentRef).toBe(documentIds[2])
+    expect(checkbox.element.checked).toBe(false)
+    expect(wrapper.emitted('update:modelValue')).toContainEqual([false])
+    wrapper.unmount()
+  })
+
+  it('opens the current personal-data consent without selecting its registration checkbox', async () => {
+    const router = testRouter()
+    await router.push('/')
+    vi.stubGlobal('fetch', vi.fn(url => {
+      const standard = standardResponse(url)
+      if (standard) return Promise.resolve(standard)
+      if (url === '/api/v1/auth/phone/resolve') {
+        return Promise.resolve(response(200, { nextStep:2, requiredDocumentKinds:[1] }))
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    }))
+    const wrapper = mountView(document.body, true, router)
+    await wrapper.get('input[name="phone"]').setValue('+79991234567')
+    await wrapper.get('.auth-form').trigger('submit')
+    await flushPromises()
+
+    const checkbox = wrapper.get('#authentication-personal-data')
+    const link = wrapper.get('#authentication-personal-document')
+    expect(wrapper.get('h2').text()).toBe('Регистрация')
+    expect(checkbox.attributes('aria-labelledby')).toBe('authentication-personal-label authentication-personal-document')
+    expect(link.attributes('href')).toBe(`/legal/${documentIds[1]}`)
+    expect(link.element.closest('label')).toBeNull()
+    expect(link.element.tabIndex).toBe(0)
+    link.element.focus()
+    expect(document.activeElement).toBe(link.element)
+    await link.trigger('click')
+    await flushPromises()
+    expect(router.currentRoute.value.params.documentRef).toBe(documentIds[1])
+    expect(checkbox.element.checked).toBe(false)
+    expect(wrapper.emitted('update:modelValue')).toContainEqual([false])
+    wrapper.unmount()
   })
 
   it('gradually changes an unknown phone to registration and sends both exact consents', async () => {
@@ -695,9 +767,14 @@ describe('PhoneAuthDialog', () => {
     await wrapper.get('input[name="phone"]').setValue('+79991234567')
     await wrapper.get('.auth-form').trigger('submit')
     await flushPromises()
-    expect(wrapper.get('h2').text()).toBe('Создайте аккаунт')
+    expect(wrapper.get('h2').text()).toBe('Регистрация')
     expect(wrapper.findAll('input[type="checkbox"]')).toHaveLength(2)
     expect(wrapper.findAll('.consent-document-link')).toHaveLength(2)
+    expect(wrapper.get('.consent-registration__agreement').text().replace(/\s+/gu, ' ').trim()).toBe('Я принимаю Пользовательское соглашение')
+    expect(wrapper.get('#authentication-personal-document').text()).toBe('Согласие на хранение и обработку персональных данных')
+    expect(wrapper.text()).toContain('Я даю отдельное Согласие на хранение и обработку персональных данных')
+    expect(wrapper.text()).not.toContain('Для номера +79991234567 нужна регистрация')
+    expect(wrapper.text()).not.toContain('Версия 1')
 
     for (const checkbox of wrapper.findAll('input[type="checkbox"]')) await checkbox.setValue(true)
     await wrapper.get('.auth-form').trigger('submit')
@@ -854,8 +931,8 @@ describe('PhoneAuthDialog', () => {
   })
 
   it.each([
-    { nextStep:1, required:[2], title:'Продолжите вход', checkbox:'authentication-terms', omitted:'personalDataConsent' },
-    { nextStep:2, required:[1], title:'Создайте аккаунт', checkbox:'authentication-personal-data', omitted:'termsAccepted' }
+    { nextStep:1, required:[2], title:'Подтверждение соглашения', checkbox:'authentication-terms', omitted:'personalDataConsent' },
+    { nextStep:2, required:[1], title:'Регистрация', checkbox:'authentication-personal-data', omitted:'termsAccepted' }
   ])('renders only the requirements selected by Ops for $title', async scenario => {
     const fetch = vi.fn(url => {
       const standard = standardResponse(url)
@@ -876,40 +953,53 @@ describe('PhoneAuthDialog', () => {
 
     expect(wrapper.get('h2').text()).toBe(scenario.title)
     expect(wrapper.findAll('input[type="checkbox"]')).toHaveLength(1)
+    expect(wrapper.get('button[type="submit"]').element.disabled).toBe(true)
     await wrapper.get(`#${scenario.checkbox}`).setValue(true)
+    expect(wrapper.get('button[type="submit"]').element.disabled).toBe(false)
     await wrapper.get('.auth-form').trigger('submit')
     await flushPromises()
     const body = JSON.parse(fetch.mock.calls.find(([url]) => url.endsWith('/code/request'))[1].body)
     expect(body).not.toHaveProperty(scenario.omitted)
   })
 
-  it('shows field-specific errors until every required registration consent is selected', async () => {
+  it('keeps registration submission disabled until both documents are accepted without showing missing-consent errors', async () => {
     const fetch = vi.fn(url => {
       const standard = standardResponse(url)
       if (standard) return Promise.resolve(standard)
       if (url === '/api/v1/auth/phone/resolve') {
         return Promise.resolve(response(200, { nextStep:2, requiredDocumentKinds:[2, 1] }))
       }
+      if (url === '/api/v1/auth/code/request') {
+        return Promise.resolve(response(202, { onboardingToken:'synthetic-onboarding-receipt-at-least-32-characters' }))
+      }
       throw new Error(`Unexpected request: ${url}`)
     })
     vi.stubGlobal('fetch', fetch)
-    const wrapper = mountView(document.body)
+    const wrapper = mountView()
 
     await wrapper.get('input[name="phone"]').setValue('+79991234567')
     await wrapper.get('.auth-form').trigger('submit')
     await flushPromises()
+    const button = wrapper.get('button[type="submit"]')
+    expect(button.element.disabled).toBe(true)
     await wrapper.get('.auth-form').trigger('submit')
     await flushPromises()
-
-    await flushPromises()
-    expect(document.activeElement).toBe(wrapper.get('#authentication-terms').element)
-    expect(wrapper.get('#authentication-terms-error').text()).toContain('Примите условия')
-    expect(wrapper.get('#authentication-personal-error').text()).toContain('Дайте согласие')
-    expect(wrapper.get('.form-error').text()).toContain('Подтвердите необходимые документы')
-    expect(wrapper.get('#authentication-terms').attributes('aria-describedby')).toContain('authentication-terms-error')
-    expect(wrapper.get('#authentication-personal-data').attributes('aria-describedby')).toContain('authentication-personal-error')
+    expect(wrapper.find('#authentication-terms-error').exists()).toBe(false)
+    expect(wrapper.find('#authentication-personal-error').exists()).toBe(false)
+    expect(wrapper.find('.form-error').exists()).toBe(false)
     expect(fetch.mock.calls.some(([url]) => url.endsWith('/code/request'))).toBe(false)
-    wrapper.unmount()
+
+    await wrapper.get('#authentication-terms').setValue(true)
+    expect(button.element.disabled).toBe(true)
+    await wrapper.get('#authentication-personal-data').setValue(true)
+    expect(button.element.disabled).toBe(false)
+    await wrapper.get('#authentication-terms').setValue(false)
+    expect(button.element.disabled).toBe(true)
+    await wrapper.get('#authentication-terms').setValue(true)
+    expect(button.element.disabled).toBe(false)
+    await wrapper.get('.auth-form').trigger('submit')
+    await flushPromises()
+    expect(fetch.mock.calls.filter(([url]) => url.endsWith('/code/request'))).toHaveLength(1)
   })
 
   it('presents a failed requirements request and preserves selections and its retry key', async () => {
@@ -1076,7 +1166,7 @@ describe('PhoneAuthDialog', () => {
     await wrapper.get('.auth-form').trigger('submit')
     await flushPromises()
 
-    expect(wrapper.text()).toContain('+79991234567')
+    expect(wrapper.vm.$.setupState.phone).toBe('+79991234567')
     expect(wrapper.findAll('input[type="checkbox"]')).toHaveLength(2)
     expect(wrapper.findAll('input[type="checkbox"]').every(item => !item.element.checked)).toBe(true)
     expect(wrapper.find('input[name="code"]').exists()).toBe(false)
@@ -1119,7 +1209,7 @@ describe('PhoneAuthDialog', () => {
     await wrapper.get('.auth-form').trigger('submit')
     await flushPromises()
 
-    expect(wrapper.text()).toContain('+79991234567')
+    expect(wrapper.vm.$.setupState.phone).toBe('+79991234567')
     expect(wrapper.findAll('input[type="checkbox"]')).toHaveLength(2)
     expect(wrapper.findAll('input[type="checkbox"]').every(item => !item.element.checked)).toBe(true)
     expect(wrapper.find('input[name="code"]').exists()).toBe(false)
@@ -1157,8 +1247,8 @@ describe('PhoneAuthDialog', () => {
     await wrapper.get('.auth-form').trigger('submit')
     await flushPromises()
 
-    expect(wrapper.get('h2').text()).toBe('Продолжите вход')
-    expect(wrapper.text()).toContain('+79991234567')
+    expect(wrapper.get('h2').text()).toBe('Подтверждение соглашения')
+    expect(wrapper.vm.$.setupState.phone).toBe('+79991234567')
     expect(wrapper.find('input[name="code"]').exists()).toBe(false)
     expect(resolves).toBe(2)
   })

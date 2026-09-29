@@ -517,16 +517,26 @@ const focusAfter = useValidationFocus(focusRoot, {
           v-if="status?.status !== 'current'"
           class="consent-renewal"
         >
-          <UiSelectionControl
-            :model-value="accepted"
-            name="personalDataConsent"
-            :error="consentErrors.length > 0"
-            :aria-describedby="consentErrors.length ? 'personal-consent-error' : undefined"
-            :disabled="busy"
-            @update:model-value="accepted = $event"
-          >
-            Я даю отдельное согласие на хранение и обработку персональных данных по этому документу
-          </UiSelectionControl>
+          <div class="consent-inline-acceptance">
+            <UiSelectionControl
+              :model-value="accepted"
+              name="personalDataConsent"
+              :error="consentErrors.length > 0"
+              aria-labelledby="personal-consent-label personal-consent-document"
+              :aria-describedby="consentErrors.length ? 'personal-consent-error' : undefined"
+              :disabled="busy"
+              @update:model-value="accepted = $event"
+            >
+              <span id="personal-consent-label">Я даю отдельное </span>
+            </UiSelectionControl>
+            <RouterLink
+              id="personal-consent-document"
+              class="consent-document-link"
+              :to="{ name: 'legal-document', params: { documentRef: personalDocument.id } }"
+            >
+              {{ store.kindName(LEGAL_DOCUMENT_KIND.PERSONAL_DATA_CONSENT) }}
+            </RouterLink>
+          </div>
           <p
             v-if="consentErrors.length"
             id="personal-consent-error"

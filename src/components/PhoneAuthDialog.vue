@@ -57,10 +57,12 @@ const requiresAgreement = computed(() => Number.isInteger(agreementKind.value)
   && resolution.value?.requiredDocumentKinds.includes(agreementKind.value))
 const requiresPersonalData = computed(() => Number.isInteger(personalDataKind.value)
   && resolution.value?.requiredDocumentKinds.includes(personalDataKind.value))
+const requirementsReady = computed(() => (!requiresAgreement.value || termsAccepted.value)
+  && (!requiresPersonalData.value || personalDataAccepted.value))
 const isRegistration = computed(() => resolution.value?.nextStep === session.flowValue('registration'))
 const dialogTitle = computed(() => ({
   phone: 'Вход или регистрация',
-  requirements: isRegistration.value ? 'Создайте аккаунт' : 'Продолжите вход',
+  requirements: isRegistration.value ? 'Регистрация' : 'Подтверждение соглашения',
   code: 'Введите код'
 })[step.value])
 const error = computed(() => problem.value ? presentProblem(problem.value) : session.notice.value)
@@ -72,14 +74,8 @@ const termsErrors = computed(() => problemFieldErrors(problem.value, 'termsAccep
 const personalDataErrors = computed(() => [...new Set(Object.keys(problem.value?.errors ?? {})
   .filter(field => /^personalDataConsent(?:\.|$)/iu.test(field))
   .flatMap(field => problemFieldErrors(problem.value, field)))])
-const termsDescribedBy = computed(() => [
-  termsDocument.value ? 'authentication-terms-document' : null,
-  termsErrors.value.length ? 'authentication-terms-error' : null
-].filter(Boolean).join(' ') || undefined)
-const personalDataDescribedBy = computed(() => [
-  pdDocument.value ? 'authentication-personal-document' : null,
-  personalDataErrors.value.length ? 'authentication-personal-error' : null
-].filter(Boolean).join(' ') || undefined)
+const termsDescribedBy = computed(() => termsErrors.value.length ? 'authentication-terms-error' : undefined)
+const personalDataDescribedBy = computed(() => personalDataErrors.value.length ? 'authentication-personal-error' : undefined)
 
 function resetAfterPhone() {
   step.value = 'phone'
@@ -303,18 +299,7 @@ async function submitPhoneAction() {
 }
 
 async function submitRequirementsAction() {
-  const errors = {}
-  if (requiresAgreement.value && !termsAccepted.value) errors.termsAccepted = ['Примите условия использования сервиса']
-  if (requiresPersonalData.value && !personalDataAccepted.value) {
-    errors.personalDataConsent = ['Дайте согласие на обработку персональных данных']
-  }
-  if (Object.keys(errors).length) {
-    problem.value = createInternalProblem('invalidInput', {
-      detail: 'Подтвердите необходимые документы.',
-      errors
-    })
-    return
-  }
+  if (!requirementsReady.value) return
 
   const operation = invalidateOperation()
   busy.value = true
@@ -454,37 +439,33 @@ const focusAfter = useValidationFocus(focusRoot, {
       class="auth-form"
       @submit.prevent="submitRequirements"
     >
-      <p v-if="isRegistration">
-        Для номера {{ phone }} нужна регистрация. Подтвердите необходимые документы.
-      </p>
-      <p v-else>
-        Чтобы продолжить вход для {{ phone }}, примите актуальное {{ consentStore.kindName(agreementKind).toLowerCase() }}.
-      </p>
       <div class="consent-registration">
         <div
           v-if="requiresAgreement"
           class="consent-registration__item"
         >
-          <UiSelectionControl
-            id="authentication-terms"
-            :model-value="termsAccepted"
-            name="termsAccepted"
-            :disabled="busy"
-            :error="termsErrors.length > 0"
-            :aria-describedby="termsDescribedBy"
-            @update:model-value="termsAccepted = $event"
-          >
-            Я принимаю условия использования сервиса
-            <small>{{ consentStore.kindName(agreementKind) }} · версия {{ termsDocument?.displayVersion }}</small>
-          </UiSelectionControl>
-          <RouterLink
-            id="authentication-terms-document"
-            class="consent-document-link"
-            :to="{ name: 'legal-document', params: { documentRef: termsDocument.id } }"
-            @click="emit('update:modelValue', false)"
-          >
-            Открыть {{ consentStore.kindName(agreementKind).toLowerCase() }}
-          </RouterLink>
+          <div class="consent-registration__agreement consent-inline-acceptance">
+            <UiSelectionControl
+              id="authentication-terms"
+              :model-value="termsAccepted"
+              name="termsAccepted"
+              :disabled="busy"
+              :error="termsErrors.length > 0"
+              aria-labelledby="authentication-terms-label authentication-terms-document"
+              :aria-describedby="termsDescribedBy"
+              @update:model-value="termsAccepted = $event"
+            >
+              <span id="authentication-terms-label">Я принимаю </span>
+            </UiSelectionControl>
+            <RouterLink
+              id="authentication-terms-document"
+              class="consent-document-link"
+              :to="{ name: 'legal-document', params: { documentRef: termsDocument.id } }"
+              @click="emit('update:modelValue', false)"
+            >
+              {{ consentStore.kindName(agreementKind) }}
+            </RouterLink>
+          </div>
           <p
             v-if="termsErrors.length"
             id="authentication-terms-error"
@@ -499,26 +480,28 @@ const focusAfter = useValidationFocus(focusRoot, {
           v-if="requiresPersonalData"
           class="consent-registration__item"
         >
-          <UiSelectionControl
-            id="authentication-personal-data"
-            :model-value="personalDataAccepted"
-            name="personalDataConsent"
-            :disabled="busy"
-            :error="personalDataErrors.length > 0"
-            :aria-describedby="personalDataDescribedBy"
-            @update:model-value="personalDataAccepted = $event"
-          >
-            Я даю отдельное согласие на обработку персональных данных
-            <small>{{ consentStore.kindName(personalDataKind) }} · версия {{ pdDocument?.displayVersion }}</small>
-          </UiSelectionControl>
-          <RouterLink
-            id="authentication-personal-document"
-            class="consent-document-link"
-            :to="{ name: 'legal-document', params: { documentRef: pdDocument.id } }"
-            @click="emit('update:modelValue', false)"
-          >
-            Открыть {{ consentStore.kindName(personalDataKind).toLowerCase() }}
-          </RouterLink>
+          <div class="consent-inline-acceptance">
+            <UiSelectionControl
+              id="authentication-personal-data"
+              :model-value="personalDataAccepted"
+              name="personalDataConsent"
+              :disabled="busy"
+              :error="personalDataErrors.length > 0"
+              aria-labelledby="authentication-personal-label authentication-personal-document"
+              :aria-describedby="personalDataDescribedBy"
+              @update:model-value="personalDataAccepted = $event"
+            >
+              <span id="authentication-personal-label">Я даю отдельное </span>
+            </UiSelectionControl>
+            <RouterLink
+              id="authentication-personal-document"
+              class="consent-document-link"
+              :to="{ name: 'legal-document', params: { documentRef: pdDocument.id } }"
+              @click="emit('update:modelValue', false)"
+            >
+              {{ consentStore.kindName(personalDataKind) }}
+            </RouterLink>
+          </div>
           <p
             v-if="personalDataErrors.length"
             id="authentication-personal-error"
@@ -540,6 +523,7 @@ const focusAfter = useValidationFocus(focusRoot, {
         type="submit"
         variant="primary"
         block
+        :disabled="!requirementsReady"
         :loading="busy"
       >
         Получить код
