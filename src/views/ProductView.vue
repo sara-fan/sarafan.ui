@@ -21,7 +21,7 @@ import {
   presentProblemTitle,
   problemFieldErrors
 } from '../errors/problem.js'
-import { formatMoneyInput } from '../moneyFormatting.js'
+import { formatMoneyAmount, formatMoneyInput } from '../moneyFormatting.js'
 import { PRODUCT_FIELDS, previewPrefill, priceCents, productFormErrors, productPayload } from '../orderProduct.js'
 import { validatePricing } from '../orders/customerPricing.js'
 import { normalizeProductAddress } from '../productAddress.js'
@@ -49,12 +49,15 @@ const touched = ref(new Set())
 const pricing = ref(null)
 const forecastProblem = ref(null)
 const forecastLoading = ref(false)
-const forecastEligible = ref(false)
+const forecastCooldownUntil = ref(0)
 let mounted = false
 let previewOperation = 0
 let submissionOperation = 0
 let forecastOperation = 0
 let forecastTimer = null
+let forecastController = null
+let forecastPending = null
+let forecastCooldownTimer = null
 let resumeRunning = false
 let releaseConsentNoticeSuppression = null
 
@@ -69,11 +72,19 @@ const errorTitle = computed(() => presentProblemTitle(pageProblem.value))
 const previewNotice = computed(() => draft.value?.previewOutcome === 'recognized'
   ? 'Проверьте распознанные данные и при необходимости исправьте их.'
   : 'Не получилось получить все данные о товаре автоматически. Заполните их вручную.')
-const showForecast = computed(() => forecastEligible.value
-  && (forecastLoading.value || pricing.value))
+const showForecast = computed(() => Boolean(forecastInput())
+  && (forecastLoading.value || pricing.value || forecastProblem.value))
+const sellerCurrencySymbol = computed(() => ops.value?.currencies
+  .find(item => item.value === ops.value.productLimits.sellerPriceCurrency)?.symbol ?? '')
+const totalPrice = computed(() => {
+  const input = forecastInput()
+  if (!input) return ''
+  const cents = priceCents(sellerPrice.value.trim()) * BigInt(input.quantity)
+  return `${formatMoneyAmount(Number(cents) / 100)} ${sellerCurrencySymbol.value}`
+})
 
 function forecastInput() {
-  if (!ops.value || !forecastEligible.value) return null
+  if (!ops.value || !previewReady.value) return null
   const limits = ops.value.productLimits
   const rawQuantity = quantity.value.trim()
   if (!/^\d+$/u.test(rawQuantity)) return null
@@ -88,33 +99,72 @@ function forecastInput() {
 
 async function runForecast(operation, input) {
   const isCurrent = () => mounted && operation === forecastOperation
+  const controller = new globalThis.AbortController()
+  forecastController = controller
+  const timeout = globalThis.setTimeout(() => controller.abort(), 10000)
   try {
     let validated
     await session.forecastOrder(input.sellerPrice, input.quantity, isCurrent, value => {
       validated = validatePricing(value)
-    })
+    }, controller.signal)
     if (isCurrent()) pricing.value = validated
   } catch (value) {
-    if (isCurrent()) forecastProblem.value = normalizeProblem(value)
+    if (isCurrent()) {
+      const normalized = normalizeProblem(value)
+      forecastProblem.value = normalized
+      if (normalized.type === CORE_PROBLEM_TYPES.rateLimited) {
+        const retrySeconds = Math.min(3600, Math.max(1, normalized.retryAfterSeconds ?? 1))
+        forecastCooldownUntil.value = Date.now() + retrySeconds * 1000
+        globalThis.clearTimeout(forecastCooldownTimer)
+        forecastCooldownTimer = globalThis.setTimeout(() => { forecastCooldownUntil.value = 0 }, retrySeconds * 1000)
+      }
+    }
   } finally {
+    globalThis.clearTimeout(timeout)
     if (isCurrent()) forecastLoading.value = false
+    if (forecastController === controller) forecastController = null
   }
 }
 
 function scheduleForecast(immediate = false) {
   globalThis.clearTimeout(forecastTimer)
+  forecastTimer = null
+  forecastController?.abort()
   const operation = ++forecastOperation
   pricing.value = null
-  forecastProblem.value = null
+  const coolingDown = Date.now() < forecastCooldownUntil.value
+  if (!coolingDown) forecastProblem.value = null
   const input = forecastInput()
-  forecastLoading.value = Boolean(input)
-  if (input) forecastTimer = globalThis.setTimeout(() => { void runForecast(operation, input) }, immediate ? 0 : 300)
+  forecastLoading.value = Boolean(input) && !coolingDown
+  if (forecastLoading.value) forecastTimer = globalThis.setTimeout(() => {
+    forecastTimer = null
+    const pending = runForecast(operation, input)
+    forecastPending = pending
+    void pending.finally(() => { if (forecastPending === pending) forecastPending = null })
+  }, immediate ? 0 : 300)
+}
+
+async function awaitLatestForecast() {
+  while (mounted && forecastInput() && Date.now() >= forecastCooldownUntil.value) {
+    const operation = forecastOperation
+    if (forecastTimer) {
+      globalThis.clearTimeout(forecastTimer)
+      forecastTimer = null
+      const pending = runForecast(operation, forecastInput())
+      forecastPending = pending
+      void pending.finally(() => { if (forecastPending === pending) forecastPending = null })
+    }
+    const pending = forecastPending
+    if (!pending) return
+    await pending
+    if (operation === forecastOperation) return
+  }
 }
 
 const sellerPrice = computed(() => draft.value?.sellerPrice ?? '')
 const quantity = computed(() => draft.value?.quantity ?? '')
 
-watch([sellerPrice, quantity, ops, forecastEligible], () => scheduleForecast())
+watch([sellerPrice, quantity, ops, previewReady], () => scheduleForecast())
 
 function updateItemField(name, value) {
   touched.value = new Set([...touched.value, name])
@@ -185,7 +235,6 @@ async function loadPreview() {
   const isCurrent = () => currentPreview(ownOperation)
   previewLoading.value = true
   previewReady.value = false
-  forecastEligible.value = false
   sourceNeedsCorrection.value = false
   problem.value = null
   try {
@@ -206,9 +255,6 @@ async function loadPreview() {
     if (!drafts.applyPreview(validated.sourceUrl, validated.outcome, prefill)) {
       throw createInternalProblem('protocolError')
     }
-    forecastEligible.value = validated.outcome === 'recognized'
-      && validated.product?.sellerPrice?.currency === loadedOps.productLimits.sellerPriceCurrency
-      && Boolean(prefill.sellerPrice)
     previewReady.value = true
   } catch (value) {
     if (isCurrent()) problem.value = normalizeProblem(value)
@@ -329,6 +375,8 @@ async function submitAction() {
   if (!currentPayload() || busy.value) return
   drafts.ensureIdempotencyKey()
   if (!session.customer.value) {
+    await awaitLatestForecast()
+    if (!mounted || !currentPayload() || busy.value) return
     openAuthentication()
     return
   }
@@ -391,6 +439,8 @@ onBeforeUnmount(() => {
   mounted = false
   ++forecastOperation
   globalThis.clearTimeout(forecastTimer)
+  globalThis.clearTimeout(forecastCooldownTimer)
+  forecastController?.abort()
   previewOperation++
   submissionOperation++
   releaseConsentProblemOwnership()
@@ -418,7 +468,7 @@ const focusAfter = useValidationFocus(focusRoot, { context:() => session.custome
           ← Назад
         </button>
         <h1>Проверим товар по ссылке</h1>
-        <p v-if="forecastEligible">
+        <p v-if="showForecast">
           Проверьте данные о товаре и ориентировочную стоимость перед отправкой на проверку.
         </p>
         <p v-else>
@@ -472,6 +522,7 @@ const focusAfter = useValidationFocus(focusRoot, { context:() => session.custome
         :pricing="pricing"
         :ops="ops"
         :loading="forecastLoading"
+        preview
       />
       <section class="product-review__form">
         <UiAlert
@@ -484,6 +535,8 @@ const focusAfter = useValidationFocus(focusRoot, { context:() => session.custome
         <OrderItemFields
           :source-url="sourceUrl"
           :item="draft"
+          :total-price="totalPrice"
+          :currency-symbol="sellerCurrencySymbol"
           :disabled="busy"
           :errors-for="errorsFor"
           @update:field="updateItemField"
@@ -495,7 +548,10 @@ const focusAfter = useValidationFocus(focusRoot, { context:() => session.custome
             title="Не удалось рассчитать стоимость"
           >
             <p>{{ presentProblem(forecastProblem) }}</p>
-            <UiButton @click="scheduleForecast(true)">
+            <UiButton
+              :disabled="Date.now() < forecastCooldownUntil"
+              @click="scheduleForecast(true)"
+            >
               Повторить
             </UiButton>
           </UiAlert>

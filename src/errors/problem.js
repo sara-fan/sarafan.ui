@@ -16,6 +16,8 @@ export const CORE_PROBLEM_TYPES = Object.freeze({
   invalidCode: `${PROBLEM_TYPE_ROOT}invalid-code`,
   invalidRefreshToken: `${PROBLEM_TYPE_ROOT}invalid-refresh-token`,
   loginFailed: `${PROBLEM_TYPE_ROOT}login-failed`,
+  rateLimited: `${PROBLEM_TYPE_ROOT}rate-limited`,
+  anonymousApiTimeout: `${PROBLEM_TYPE_ROOT}anonymous-api-timeout`,
   onboardingConsentExpired: `${PROBLEM_TYPE_ROOT}onboarding-consent-expired`,
   orderLimitRatesUnavailable: `${PROBLEM_TYPE_ROOT}order-limit-rates-unavailable`,
   orderNotCancellable: `${PROBLEM_TYPE_ROOT}order-not-cancellable`,
@@ -78,6 +80,7 @@ export function hasOnlyPresentedFieldErrors(value, fields) {
 }
 
 export function isServiceUnavailableProblem(problem) {
+  if (problem?.type === CORE_PROBLEM_TYPES.anonymousApiTimeout) return false
   return problem?.type === INTERNAL_PROBLEM_TYPES.networkUnavailable
     || problem?.type === INTERNAL_PROBLEM_TYPES.protocolError
     || problem?.type === INTERNAL_PROBLEM_TYPES.serviceUnavailable

@@ -9,6 +9,7 @@ defineProps({
   sourceUrl: { type: String, required: true },
   item: { type: Object, required: true },
   totalPrice: { type: String, default: '' },
+  currencySymbol: { type: String, default: '' },
   readonly: { type: Boolean, default: false },
   disabled: { type: Boolean, default: false },
   errorsFor: { type: Function, default: () => [] }
@@ -58,7 +59,7 @@ const blur = name => emit('blur', name)
     <UiField
       :model-value="item.sellerPrice"
       name="sellerPrice"
-      :label="readonly ? 'Цена за единицу' : 'Цена за единицу, USD'"
+      :label="readonly ? 'Цена за единицу' : `Цена за единицу, ${currencySymbol}`"
       inputmode="decimal"
       :required="!readonly"
       :readonly="readonly"
@@ -80,7 +81,6 @@ const blur = name => emit('blur', name)
       @blur="blur('quantity')"
     />
     <UiField
-      v-if="totalPrice"
       :model-value="totalPrice"
       label="Общая цена"
       readonly
