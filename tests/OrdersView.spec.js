@@ -164,6 +164,7 @@ describe('OrdersView', () => {
     expect(wrapper.text()).toContain('Активных заказов нет')
     expect(wrapper.text()).toContain('4 товара')
     expect(wrapper.text()).toContain('Отменён')
+    expect(wrapper.get('.orders-panel--history .order-card').text()).not.toContain('Срок доставки уточняется')
   })
 
   it('uses safe presentation defaults for added statuses and Russian count boundaries', async () => {

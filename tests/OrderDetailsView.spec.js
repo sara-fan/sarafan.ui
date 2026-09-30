@@ -67,7 +67,7 @@ describe('OrderDetailsView', () => {
     expect(wrapper.get('.order-details-heading p').text())
       .toMatch(/^Создан \d{2}\.\d{2}\.\d{4}, \d{2}:\d{2} · Отменён \d{2}\.\d{2}\.\d{4}, \d{2}:\d{2}$/u)
     expect(wrapper.get('.customer-cost__excluded').findAll('dd').map(item => item.text()))
-      .toEqual(['Не рассчитывался', 'Не рассчитывался'])
+      .toEqual(['Рассчёт не проводился', 'Рассчёт не проводился'])
     expect(wrapper.find('.order-details-heading .ui-button--danger').exists()).toBe(false)
     expect(h.session.orderRequest.mock.calls.filter(([path]) => path.endsWith('/cancel'))).toHaveLength(1)
   })
@@ -270,11 +270,11 @@ describe('OrderDetailsView', () => {
     const { wrapper } = await mountAt()
     expect(wrapper.text()).toContain('12 000,00 ₽')
     expect(wrapper.text()).toContain('Действует до')
-    expect(wrapper.text()).toContain('Таможенные платежи0,00 ₽')
+    expect(wrapper.text()).toContain('Таможенные платежиНе ожидаются')
     expect(wrapper.text()).not.toContain('В разработке')
   })
 
-  it('shows a staff-saved domestic delivery amount after refreshing the order', async () => {
+  it('keeps delivery concealed after refreshing the order', async () => {
     let delivery = null
     h.session.orderRequest.mockImplementation(async (path, _options, isCurrent, validate) => {
       const value = path.endsWith('/ops') ? ops : completeOrder({ pricing:{
@@ -285,12 +285,12 @@ describe('OrderDetailsView', () => {
       return value
     })
     const { wrapper } = await mountAt()
-    expect(wrapper.get('.customer-cost__excluded').text()).toContain('Будет рассчитана позже')
+    expect(wrapper.get('.customer-cost__excluded').text()).toContain('Рассчитаем при оформлении заказа')
 
     delivery = 1000
     await wrapper.get('.order-details-heading__actions > button').trigger('click')
     await flushPromises()
-    expect(wrapper.get('.customer-cost__excluded').text()).toContain('Доставка по России1 000,00 ₽')
+    expect(wrapper.get('.customer-cost__excluded').text()).toContain('Доставка по РоссииРассчитаем при оформлении заказа')
   })
 
   it('deduplicates an in-flight tab return and refreshes saved pricing after it settles', async () => {
