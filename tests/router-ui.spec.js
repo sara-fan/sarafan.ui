@@ -52,7 +52,7 @@ beforeEach(() => {
   h.store.ops = ref({
     kinds: [
       { value: 2, name: 'Пользовательское соглашение', routeAlias: 'user-agreement' },
-      { value: 4, name: 'Политика обработки персональных данных', routeAlias: 'privacy-policy' }
+      { value:1, name: 'Согласие на обработку персональных данных', routeAlias: 'personal-data-consent' }
     ]
   })
   const orderStatuses = new Map([
@@ -283,7 +283,7 @@ describe('shared application chrome and controls', () => {
   })
 
   it('keeps New Order navigation on anonymous legal and fallback routes without a catalogue', async () => {
-    const router = await routerAt('/legal/privacy-policy')
+    const router = await routerAt('/legal/personal-data-consent')
     const wrapper = mount(AppHeader, { props:{ authenticated:false, storesAvailable:false }, global:{ plugins:[router] } })
     expect(wrapper.findAll('.app-header__desktop-nav a').map(link => link.text())).toEqual(['Новый заказ'])
     expect(wrapper.find('.app-header__desktop-nav [aria-current="page"]').exists()).toBe(false)
@@ -311,7 +311,7 @@ describe('shared application chrome and controls', () => {
       await flushPromises()
       expect(active()).toEqual([label])
     }
-    await router.push('/legal/privacy-policy')
+    await router.push('/legal/personal-data-consent')
     await flushPromises()
     expect(active()).toEqual([])
     await router.push('/missing')
@@ -326,7 +326,10 @@ describe('shared application chrome and controls', () => {
       global: { plugins: [router] }
     })
     expect(wrapper.findAll('.site-footer__links a')).toHaveLength(3)
-    expect(wrapper.get('a[href="/legal/privacy-policy"]').exists()).toBe(true)
+    expect(wrapper.findAll('.site-footer__links a').map(link => link.attributes('href'))).toEqual([
+      '/legal/user-agreement', '/legal/personal-data-consent', '/consents'
+    ])
+    expect(wrapper.get('a[href="/legal/personal-data-consent"]').text()).toBe('Согласие на обработку персональных данных')
     expect(wrapper.get('a[href="/consents"]').text()).toBe('Согласия')
     expect(wrapper.get('.brand-lockup__home').attributes('href')).toBe('/')
     expect(wrapper.find('.brand-lockup__partner').exists()).toBe(false)

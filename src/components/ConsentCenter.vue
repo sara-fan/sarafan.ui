@@ -18,6 +18,7 @@ import {
   presentProblemTitle,
   problemFieldErrors
 } from '../errors/problem.js'
+import { useAuthenticationReturn } from '../stores/authenticationReturn.js'
 import { useConsents } from '../stores/consents.js'
 import { useSession } from '../stores/session.js'
 import LegalDocumentReader from './LegalDocumentReader.vue'
@@ -47,6 +48,9 @@ const session = useSession()
 const store = useConsents()
 const route = useRoute()
 const router = useRouter()
+const authenticationReturn = useAuthenticationReturn()
+const authenticationBack = computed(() => authenticationReturn.visit.value?.documentPath === route.fullPath
+  ? authenticationReturn.visit.value : null)
 const { mine, opsProblem, personalProblem } = store
 const document = ref(null)
 const legalReader = ref(null)
@@ -219,6 +223,11 @@ async function openLegal(target = route.params.documentRef, isCurrent = alwaysCu
 }
 
 function printLegal() { legalReader.value?.printDocument() }
+
+function returnToAuthentication() {
+  if (authenticationBack.value.originPath === route.fullPath) authenticationReturn.resume()
+  else router.push(authenticationBack.value.originPath)
+}
 
 async function showPersonal(isCurrent = alwaysCurrent, preserveChoice = false) {
   if (!isCurrent()) return
@@ -435,7 +444,7 @@ const focusAfter = useValidationFocus(focusRoot, {
 
 <template>
   <ServiceUnavailablePage
-    v-if="serviceUnavailable"
+    v-if="serviceUnavailable && !authenticationBack"
     :busy="busy"
     :message="message"
     @retry="retry"
@@ -527,7 +536,7 @@ const focusAfter = useValidationFocus(focusRoot, {
               :disabled="busy"
               @update:model-value="accepted = $event"
             >
-              <span id="personal-consent-label">Я даю отдельное </span>
+              <span id="personal-consent-label">Я даю </span>
             </UiSelectionControl>
             <RouterLink
               id="personal-consent-document"
@@ -610,6 +619,13 @@ const focusAfter = useValidationFocus(focusRoot, {
           {{ document?.title || 'Юридический документ' }}
         </component>
       </div>
+      <UiButton
+        v-if="authenticationBack"
+        variant="secondary"
+        @click="returnToAuthentication"
+      >
+        {{ authenticationBack.label }}
+      </UiButton>
     </header>
     <UiAlert
       v-if="message"

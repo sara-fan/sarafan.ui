@@ -23,8 +23,6 @@ const document = { id, title:'Согласие', displayVersion:'2', contentHash
 const kinds = [
   { value:1, name:'Согласие на обработку персональных данных', routeAlias:'personal-data-consent' },
   { value:2, name:'Пользовательское соглашение', routeAlias:'user-agreement' },
-  { value:3, name:'Правила заказа товаров', routeAlias:'order-rules' },
-  { value:4, name:'Политика обработки персональных данных', routeAlias:'privacy-policy' }
 ]
 const denied = () => createInternalProblem('serviceUnavailable')
 function deferred() {
@@ -184,7 +182,7 @@ it('cancels customer-history work when a consent route unmounts', async () => {
 
   expect(h.store.resetCustomer).toHaveBeenCalledTimes(1)
 })
-it.each(['/', '/legal/privacy-policy'])(
+it.each(['/', '/legal/personal-data-consent'])(
   'does not reset customer history when the %s controller unmounts',
   async path => {
     h.session.customer.value = { id:7 }
@@ -267,7 +265,7 @@ it('links the current document from the renewal sentence without selecting conse
   const checkbox = wrapper.get('.consent-renewal input[name="personalDataConsent"]')
   const link = wrapper.get('#personal-consent-document')
   expect(wrapper.get('.consent-inline-acceptance').text().replace(/\s+/gu, ' ').trim())
-    .toBe('Я даю отдельное Согласие из каталога')
+    .toBe('Я даю Согласие из каталога')
   expect(checkbox.attributes('aria-labelledby')).toBe('personal-consent-label personal-consent-document')
   expect(link.attributes('href')).toBe(`/legal/${id}`)
   expect(link.element.closest('label')).toBeNull()
@@ -287,7 +285,7 @@ it('shows consent history newest first without ordinal markers', async () => {
     history:[
       { id:'oldest', kind:1, decision:'grant', at:'2026-09-09T10:00:00Z', documentId:id, displayVersion:'1' },
       { id:'newest', kind:2, decision:'grant', at:'2026-09-14T20:14:00Z', documentId:id, displayVersion:'3' },
-      { id:'middle', kind:3, decision:'grant', at:'2026-09-14T16:05:00Z', documentId:id, displayVersion:'2' }
+      { id:'middle', kind:2, decision:'grant', at:'2026-09-14T16:05:00Z', documentId:id, displayVersion:'2' }
     ],
     withdrawalRequest:null
   }
@@ -382,8 +380,8 @@ it.each(['mixed', 'service', 'store', 'hidden'])('retains the consent page alert
 })
 
 it('makes immutable and current legal links available without login as routed pages', async () => {
-  await mountCenter('/legal/privacy-policy'); await flushPromises()
-  expect(h.store.current).toHaveBeenCalledWith(LEGAL_DOCUMENT_KIND.PRIVACY_POLICY)
+  await mountCenter('/legal/personal-data-consent'); await flushPromises()
+  expect(h.store.current).toHaveBeenCalledWith(LEGAL_DOCUMENT_KIND.PERSONAL_DATA_CONSENT)
   expect(wrapper.text()).toContain('Отдельный текст согласия.')
   expect(wrapper.find('.legal-document-page').exists()).toBe(true)
   expect(wrapper.findComponent(UiDialog).exists()).toBe(false)
@@ -398,7 +396,7 @@ it('makes immutable and current legal links available without login as routed pa
   expect(h.store.read).toHaveBeenCalledWith(id)
   expect(h.store.ensureOps).not.toHaveBeenCalled()
   h.store.current.mockResolvedValue({ document:null })
-  await router.push('/legal/privacy-policy'); await flushPromises()
+  await router.push('/legal/personal-data-consent'); await flushPromises()
   expect(wrapper.text()).toContain('Документ пока не действует')
   expect(button('Повторить')).toBeTruthy()
   h.store.current.mockResolvedValue({ document })
@@ -414,19 +412,19 @@ it('uses the canonical document heading without adding a competing page h1', asy
   h.store.current.mockResolvedValue({
     document:{ ...document, title:'Название документа', html:'<h1>Канонический заголовок</h1><p>Текст.</p>' }
   })
-  await mountCenter('/legal/privacy-policy'); await flushPromises()
+  await mountCenter('/legal/personal-data-consent'); await flushPromises()
   expect(wrapper.get('.consent-page__document-title').text()).toBe('Название документа')
   expect(wrapper.findAll('h1')).toHaveLength(1)
   expect(wrapper.get('h1').text()).toBe('Канонический заголовок')
 })
 it('provides a semantic route heading when the canonical document has no h1', async () => {
-  await mountCenter('/legal/privacy-policy'); await flushPromises()
+  await mountCenter('/legal/personal-data-consent'); await flushPromises()
   expect(wrapper.findAll('h1')).toHaveLength(1)
   expect(wrapper.get('h1').text()).toBe(document.title)
 })
 it('keeps a semantic route heading when the canonical document is rejected', async () => {
   h.store.current.mockResolvedValue({ document:{ ...document, html:'<script>alert(1)</script>' } })
-  await mountCenter('/legal/privacy-policy'); await flushPromises()
+  await mountCenter('/legal/personal-data-consent'); await flushPromises()
   expect(wrapper.findAll('h1')).toHaveLength(1)
   expect(wrapper.find('.service-unavailable-page').exists()).toBe(true)
   h.store.current.mockResolvedValue({ document })
@@ -435,14 +433,14 @@ it('keeps a semantic route heading when the canonical document is rejected', asy
   expect(wrapper.findComponent(LegalDocumentReader).exists()).toBe(true)
 })
 it('falls back safely if defensive legal-heading parsing fails', async () => {
-  await mountCenter('/legal/privacy-policy'); await flushPromises()
+  await mountCenter('/legal/personal-data-consent'); await flushPromises()
   state().document = { ...document, html:'<script>alert(1)</script>' }
   await nextTick()
   expect(state().legalDocumentHasH1).toBe(false)
 })
 it('rejects invalid legal effective dates before rendering and permits retry', async () => {
   h.store.current.mockResolvedValue({ document:{ ...document, effectiveAt:'not-a-date' } })
-  await mountCenter('/legal/privacy-policy'); await flushPromises()
+  await mountCenter('/legal/personal-data-consent'); await flushPromises()
   expect(wrapper.find('.service-unavailable-page').exists()).toBe(true)
   h.store.current.mockResolvedValue({ document })
   await click('Повторить')
@@ -459,7 +457,7 @@ it('refreshes a current legal route at the server document boundary', async () =
       nextChangeAt:'2026-09-10T08:00:00.100Z'
     })
     .mockResolvedValue({ document:replacement, serverNow:'2026-09-10T08:00:00.100Z', nextChangeAt:null })
-  await mountCenter('/legal/privacy-policy'); await flushPromises()
+  await mountCenter('/legal/personal-data-consent'); await flushPromises()
   expect(wrapper.get('.consent-page__document-title').text()).toBe('Текущая версия')
   await vi.waitFor(() => expect(wrapper.get('.consent-page__document-title').text()).toBe('Новая версия'))
   expect(h.store.current).toHaveBeenCalledTimes(2)
@@ -473,7 +471,7 @@ it('recovers a not-yet-effective legal route at its server boundary', async () =
       nextChangeAt:'2026-09-10T08:00:00.100Z'
     })
     .mockResolvedValue({ document:replacement, serverNow:'2026-09-10T08:00:00.100Z', nextChangeAt:null })
-  await mountCenter('/legal/privacy-policy'); await flushPromises()
+  await mountCenter('/legal/personal-data-consent'); await flushPromises()
   expect(wrapper.text()).toContain('Документ пока не действует')
   await vi.waitFor(() => expect(wrapper.get('.consent-page__document-title').text()).toBe('Версия после границы'))
   expect(h.store.current).toHaveBeenCalledTimes(2)
@@ -484,12 +482,12 @@ it('rejects a non-future legal document boundary as a protocol outage', async ()
     serverNow:'2026-09-10T08:00:00Z',
     nextChangeAt:'2026-09-10T08:00:00Z'
   })
-  await mountCenter('/legal/privacy-policy'); await flushPromises()
+  await mountCenter('/legal/personal-data-consent'); await flushPromises()
   expect(wrapper.find('.service-unavailable-page').exists()).toBe(true)
 })
 it('loads a legal document without associating the authenticated browser', async () => {
   h.session.customer.value = { id:7 }
-  await mountCenter('/legal/privacy-policy'); await flushPromises()
+  await mountCenter('/legal/personal-data-consent'); await flushPromises()
   expect(h.store).not.toHaveProperty('associate')
   expect(wrapper.find('.service-unavailable-page').exists()).toBe(false)
   expect(wrapper.findComponent(LegalDocumentReader).exists()).toBe(true)
@@ -498,7 +496,7 @@ it('removes foreground listeners when a pending mount load is unmounted', async 
   const pending = deferred()
   h.store.current.mockImplementationOnce(() => pending.promise)
   vi.spyOn(globalThis.document, 'visibilityState', 'get').mockReturnValue('visible')
-  await mountCenter('/legal/privacy-policy'); await nextTick()
+  await mountCenter('/legal/personal-data-consent'); await nextTick()
   wrapper.unmount()
   pending.resolve({ document }); await flushPromises()
   h.store.current.mockClear()
@@ -511,7 +509,7 @@ it('ignores a stale document response after route changes and refreshes the rout
   const historical = { ...document, title:'Исторический документ' }
   h.store.read.mockResolvedValue(historical)
   h.store.current.mockImplementationOnce(() => new Promise(r => { resolve = r }))
-  await mountCenter('/legal/privacy-policy'); await nextTick()
+  await mountCenter('/legal/personal-data-consent'); await nextTick()
   expect(() => state().printLegal()).not.toThrow()
   await router.push(`/legal/${id}`); await flushPromises()
   resolve({ document }); await flushPromises()
@@ -529,7 +527,7 @@ it('does not let a stale legal failure replace the newly selected document', asy
   h.store.current
     .mockImplementationOnce(() => stale.promise)
     .mockResolvedValueOnce({ document:selected })
-  await mountCenter('/legal/privacy-policy'); await nextTick()
+  await mountCenter('/legal/personal-data-consent'); await nextTick()
   await router.push('/legal/user-agreement'); await flushPromises()
   expect(wrapper.get('.consent-page__document-title').text()).toBe('Новый документ')
   stale.reject(denied()); await flushPromises()
@@ -543,7 +541,7 @@ it('keeps the replacement legal load current after the previous watcher is clean
   h.store.current
     .mockImplementationOnce(() => stale.promise)
     .mockImplementationOnce(() => selected.promise)
-  await mountCenter('/legal/privacy-policy'); await nextTick()
+  await mountCenter('/legal/personal-data-consent'); await nextTick()
   await router.push('/legal/user-agreement'); await nextTick()
   stale.resolve({ document:{ ...document, title:'Устаревший документ' } }); await flushPromises()
   selected.resolve({ document:replacement }); await flushPromises()
@@ -557,7 +555,7 @@ it('stops a stale legal load after its catalogue request completes', async () =>
     .mockImplementationOnce(() => staleCatalogue.promise)
     .mockResolvedValueOnce({ kinds })
   h.store.current.mockResolvedValue({ document:selected })
-  await mountCenter('/legal/privacy-policy'); await nextTick()
+  await mountCenter('/legal/personal-data-consent'); await nextTick()
   await router.push('/legal/user-agreement'); await flushPromises()
   staleCatalogue.resolve({ kinds }); await flushPromises()
   expect(wrapper.get('.consent-page__document-title').text()).toBe('Документ после смены маршрута')
@@ -566,7 +564,7 @@ it('stops a stale legal load after its catalogue request completes', async () =>
 it('keeps a pending legal load current when the customer session changes', async () => {
   const pending = deferred()
   h.store.current.mockImplementationOnce(() => pending.promise)
-  await mountCenter('/legal/privacy-policy'); await nextTick()
+  await mountCenter('/legal/personal-data-consent'); await nextTick()
   h.session.customer.value = { id:7 }
   await nextTick()
   pending.resolve({ document }); await flushPromises()

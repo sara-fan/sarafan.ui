@@ -21,7 +21,7 @@ vi.mock('../src/stores/orders.js', () => ({ createOrderStore: () => h.orders }))
 
 const legalKinds = [
   { value: 2, name: 'Пользовательское соглашение', routeAlias: 'user-agreement' },
-  { value: 4, name: 'Политика обработки персональных данных', routeAlias: 'privacy-policy' }
+  { value:1, name: 'Согласие на обработку персональных данных', routeAlias: 'personal-data-consent' }
 ]
 
 async function mountApp(path = '/') {
@@ -212,7 +212,7 @@ describe('App routing and privacy gates', () => {
     expect(wrapper.find('.phone-auth-stub').exists()).toBe(true)
     expect(wrapper.get('.phone-auth-notice').text())
       .toBe('Сервис временно недоступен. Пожалуйста, повторите позже')
-    await router.push('/legal/privacy-policy')
+    await router.push('/legal/personal-data-consent')
     await flushPromises()
     expect(wrapper.find('.session-notice').exists()).toBe(false)
   })

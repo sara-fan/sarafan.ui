@@ -87,6 +87,10 @@ For other comment-capable formats, use the same three lines with that format's n
 
 ## Versioned customer consent
 
+- Opening a legal document from authentication temporarily suspends the requirements step in memory, including the phone, exact documents, choices and retry key. Return actions and browser Back restore the originating global/product flow; ordinary reopening starts fresh. Clear the return state on identity changes or unrelated navigation. Never put authentication state in URLs, browser history state or persistent storage. Preserve the product authentication-resume marker during this document visit.
+
+- LEGAL at `sara-fan/sarafan@aba6c7abaad915e5224e4398c9429d74c7eceae9` and issue #11 use exactly PersonalDataConsent=1 and UserAgreement=2; values 0, 3 and 4 are retired and reserved. Validate the complete two-kind Ops catalogue, consuming Core names and aliases. The Privacy Policy is an appendix in the same consent document/version, with no separate link or confirmation; order terms belong in the User Agreement.
+
 - Consent history contains only versioned events with a document ID and content digest. Do not add legacy record labels or fallbacks; pre-versioned records are deleted by the Core consent migration, and existing customers without a new receipt have missing consent.
 
 - Spec v1.17 §§4.3/4.18 and Core #19 govern the phone-first combined flow. Never show a login/register selector or send a client-selected purpose. Load authentication/customer Ops, resolve the phone in Core, and render only the returned current legal-document kinds before requesting the code. Require an onboarding receipt for both agreement and registration; only the direct code flow permits null. Keep the short-lived receipt and phone in memory only; requirements/version changes retain the phone but clear documents, confirmations, code and receipt before a fresh resolve/request. Authentication alone never grants personal-data processing permission.

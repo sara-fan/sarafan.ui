@@ -25,6 +25,7 @@ import { formatMoneyAmount, formatMoneyInput } from '../moneyFormatting.js'
 import { PRODUCT_FIELDS, previewPrefill, priceCents, productFormErrors, productPayload } from '../orderProduct.js'
 import { validatePricing } from '../orders/customerPricing.js'
 import { normalizeProductAddress } from '../productAddress.js'
+import { useAuthenticationReturn } from '../stores/authenticationReturn.js'
 import { useConsents } from '../stores/consents.js'
 import { showOrderCreated } from '../stores/orderNotices.js'
 import { validateCreatedOrder, validateOrderOps, validateProductPreview } from '../stores/orders.js'
@@ -37,6 +38,7 @@ const router = useRouter()
 const session = useSession()
 const consents = useConsents()
 const drafts = useProductDraft()
+const authenticationReturn = useAuthenticationReturn()
 const problem = ref(null)
 const ops = ref(null)
 const previewLoading = ref(false)
@@ -291,7 +293,8 @@ function openAuthentication() {
 
 function updateAuthentication(open) {
   authOpen.value = open
-  if (!open && draft.value?.resumeMode === 'authentication') drafts.clearResume()
+  if (!open && draft.value?.resumeMode === 'authentication'
+    && !authenticationReturn.isPending('product')) drafts.clearResume()
 }
 
 async function authenticatedAction() {
@@ -582,6 +585,7 @@ const focusAfter = useValidationFocus(focusRoot, { context:() => session.custome
 
     <PhoneAuthDialog
       :model-value="authOpen"
+      return-context="product"
       @update:model-value="updateAuthentication"
       @authenticated="authenticated"
     />
