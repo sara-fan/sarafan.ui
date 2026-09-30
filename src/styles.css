@@ -270,7 +270,9 @@ a { color: var(--sarafan-secondary); }
 .customer-cost--compact .customer-cost__headline > span { font-size: 11px; }
 .customer-cost--compact .customer-cost__headline > strong { font-size: 20px; }
 .customer-cost--compact .customer-cost__status { margin-top: var(--sarafan-space-8); font-size: 11px; }
-.order-card__price .customer-cost { text-align: right; }
+.order-card__price .customer-cost { width: 100%; min-width: 0; text-align: right; }
+.order-card__price .customer-cost__headline { grid-template-columns: minmax(0, 1fr); }
+.order-card__price .customer-cost__headline > span, .order-card__price .customer-cost__headline > strong { white-space: normal; overflow-wrap: anywhere; }
 .order-details-view > .customer-cost { margin-bottom: var(--sarafan-space-20); }
 
 .order-details-view { padding-block: var(--sarafan-space-48) var(--sarafan-space-64); }
@@ -304,7 +306,7 @@ a { color: var(--sarafan-secondary); }
 .orders-state--empty strong { color: var(--sarafan-ink); font: 500 22px/1.2 var(--sarafan-font-display); }
 .orders-state--empty .ui-button { margin-top: var(--sarafan-space-8); }
 .orders-state--compact { min-height: 72px; }
-.order-card { display: grid; grid-template-columns: 98px minmax(0, 1fr) auto; align-items: center; gap: var(--sarafan-space-20); padding: 18px; border: 1px solid var(--sarafan-line); border-radius: var(--sarafan-radius-20); background: rgba(255, 255, 255, 0.94); color: inherit; text-decoration: none; transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease; }
+.order-card { display: grid; grid-template-columns: 98px minmax(0, 1fr) 240px; align-items: center; gap: var(--sarafan-space-20); padding: 18px; border: 1px solid var(--sarafan-line); border-radius: var(--sarafan-radius-20); background: rgba(255, 255, 255, 0.94); color: inherit; text-decoration: none; transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease; }
 .order-card:hover { border-color: var(--sarafan-line-strong); box-shadow: 0 12px 28px rgba(29, 62, 133, 0.09); transform: translateY(-2px); }
 .order-card:focus-visible { outline: 3px solid rgba(28, 163, 228, 0.3); outline-offset: 3px; }
 .order-card__visual { display: grid; width: 98px; height: 100px; overflow: hidden; place-items: center; border: 1px solid rgba(28, 163, 228, 0.1); border-radius: var(--sarafan-radius-16); background: linear-gradient(145deg, #eef9fd, #dbeef8); }
@@ -327,11 +329,11 @@ a { color: var(--sarafan-secondary); }
 .order-card__progress-labels strong { color: var(--sarafan-ink); font-weight: 700; }
 .order-card__progress-track { height: 6px; overflow: hidden; border-radius: var(--sarafan-radius-full); background: var(--sarafan-disabled-bg); }
 .order-card__progress-track span { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--sarafan-accent), var(--sarafan-secondary)); }
-.order-card__price { display: flex; min-width: 132px; align-items: flex-end; gap: 4px; flex-direction: column; }
+.order-card__price { display: flex; min-width: 0; align-items: flex-end; gap: 4px; flex-direction: column; }
 .order-card__price--empty { min-width: 36px; }
 .order-card__price small { color: var(--sarafan-ink); font-size: 14px; line-height: 1.5; }
 .order-card__price > strong { margin-bottom: var(--sarafan-space-8); color: #1d3e85; font: 600 22px/1.3 var(--sarafan-font-display); }
-.order-card__action { display: grid; width: 36px; height: 36px; place-items: center; border: 1px solid rgba(28, 163, 228, 0.18); border-radius: var(--sarafan-radius-12); background: var(--sarafan-accent-soft); color: var(--sarafan-secondary); font-size: 20px; font-weight: 800; text-decoration: none; transition: background-color 160ms ease, color 160ms ease, transform 160ms ease; }
+.order-card__action { display: grid; width: 36px; height: 36px; flex-shrink: 0; place-items: center; border: 1px solid rgba(28, 163, 228, 0.18); border-radius: var(--sarafan-radius-12); background: var(--sarafan-accent-soft); color: var(--sarafan-secondary); font-size: 20px; font-weight: 800; text-decoration: none; transition: background-color 160ms ease, color 160ms ease, transform 160ms ease; }
 .order-card__action:hover { background: linear-gradient(135deg, var(--sarafan-accent), var(--sarafan-secondary)); color: var(--sarafan-paper); transform: translateX(2px); }
 
 .profile-view { width: min(calc(100% - 48px), var(--sarafan-content-width)); padding-block: var(--sarafan-space-48) var(--sarafan-space-64); }

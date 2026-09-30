@@ -62,7 +62,7 @@ describe('customer pricing', () => {
     const wrapper = mount(CustomerCostSummary, { props:{ pricing:confirmed, ops } })
     expect(wrapper.get('.customer-cost__headline > span').text()).toBe('Подтверждённая стоимость')
     expect(wrapper.text()).toContain('Действует до')
-    expect(wrapper.text()).toContain('0,00 ₽')
+    expect(wrapper.text()).toContain('Не ожидаются')
     expect(wrapper.text()).not.toContain('В разработке')
     await vi.advanceTimersByTimeAsync(5000)
     expect(wrapper.get('.customer-cost__headline > span').text()).toBe('Срок подтверждения истёк')
@@ -124,8 +124,8 @@ describe('customer pricing', () => {
       .toEqual(['customer-cost__main', 'customer-cost__note', 'customer-cost__excluded'])
     expect(wrapper.get('.customer-cost__headline').text()).toContain('Предварительная стоимость5 228,31 ₽')
     const amounts = wrapper.findAll('.customer-cost__excluded dd')
-    expect(amounts[0].text()).toBe('Будет рассчитана позже')
-    expect(amounts[1].text()).toBe('120,00 ₽')
+    expect(amounts[0].text()).toBe('Рассчитаем при оформлении заказа')
+    expect(amounts[1].text()).toBe('Проверяем, потребуются ли таможенные платежи')
     wrapper.unmount()
   })
 
@@ -135,9 +135,26 @@ describe('customer pricing', () => {
     }, ops } })
     expect(wrapper.get('.customer-cost__headline > span').text()).toBe('Подтверждённая стоимость')
     expect(wrapper.findAll('.customer-cost__excluded dd').map(amount => amount.text()))
-      .toEqual(['55,00 ₽', '120,00 ₽'])
+      .toEqual(['Рассчитаем при оформлении заказа', 'Предварительно 120,00 ₽'])
     expect(wrapper.get('.customer-cost__note').element.nextElementSibling)
       .toBe(wrapper.get('.customer-cost__excluded').element)
     wrapper.unmount()
   })
+})
+
+it.each([0, 120, null])('keeps extra rows visible and interprets confirmed customs %s', amount => {
+  const wrapper = mount(CustomerCostSummary, { props:{ pricing:{ ...confirmed, customsRub:amount }, ops } })
+  expect(wrapper.findAll('.customer-cost__excluded dd')).toHaveLength(2)
+  expect(wrapper.findAll('.customer-cost__excluded dd')[1].text()).toBe(amount === null
+    ? 'Проверяем, потребуются ли таможенные платежи' : amount === 0 ? 'Не ожидаются' : 'Предварительно 120,00 ₽')
+  wrapper.unmount()
+})
+
+it('retains cancelled historical unknown wording and published customs context', async () => {
+  const wrapper = mount(CustomerCostSummary, { props:{ pricing:forecastPricing, ops, historical:true } })
+  expect(wrapper.text()).toContain('Последняя рассчитанная стоимость')
+  expect(wrapper.findAll('.customer-cost__excluded dd').map(item => item.text())).toEqual(['Рассчёт не проводился', 'Рассчёт не проводился'])
+  await wrapper.setProps({ pricing:{ ...confirmed, customsRub:120 } })
+  expect(wrapper.findAll('.customer-cost__excluded dd')[1].text()).toBe('Предварительно 120,00 ₽')
+  wrapper.unmount()
 })

@@ -293,7 +293,7 @@ onBeforeUnmount(() => {
             </p>
             <p class="order-card__details">
               <span>Создан {{ createdAt(order.createdAt) }}</span>
-              <span>Срок доставки уточняется</span>
+              <span v-if="status(order)?.routeAlias !== 'cancelled'">Срок доставки уточняется</span>
             </p>
           </div>
           <div

@@ -34,9 +34,14 @@ const label = computed(() => props.historical ? 'Последняя рассчи
   : props.pricing?.state === 0 ? 'Предварительная стоимость'
   : props.ops?.pricingStates?.find(item => item.value === state.value)?.name ?? 'Стоимость заказа')
 const rubSymbol = computed(() => props.ops?.currencies?.find(item => item.routeAlias === 'rub')?.symbol ?? '₽')
-const excludedAmount = amount => amount === null || amount === undefined
-  ? props.historical ? 'Не рассчитывался' : 'Будет рассчитана позже'
-  : formatRub(amount, rubSymbol.value)
+const deliveryText = computed(() => props.historical
+  ? props.pricing?.domesticDeliveryRub == null ? 'Рассчёт не проводился' : formatRub(props.pricing.domesticDeliveryRub, rubSymbol.value)
+  : 'Рассчитаем при оформлении заказа')
+const customsText = computed(() => {
+  const amount = props.pricing?.state === 0 ? null : props.pricing?.customsRub
+  if (amount == null) return props.historical ? 'Рассчёт не проводился' : 'Проверяем, потребуются ли таможенные платежи'
+  return amount === 0 ? 'Не ожидаются' : 'Предварительно ' + formatRub(amount, rubSymbol.value)
+})
 </script>
 
 <template>
@@ -73,13 +78,13 @@ const excludedAmount = amount => amount === null || amount === undefined
       <div>
         <dt>Доставка по России</dt>
         <dd>
-          {{ excludedAmount(pricing?.domesticDeliveryRub) }}
+          {{ deliveryText }}
         </dd>
       </div>
       <div>
         <dt>Таможенные платежи</dt>
         <dd>
-          {{ excludedAmount(pricing?.customsRub) }}
+          {{ customsText }}
         </dd>
       </div>
     </dl>
