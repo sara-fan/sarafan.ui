@@ -5,7 +5,7 @@
 
 import { useValidationFocus, validationFields } from '../validationFocus.js'
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
-import { RouterLink, useRoute } from 'vue-router'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
 
 import { BRAND_ICON_URL } from '../branding.js'
 import {
@@ -17,6 +17,7 @@ import {
   presentProblem,
   problemFieldErrors
 } from '../errors/problem.js'
+import { useAuthenticationReturn } from '../stores/authenticationReturn.js'
 import { useConsents } from '../stores/consents.js'
 import { useSession } from '../stores/session.js'
 import UiAlert from './ui/UiAlert.vue'
@@ -25,10 +26,16 @@ import UiDialog from './ui/UiDialog.vue'
 import UiField from './ui/UiField.vue'
 import UiSelectionControl from './ui/UiSelectionControl.vue'
 
-const props = defineProps({ modelValue: { type: Boolean, default: true } })
+const props = defineProps({
+  modelValue: { type: Boolean, default: true },
+  returnContext: { type: String, default: 'global' }
+})
 const emit = defineEmits(['update:modelValue', 'authenticated'])
 const session = useSession()
 const route = useRoute()
+const router = useRouter()
+const authenticationReturn = useAuthenticationReturn()
+let resumedRequirements = null
 const consentStore = useConsents()
 const step = ref('phone')
 const phone = ref('')
@@ -116,6 +123,51 @@ function invalidateOperation() {
 
 onBeforeUnmount(invalidateOperation)
 
+function restoreRequirements(value) {
+  phone.value = value.phone
+  resolution.value = value.resolution
+  termsDocument.value = value.termsDocument
+  pdDocument.value = value.pdDocument
+  termsAccepted.value = value.termsAccepted
+  personalDataAccepted.value = value.personalDataAccepted
+  problem.value = value.problem
+  consentRetryFingerprint = value.consentRetryFingerprint
+  consentRetryKey = value.consentRetryKey
+  step.value = 'requirements'
+}
+
+function openLegalDocument(event, document) {
+  if (event.button > 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+  const documentPath = router.resolve({ name:'legal-document', params:{ documentRef:document.id } }).fullPath
+  authenticationReturn.save({
+    owner:props.returnContext,
+    originPath:route.fullPath,
+    documentPath,
+    customerId:session.customer.value?.id ?? null,
+    label:isRegistration.value ? 'Вернуться к регистрации' : 'Вернуться ко входу',
+    state:{
+      phone:phone.value, resolution:resolution.value,
+      termsDocument:termsDocument.value, pdDocument:pdDocument.value,
+      termsAccepted:termsAccepted.value, personalDataAccepted:personalDataAccepted.value,
+      problem:problem.value, consentRetryFingerprint, consentRetryKey
+    }
+  })
+  emit('update:modelValue', false)
+}
+
+watch([() => route.fullPath, authenticationReturn.resumeGeneration], ([path]) => {
+  authenticationReturn.observeRoute(path)
+  const saved = authenticationReturn.take(props.returnContext, path, session.customer.value?.id ?? null)
+  if (!saved) return
+  resumedRequirements = saved
+  if (props.modelValue) {
+    restoreRequirements(saved)
+    resumedRequirements = null
+  } else emit('update:modelValue', true)
+}, { immediate:true })
+
+watch(() => session.customer.value?.id, () => authenticationReturn.clear())
+
 watch(() => props.modelValue, open => {
   invalidateOperation()
   busy.value = false
@@ -124,6 +176,10 @@ watch(() => props.modelValue, open => {
     hasOpened = true
     phone.value = ''
     resetAfterPhone()
+    if (resumedRequirements) {
+      restoreRequirements(resumedRequirements)
+      resumedRequirements = null
+    } else authenticationReturn.clear()
   }
 })
 
@@ -461,7 +517,7 @@ const focusAfter = useValidationFocus(focusRoot, {
               id="authentication-terms-document"
               class="consent-document-link"
               :to="{ name: 'legal-document', params: { documentRef: termsDocument.id } }"
-              @click="emit('update:modelValue', false)"
+              @click="openLegalDocument($event, termsDocument)"
             >
               {{ consentStore.kindName(agreementKind) }}
             </RouterLink>
@@ -491,13 +547,13 @@ const focusAfter = useValidationFocus(focusRoot, {
               :aria-describedby="personalDataDescribedBy"
               @update:model-value="personalDataAccepted = $event"
             >
-              <span id="authentication-personal-label">Я даю отдельное </span>
+              <span id="authentication-personal-label">Я даю </span>
             </UiSelectionControl>
             <RouterLink
               id="authentication-personal-document"
               class="consent-document-link"
               :to="{ name: 'legal-document', params: { documentRef: pdDocument.id } }"
-              @click="emit('update:modelValue', false)"
+              @click="openLegalDocument($event, pdDocument)"
             >
               {{ consentStore.kindName(personalDataKind) }}
             </RouterLink>

@@ -7,6 +7,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createMemoryHistory, createRouter } from 'vue-router'
 
 import PhoneAuthDialog from '../src/components/PhoneAuthDialog.vue'
+import ConsentCenter from '../src/components/ConsentCenter.vue'
+import { useAuthenticationReturn } from '../src/stores/authenticationReturn.js'
 import { createSarafanVuetify } from '../src/plugins/vuetify.js'
 import { resetConsentsForTests } from '../src/stores/consents.js'
 import { resetSessionForTests, useSession } from '../src/stores/session.js'
@@ -26,8 +28,6 @@ const customerOps = { states:[
 const legalOps = { kinds:[
   { value:1, name:'Согласие на хранение и обработку персональных данных', routeAlias:'personal-data-consent' },
   { value:2, name:'Пользовательское соглашение', routeAlias:'user-agreement' },
-  { value:3, name:'Правила заказа товаров', routeAlias:'order-rules' },
-  { value:4, name:'Политика обработки персональных данных', routeAlias:'privacy-policy' }
 ], cookieCategories:[{ value:0, name:'Обязательные', required:true }] }
 const documentIds = {
   1:'11111111-1111-1111-1111-111111111111',
@@ -67,8 +67,10 @@ function testRouter() {
   })
 }
 
+const mountedDialogs = []
+
 function mountView(attachTo, modelValue = true, router = testRouter()) {
-  return mount(PhoneAuthDialog, {
+  const wrapper = mount(PhoneAuthDialog, {
     props: { modelValue },
     ...(attachTo ? { attachTo } : {}),
     global: {
@@ -78,6 +80,8 @@ function mountView(attachTo, modelValue = true, router = testRouter()) {
       }
     }
   })
+  mountedDialogs.push(wrapper)
+  return wrapper
 }
 
 function deferred() {
@@ -100,9 +104,13 @@ describe('PhoneAuthDialog', () => {
   beforeEach(() => {
     resetSessionForTests()
     resetConsentsForTests()
+    useAuthenticationReturn().clear()
   })
 
-  afterEach(() => vi.unstubAllGlobals())
+  afterEach(() => {
+    for (const wrapper of mountedDialogs.splice(0)) wrapper.unmount()
+    vi.unstubAllGlobals()
+  })
 
   it('focuses the phone field after an empty submission', async () => {
     const wrapper = mountView(globalThis.document.body)
@@ -723,6 +731,189 @@ describe('PhoneAuthDialog', () => {
     wrapper.unmount()
   })
 
+  it.each([
+    { nextStep:1, required:[2], documentKind:2, browserBack:true },
+    { nextStep:1, required:[2], documentKind:2, browserBack:false },
+    { nextStep:2, required:[2, 1], documentKind:1, browserBack:true },
+    { nextStep:2, required:[2, 1], documentKind:1, browserBack:false },
+    { nextStep:2, required:[2, 1], documentKind:2, browserBack:true },
+    { nextStep:2, required:[2, 1], documentKind:2, browserBack:false },
+    { nextStep:2, required:[2, 1], documentKind:1, browserBack:false, failedDocument:true },
+    { nextStep:2, required:[2, 1], documentKind:1, browserBack:false, sameDocumentOrigin:true },
+    { nextStep:1, required:[2], documentKind:2, browserBack:true, parentRemainsOpen:true }
+  ])('restores the same requirements and choices after reading a document %#', async scenario => {
+    const router = testRouter()
+    const origin = scenario.sameDocumentOrigin ? '/legal/' + documentIds[scenario.documentKind] : '/'
+    await router.push(origin)
+    const fetch = vi.fn(url => {
+      const standard = standardResponse(url)
+      if (standard) return Promise.resolve(standard)
+      if (url === '/api/v1/auth/phone/resolve') return Promise.resolve(response(200, {
+        nextStep:scenario.nextStep, requiredDocumentKinds:scenario.required
+      }))
+      if (url === '/api/v1/legal/documents/' + documentIds[scenario.documentKind]) {
+        if (scenario.failedDocument) throw new Error('Network failure')
+        return Promise.resolve(response(200, legalDocument('/current/' + scenario.documentKind)))
+      }
+      if (url === '/api/v1/auth/code/request') return Promise.resolve(response(202, {
+        onboardingToken:'synthetic-onboarding-receipt-at-least-32-characters'
+      }))
+      throw new Error('Unexpected request: ' + url)
+    })
+    vi.stubGlobal('fetch', fetch)
+    const wrapper = mountView(undefined, true, router)
+    let reader
+    try {
+      await wrapper.get('input[name="phone"]').setValue('+79991234567')
+      await wrapper.get('.auth-form').trigger('submit')
+      await flushPromises()
+      const otherCheckbox = scenario.documentKind === 1 ? '#authentication-terms' : '#authentication-personal-data'
+      if (wrapper.find(otherCheckbox).exists()) await wrapper.get(otherCheckbox).setValue(true)
+      const choices = wrapper.findAll('input[type="checkbox"]').map(item => item.element.checked)
+      const link = scenario.documentKind === 1 ? '#authentication-personal-document' : '#authentication-terms-document'
+      await wrapper.get(link).trigger('click')
+      await flushPromises()
+      if (!scenario.parentRemainsOpen) await wrapper.setProps({ modelValue:false })
+      expect(router.currentRoute.value.query).toEqual({})
+      expect(router.currentRoute.value.fullPath).not.toContain('79991234567')
+      reader = mount(ConsentCenter, {
+        props:{ mode:'legal' },
+        global:{ plugins:[router, createSarafanVuetify()], stubs:{ VDialog:{ props:['modelValue'], template:'<section v-if="modelValue"><slot /></section>' } } }
+      })
+      await flushPromises()
+      const back = reader.findAll('button').find(item => item.text().startsWith('Вернуться'))
+      expect(back.text()).toBe(scenario.nextStep === 2 ? 'Вернуться к регистрации' : 'Вернуться ко входу')
+      if (scenario.browserBack) router.back()
+      else await back.trigger('click')
+      await vi.waitFor(() => expect(router.currentRoute.value.fullPath).toBe(origin))
+      await flushPromises()
+      expect(wrapper.emitted('update:modelValue').at(-1)).toEqual([!scenario.parentRemainsOpen])
+      if (!scenario.parentRemainsOpen) await wrapper.setProps({ modelValue:true })
+      await flushPromises()
+      expect(wrapper.get('h2').text()).toBe(scenario.nextStep === 2 ? 'Регистрация' : 'Подтверждение соглашения')
+      expect(wrapper.findAll('input[type="checkbox"]').map(item => item.element.checked)).toEqual(choices)
+      expect(fetch.mock.calls.filter(([url]) => url === '/api/v1/auth/phone/resolve')).toHaveLength(1)
+      expect(fetch.mock.calls.some(([url]) => url === '/api/v1/auth/code/request')).toBe(false)
+      for (const checkbox of wrapper.findAll('input[type="checkbox"]')) await checkbox.setValue(true)
+      await wrapper.get('.auth-form').trigger('submit')
+      await flushPromises()
+      const body = JSON.parse(fetch.mock.calls.find(([url]) => url === '/api/v1/auth/code/request')[1].body)
+      expect(body.phone).toBe('+79991234567')
+      expect(body.termsDocumentId).toBe(documentIds[2])
+      expect(wrapper.get('h2').text()).toBe('Введите код')
+    } finally {
+      reader?.unmount()
+      wrapper.unmount()
+    }
+  })
+
+  it('restores product authentication after its dialog unmounts without reopening the global dialog', async () => {
+    const router = testRouter()
+    await router.push('/product')
+    vi.stubGlobal('fetch', vi.fn(url => {
+      const standard = standardResponse(url)
+      if (standard) return Promise.resolve(standard)
+      if (url === '/api/v1/auth/phone/resolve') return Promise.resolve(response(200, { nextStep:2, requiredDocumentKinds:[2, 1] }))
+      throw new Error('Unexpected request: ' + url)
+    }))
+    const wrapper = mountView(undefined, true, router)
+    await wrapper.setProps({ returnContext:'product' })
+    await wrapper.get('input[name="phone"]').setValue('+79991234567')
+    await wrapper.get('.auth-form').trigger('submit')
+    await flushPromises()
+    await wrapper.get('#authentication-terms').setValue(true)
+    await wrapper.get('#authentication-personal-document').trigger('click')
+    await flushPromises()
+    const globalDialog = mountView(undefined, false, router)
+    wrapper.unmount()
+    expect(useAuthenticationReturn().visit.value?.owner).toBe('product')
+    await router.push('/product')
+    expect(useAuthenticationReturn().visit.value?.owner).toBe('product')
+    expect(globalDialog.emitted('update:modelValue')).toBeUndefined()
+    const updateModel = vi.fn()
+    const returned = mount(PhoneAuthDialog, {
+      props:{ modelValue:false, returnContext:'product', 'onUpdate:modelValue':updateModel },
+      global:{ plugins:[router, createSarafanVuetify()], stubs:{ VDialog:{ props:['modelValue'], template:'<section v-if="modelValue"><slot /></section>' } } }
+    })
+    try {
+      expect(updateModel).toHaveBeenCalledWith(true)
+      await returned.setProps({ modelValue:true })
+      expect(returned.get('h2').text()).toBe('Регистрация')
+      expect(returned.get('#authentication-terms').element.checked).toBe(true)
+      expect(returned.get('#authentication-personal-data').element.checked).toBe(false)
+      await returned.setProps({ modelValue:false })
+      await returned.setProps({ modelValue:true })
+      expect(returned.get('input[name="phone"]').element.value).toBe('')
+    } finally { returned.unmount(); globalDialog.unmount() }
+  })
+
+  it.each(['unrelated-route', 'identity-change'])('discards the suspended authentication after %s', async reason => {
+    const router = testRouter()
+    await router.push('/')
+    vi.stubGlobal('fetch', vi.fn(url => {
+      const standard = standardResponse(url)
+      if (standard) return Promise.resolve(standard)
+      if (url === '/api/v1/auth/phone/resolve') return Promise.resolve(response(200, { nextStep:1, requiredDocumentKinds:[2] }))
+      throw new Error('Unexpected request: ' + url)
+    }))
+    const wrapper = mountView(undefined, true, router)
+    try {
+      await wrapper.get('input[name="phone"]').setValue('+79991234567')
+      await wrapper.get('.auth-form').trigger('submit')
+      await flushPromises()
+      await wrapper.get('#authentication-terms-document').trigger('click')
+      await flushPromises()
+      await wrapper.setProps({ modelValue:false })
+      if (reason === 'identity-change') {
+        vi.mocked(globalThis.fetch).mockImplementationOnce(() => Promise.resolve(response(200, {
+          accessToken:'token', expiresAt:'2026-09-11T12:15:00Z', customer
+        })))
+        await useSession().verifyCode({ phone:'+79991234567', code:'4567' })
+      }
+      else await router.push('/elsewhere')
+      await flushPromises()
+      await router.push('/')
+      expect(wrapper.emitted('update:modelValue')).not.toContainEqual([true])
+      expect(useAuthenticationReturn().visit.value).toBeNull()
+    } finally { wrapper.unmount() }
+  })
+
+  it('keeps authentication open when a document is opened in another tab', async () => {
+    const router = testRouter()
+    await router.push('/')
+    vi.stubGlobal('fetch', vi.fn(url => {
+      const standard = standardResponse(url)
+      if (standard) return Promise.resolve(standard)
+      if (url === '/api/v1/auth/phone/resolve') return Promise.resolve(response(200, { nextStep:1, requiredDocumentKinds:[2] }))
+      throw new Error('Unexpected request: ' + url)
+    }))
+    const wrapper = mountView(undefined, true, router)
+    try {
+      await wrapper.get('input[name="phone"]').setValue('+79991234567')
+      await wrapper.get('.auth-form').trigger('submit')
+      await flushPromises()
+      const link = wrapper.get('#authentication-terms-document')
+      link.element.addEventListener('click', event => event.preventDefault())
+      await link.trigger('click', { ctrlKey:true })
+      expect(wrapper.emitted('update:modelValue')).toBeUndefined()
+      expect(useAuthenticationReturn().visit.value).toBeNull()
+      expect(router.currentRoute.value.fullPath).toBe('/')
+    } finally { wrapper.unmount() }
+  })
+
+  it('does not restore a saved authentication step belonging to another identity', async () => {
+    const router = testRouter()
+    await router.push('/')
+    useAuthenticationReturn().save({ owner:'global', originPath:'/', documentPath:'/legal/' + documentIds[2], customerId:9, state:{ phone:'+79991234567' } })
+    const wrapper = mountView(undefined, false, router)
+    try {
+      expect(useAuthenticationReturn().visit.value).toBeNull()
+      await wrapper.setProps({ modelValue:true })
+      expect(wrapper.get('input[name="phone"]').element.value).toBe('')
+      expect(wrapper.get('h2').text()).toBe('Вход или регистрация')
+    } finally { wrapper.unmount() }
+  })
+
   it('gradually changes an unknown phone to registration and sends both exact consents', async () => {
     const receipt = 'synthetic-onboarding-receipt-at-least-32-characters'
     const fetch = vi.fn(url => {
@@ -746,7 +937,7 @@ describe('PhoneAuthDialog', () => {
     expect(wrapper.findAll('.consent-document-link')).toHaveLength(2)
     expect(wrapper.get('.consent-registration__agreement').text().replace(/\s+/gu, ' ').trim()).toBe('Я принимаю Пользовательское соглашение')
     expect(wrapper.get('#authentication-personal-document').text()).toBe('Согласие на хранение и обработку персональных данных')
-    expect(wrapper.text()).toContain('Я даю отдельное Согласие на хранение и обработку персональных данных')
+    expect(wrapper.text()).toContain('Я даю Согласие на хранение и обработку персональных данных')
     expect(wrapper.text()).not.toContain('Для номера +79991234567 нужна регистрация')
     expect(wrapper.text()).not.toContain('Версия 1')
 

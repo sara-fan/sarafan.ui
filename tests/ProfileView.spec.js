@@ -16,7 +16,7 @@ import { customerDto } from './fixtures/customer.js'
 
 const consent = vi.hoisted(() => ({
   requirePersonalData: vi.fn(),
-  ops: { value: { kinds: [{ value: 4, routeAlias: 'privacy-policy' }] } }
+  ops: { value: { kinds: [{ value:1, routeAlias: 'personal-data-consent' }] } }
 }))
 vi.mock('../src/stores/consents.js', () => ({ useConsents: () => consent }))
 

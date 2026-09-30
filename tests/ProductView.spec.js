@@ -14,6 +14,7 @@ vi.mock('../src/stores/orderNotices.js', () => ({ showOrderCreated:h.showOrderCr
 
 import { CORE_PROBLEM_TYPES, ProblemError, createInternalProblem } from '../src/errors/problem.js'
 import { resetProductDraftForTests, useProductDraft } from '../src/stores/productDraft.js'
+import { useAuthenticationReturn } from '../src/stores/authenticationReturn.js'
 import ProductView from '../src/views/ProductView.vue'
 import { completeOrder, forecastPricing, ops, product } from './fixtures/orders.js'
 
@@ -76,6 +77,7 @@ describe('ProductView product review', () => {
   beforeEach(() => {
     globalThis.sessionStorage.clear()
     resetProductDraftForTests()
+    useAuthenticationReturn().clear()
     vi.restoreAllMocks()
     vi.spyOn(globalThis.crypto, 'randomUUID').mockReturnValue(IDEMPOTENCY_KEY)
     h.showOrderCreated.mockClear()
@@ -563,6 +565,18 @@ describe('ProductView product review', () => {
     expect(useProductDraft().draft.value).toMatchObject({ resumeMode:'none', productName:'Товар' })
     wrapper.getComponent({ name:'PhoneAuthDialog' }).vm.$emit('update:modelValue', false)
     await flushPromises()
+  })
+
+  it('preserves the product authentication-resume marker while reading a legal document', async () => {
+    const { wrapper } = await mountView()
+    await wrapper.get('input[name="productName"]').setValue('Товар')
+    await wrapper.get('input[name="sellerPrice"]').setValue('10')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    useAuthenticationReturn().save({ owner:'product' })
+    wrapper.getComponent({ name:'PhoneAuthDialog' }).vm.$emit('update:modelValue', false)
+    await flushPromises()
+    expect(useProductDraft().draft.value).toMatchObject({ resumeMode:'authentication', productName:'Товар' })
   })
 
   it('routes missing consent and automatically resumes for the bound customer', async () => {

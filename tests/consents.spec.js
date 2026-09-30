@@ -10,9 +10,9 @@ const id = '11111111-1111-1111-1111-111111111111'
 const now = '2026-09-07T12:00:00Z'
 const document = {
   id,
-  kind:LEGAL_DOCUMENT_KIND.PRIVACY_POLICY,
+  kind:LEGAL_DOCUMENT_KIND.PERSONAL_DATA_CONSENT,
   locale:'ru',
-  title:'Согласие на использование куки',
+  title:'Согласие на обработку персональных данных',
   displayVersion:'1',
   html:'<p>Текст</p>',
   sourceHash:'b'.repeat(64),
@@ -28,8 +28,6 @@ const document = {
 const ops = { kinds:[
   { value:1, name:'Согласие на обработку персональных данных', routeAlias:'personal-data-consent' },
   { value:2, name:'Пользовательское соглашение', routeAlias:'user-agreement' },
-  { value:3, name:'Правила заказа товаров', routeAlias:'order-rules' },
-  { value:4, name:'Политика обработки персональных данных', routeAlias:'privacy-policy' }
 ]  }
 const history = { customerId:7, statuses:[], history:[], withdrawalRequest:null }
 let session, store
@@ -50,9 +48,9 @@ describe('consent state and request contracts', () => {
     expect(local.ops.value).toBeNull()
     expect(local.opsProblem.value).toBeTruthy()
     await expect(local.loadOps()).resolves.toEqual(ops)
-    expect(local.kindByAlias('privacy-policy')).toBe(LEGAL_DOCUMENT_KIND.PRIVACY_POLICY)
+    expect(local.kindByAlias('personal-data-consent')).toBe(LEGAL_DOCUMENT_KIND.PERSONAL_DATA_CONSENT)
     expect(local.kindName(LEGAL_DOCUMENT_KIND.USER_AGREEMENT)).toBe('Пользовательское соглашение')
-    expect(local.routeAlias(LEGAL_DOCUMENT_KIND.PRIVACY_POLICY)).toBe('privacy-policy')
+    expect(local.routeAlias(LEGAL_DOCUMENT_KIND.PERSONAL_DATA_CONSENT)).toBe('personal-data-consent')
     expect(local.kindByAlias('unknown')).toBeUndefined()
     local.dispose()
   })
@@ -61,6 +59,19 @@ describe('consent state and request contracts', () => {
     { kinds:[{ value:0, name:'One', routeAlias:'one' }, { value:0, name:'Two', routeAlias:'two' }], cookieCategories:ops.cookieCategories },
     { kinds:[{ value:0, name:'One', routeAlias:'same' }, { value:1, name:'Two', routeAlias:'same' }], cookieCategories:ops.cookieCategories },
 ])('rejects malformed legal-document ops %j', async value => {
+    const local = createConsentStore({ customer:ref(null), consentRequest:vi.fn().mockResolvedValue(value) })
+    await expect(local.loadOps()).rejects.toMatchObject({ code:'ui_protocol_error' })
+    expect(local.ops.value).toBeNull()
+    local.dispose()
+  })
+  it.each([
+    { kinds:[ops.kinds[0]] },
+    { kinds:[ops.kinds[0], { ...ops.kinds[1], value:3 }] },
+    { kinds:[ops.kinds[0], { ...ops.kinds[1], value:4 }] },
+    { kinds:[...ops.kinds, { value:3, name:'Retired', routeAlias:'order-rules' }] },
+    { kinds:[ops.kinds[0], { ...ops.kinds[1], value:1 }] },
+    { kinds:[ops.kinds[0], { ...ops.kinds[1], routeAlias:ops.kinds[0].routeAlias }] }
+  ])('rejects incomplete, retired or duplicate document catalogues %j', async value => {
     const local = createConsentStore({ customer:ref(null), consentRequest:vi.fn().mockResolvedValue(value) })
     await expect(local.loadOps()).rejects.toMatchObject({ code:'ui_protocol_error' })
     expect(local.ops.value).toBeNull()
@@ -140,16 +151,16 @@ describe('consent state and request contracts', () => {
   })
   it('loads only supported public documents and exact immutable source', async () => {
     session.consentRequest.mockResolvedValue({ serverNow:now, nextChangeAt:null, document })
-    expect((await store.current(LEGAL_DOCUMENT_KIND.PRIVACY_POLICY)).document.id).toBe(id)
+    expect((await store.current(LEGAL_DOCUMENT_KIND.PERSONAL_DATA_CONSENT)).document.id).toBe(id)
     await expect(store.current(99)).rejects.toMatchObject({ code:'ui_invalid_input' })
     session.consentRequest.mockResolvedValue(null)
-    await expect(store.current(LEGAL_DOCUMENT_KIND.PRIVACY_POLICY)).rejects.toMatchObject({ code:'ui_protocol_error' })
+    await expect(store.current(LEGAL_DOCUMENT_KIND.PERSONAL_DATA_CONSENT)).rejects.toMatchObject({ code:'ui_protocol_error' })
     session.consentRequest.mockResolvedValue({ serverNow:'invalid', nextChangeAt:null, document })
-    await expect(store.current(LEGAL_DOCUMENT_KIND.PRIVACY_POLICY)).rejects.toBeDefined()
+    await expect(store.current(LEGAL_DOCUMENT_KIND.PERSONAL_DATA_CONSENT)).rejects.toBeDefined()
     session.consentRequest.mockResolvedValue({ serverNow:now, nextChangeAt:null, document:{ id:'bad' } })
-    await expect(store.current(LEGAL_DOCUMENT_KIND.PRIVACY_POLICY)).rejects.toBeDefined()
+    await expect(store.current(LEGAL_DOCUMENT_KIND.PERSONAL_DATA_CONSENT)).rejects.toBeDefined()
     session.consentRequest.mockResolvedValue({ serverNow:now, nextChangeAt:null, document:null })
-    expect((await store.current(LEGAL_DOCUMENT_KIND.PRIVACY_POLICY)).document).toBeNull()
+    expect((await store.current(LEGAL_DOCUMENT_KIND.PERSONAL_DATA_CONSENT)).document).toBeNull()
     await expect(store.read('bad')).rejects.toBeDefined()
     await expect(store.source('bad')).rejects.toBeDefined()
     session.consentRequest.mockResolvedValue(document)
@@ -189,14 +200,14 @@ describe('consent state and request contracts', () => {
       document:{ ...document, [property]:value }
     })
 
-    await expect(store.current(LEGAL_DOCUMENT_KIND.PRIVACY_POLICY)).rejects.toMatchObject({ code:'ui_protocol_error' })
+    await expect(store.current(LEGAL_DOCUMENT_KIND.PERSONAL_DATA_CONSENT)).rejects.toMatchObject({ code:'ui_protocol_error' })
     session.consentRequest.mockResolvedValue({ ...document, [property]:value })
     await expect(store.read(id)).rejects.toMatchObject({ code:'ui_protocol_error' })
   })
   it.each([{}, { document:undefined }, { document:false }, { document:0 }, { document:'' }, { document:[] }])(
     'rejects malformed current-document absence %j', async payload => {
       session.consentRequest.mockResolvedValue({ serverNow:now, nextChangeAt:null, ...payload })
-      await expect(store.current(LEGAL_DOCUMENT_KIND.PRIVACY_POLICY)).rejects.toMatchObject({ code:'ui_protocol_error' })
+      await expect(store.current(LEGAL_DOCUMENT_KIND.PERSONAL_DATA_CONSENT)).rejects.toMatchObject({ code:'ui_protocol_error' })
     })
   it.each([null, undefined, false, {}, [], { ...document, id:'22222222-2222-2222-2222-222222222222' }])(
     'rejects malformed or mismatched UUID documents %j', async value => {
@@ -218,12 +229,12 @@ describe('consent state and request contracts', () => {
   it.each([undefined, 'invalid', '2026-09-08', '2026-02-30T12:00:00Z', now])('rejects an invalid current-document boundary %j', async nextChangeAt => {
     session.consentRequest.mockResolvedValue({ serverNow:now, nextChangeAt, document })
 
-    await expect(store.current(LEGAL_DOCUMENT_KIND.PRIVACY_POLICY)).rejects.toMatchObject({ code:'ui_protocol_error' })
+    await expect(store.current(LEGAL_DOCUMENT_KIND.PERSONAL_DATA_CONSENT)).rejects.toMatchObject({ code:'ui_protocol_error' })
   })
   it.each(['2026-09-07', '2026-02-30T12:00:00Z'])('rejects invalid current-document server time %s', async serverNow => {
     session.consentRequest.mockResolvedValue({ serverNow, nextChangeAt:null, document })
 
-    await expect(store.current(LEGAL_DOCUMENT_KIND.PRIVACY_POLICY)).rejects.toMatchObject({ code:'ui_protocol_error' })
+    await expect(store.current(LEGAL_DOCUMENT_KIND.PERSONAL_DATA_CONSENT)).rejects.toMatchObject({ code:'ui_protocol_error' })
   })
   it('rejects a current document before its effective boundary', async () => {
     session.consentRequest.mockResolvedValue({
@@ -232,7 +243,7 @@ describe('consent state and request contracts', () => {
       document:{ ...document, effectiveAt:'2026-09-07T12:00:01Z' }
     })
 
-    await expect(store.current(LEGAL_DOCUMENT_KIND.PRIVACY_POLICY)).rejects.toMatchObject({ code:'ui_protocol_error' })
+    await expect(store.current(LEGAL_DOCUMENT_KIND.PERSONAL_DATA_CONSENT)).rejects.toMatchObject({ code:'ui_protocol_error' })
   })
 
   it('scopes customer histories to identity and protects against stale loads', async () => {

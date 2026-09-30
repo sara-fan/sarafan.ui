@@ -174,12 +174,12 @@
 }
 
 .ui-selection input { position: absolute; width: 1px; height: 1px; overflow: hidden; opacity: 0; }
-.ui-selection__mark { position: relative; width: 22px; height: 22px; flex: 0 0 22px; border: 1px solid var(--sarafan-line-strong); border-radius: var(--sarafan-radius-5); background: var(--sarafan-paper); }
+.ui-selection__mark { position: relative; width: 22px; height: 22px; flex: 0 0 22px; border: 2px solid var(--sarafan-secondary); border-radius: var(--sarafan-radius-5); background: var(--sarafan-paper); }
 .ui-selection--radio .ui-selection__mark { width: 20px; height: 20px; flex-basis: 20px; border-radius: 50%; }
-.ui-selection input:checked + .ui-selection__mark { border-color: var(--sarafan-accent); background: var(--sarafan-accent); }
-.ui-selection--checkbox input:checked + .ui-selection__mark::after { content: ''; position: absolute; left: 6px; top: 2px; width: 6px; height: 11px; border: solid var(--sarafan-paper); border-width: 0 2px 2px 0; transform: rotate(45deg); }
+.ui-selection input:checked + .ui-selection__mark { border-color: var(--sarafan-secondary); background: var(--sarafan-secondary); }
+.ui-selection--checkbox input:checked + .ui-selection__mark::after { content: ''; position: absolute; left: 5px; top: 1px; width: 6px; height: 11px; border: solid var(--sarafan-paper); border-width: 0 2px 2px 0; transform: rotate(45deg); }
 .ui-selection--radio input:checked + .ui-selection__mark::after { content: ''; position: absolute; inset: 5px; border-radius: 50%; background: var(--sarafan-paper); }
-.ui-selection input:focus-visible + .ui-selection__mark { outline: 3px solid color-mix(in srgb, var(--sarafan-accent) 35%, transparent); outline-offset: 2px; }
+.ui-selection input:focus-visible + .ui-selection__mark { outline: 3px solid var(--sarafan-secondary); outline-offset: 2px; }
 .ui-selection--error .ui-selection__mark { border-color: var(--sarafan-danger); }
 .ui-selection--disabled { color: var(--sarafan-disabled-text); cursor: not-allowed; }
 .ui-selection--disabled .ui-selection__mark { border-color: var(--sarafan-disabled-bg); background: var(--sarafan-disabled-bg); }

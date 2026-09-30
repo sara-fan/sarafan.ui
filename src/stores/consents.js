@@ -24,11 +24,11 @@ export function createConsentStore(session) {
   let opsRequest = null
   function resetCustomer() { generation++; globalThis.clearTimeout(personalTimer); mine.value = null; personalProblem.value = null }
   function validateOps(value) {
-    if (!value || !Array.isArray(value.kinds) || value.kinds.length === 0) throw createInternalProblem('protocolError')
+    if (!value || !Array.isArray(value.kinds) || value.kinds.length !== 2) throw createInternalProblem('protocolError')
     const values = new Set()
     const aliases = new Set()
     for (const item of value.kinds) {
-      if (!item || !Number.isInteger(item.value) || item.value <= 0 || typeof item.name !== 'string' || !item.name.trim()
+      if (!item || !Object.values(LEGAL_DOCUMENT_KIND).includes(item.value) || typeof item.name !== 'string' || !item.name.trim()
         || typeof item.routeAlias !== 'string' || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(item.routeAlias)
         || values.has(item.value) || aliases.has(item.routeAlias)) throw createInternalProblem('protocolError')
       values.add(item.value)

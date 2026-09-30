@@ -7,9 +7,7 @@ import { createInternalProblem } from './errors/problem.js'
 
 export const LEGAL_DOCUMENT_KIND = Object.freeze({
   PERSONAL_DATA_CONSENT:1,
-  USER_AGREEMENT:2,
-  ORDER_RULES:3,
-  PRIVACY_POLICY:4
+  USER_AGREEMENT:2
 })
 export const CONSENT_STATUSES = Object.freeze({ current:'Актуально', missing:'Не принято', 'renewal-required':'Требуется новое согласие',
   withdrawn:'Отозвано', refused:'Отказ', unavailable:'Документ недоступен',
