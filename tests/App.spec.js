@@ -273,6 +273,6 @@ describe('App routing and privacy gates', () => {
     await flushPromises()
 
     expect(h.session.logout).toHaveBeenCalledTimes(1)
-    expect(router.currentRoute.value.name).toBe('home')
+    await vi.waitFor(() => expect(router.currentRoute.value.name).toBe('home'))
   })
 })

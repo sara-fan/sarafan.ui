@@ -52,6 +52,7 @@ async function mountView(attachTo) {
     global:{
       plugins:[router],
       stubs:{
+        ConsentRenewalDialog:true,
         PhoneAuthDialog:{
           name:'PhoneAuthDialog',
           props:['modelValue'],
@@ -103,7 +104,10 @@ describe('ProductView product review', () => {
       if (isCurrent()) validate(value)
       return value
     })
-    h.consents.hasCurrentPersonalData = vi.fn().mockResolvedValue(true)
+    h.consents.missingKinds = vi.fn().mockResolvedValue([])
+    h.consents.current = vi.fn(async kind => ({ document:{ id:String(kind), kind, title:'Документ', displayVersion:'1', contentHash:'a'.repeat(64), html:'<p>Текст</p>', effectiveAt:'2026-09-01T00:00:00Z' } }))
+    h.consents.grant = vi.fn().mockResolvedValue()
+    h.consents.kindName = kind => kind === 2 ? 'Пользовательское соглашение' : 'Согласие'
     h.consents.acquireNoticeSuppression = vi.fn(() => vi.fn())
     startDraft()
   })
@@ -579,24 +583,99 @@ describe('ProductView product review', () => {
     expect(useProductDraft().draft.value).toMatchObject({ resumeMode:'authentication', productName:'Товар' })
   })
 
-  it('routes missing consent and automatically resumes for the bound customer', async () => {
+  it('clears automatic submission when ordinary navigation abandons product authentication', async () => {
+    const { wrapper } = await mountView()
+    await wrapper.get('input[name="productName"]').setValue('Товар')
+    await wrapper.get('input[name="sellerPrice"]').setValue('10')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    const saved = { ...useProductDraft().draft.value }
+    wrapper.unmount()
+    expect(useProductDraft().draft.value).toMatchObject({ ...saved, resumeMode:'none' })
     h.session.customer.value = { id:7 }
-    h.consents.hasCurrentPersonalData.mockResolvedValueOnce(false)
+    await mountView()
+    expect(h.session.createOrder).not.toHaveBeenCalled()
+  })
+  it.each(['navigation', 'identity', 'identity-mismatch'])('does not submit an abandoned document visit after %s and a later login', async action => {
+    const { wrapper } = await mountView()
+    await wrapper.get('input[name="productName"]').setValue('Товар')
+    await wrapper.get('input[name="sellerPrice"]').setValue('10')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    const drafts = useProductDraft()
+    const saved = { ...drafts.draft.value }
+    const returned = useAuthenticationReturn()
+    returned.save({ owner:'product', originPath:'/product', documentPath:'/legal/agreement', customerId:null, state:{ phone:'+79991234567' } })
+    wrapper.getComponent({ name:'PhoneAuthDialog' }).vm.$emit('update:modelValue', false)
+    wrapper.unmount()
+    if (action === 'navigation') returned.observeRoute('/')
+    else if (action === 'identity') returned.clear()
+    else expect(returned.take('product', '/product', 7)).toBeNull()
+    expect(drafts.draft.value).toMatchObject({ ...saved, resumeMode:'none' })
+    h.session.customer.value = { id:7 }
+    const reopened = await mountView()
+    expect(h.session.createOrder).not.toHaveBeenCalled()
+    expect(reopened.wrapper.get('input[name="productName"]').element.value).toBe('Товар')
+    await reopened.wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(h.session.createOrder).toHaveBeenCalledOnce()
+    expect(h.session.createOrder.mock.calls[0][1]).toBe(saved.idempotencyKey)
+  })
+
+  it('consumes a successful document return without cancelling product authentication resumption', async () => {
+    const drafts = useProductDraft()
+    drafts.markAuthenticationResume()
+    const returned = useAuthenticationReturn()
+    returned.save({ owner:'product', originPath:'/product', documentPath:'/legal/agreement', customerId:null, state:{ phone:'+79991234567' } })
+    returned.observeRoute('/legal/agreement')
+    expect(returned.take('global', '/product', null)).toBeNull()
+    expect(returned.take('product', '/product', null)).toEqual({ phone:'+79991234567' })
+    expect(drafts.draft.value.resumeMode).toBe('authentication')
+    returned.clear()
+    expect(drafts.draft.value.resumeMode).toBe('authentication')
+  })
+
+  it('releases both consent notice owners when order renewal is cancelled', async () => {
+    const pageRelease = vi.fn()
+    const dialogRelease = vi.fn()
+    h.consents.acquireNoticeSuppression.mockReturnValueOnce(pageRelease).mockReturnValueOnce(dialogRelease)
+    h.session.customer.value = { id:7 }
+    h.consents.missingKinds.mockResolvedValue([1])
+    const { wrapper } = await mountView()
+    await wrapper.get('input[name="productName"]').setValue('Товар')
+    await wrapper.get('input[name="sellerPrice"]').setValue('10')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    const flow = wrapper.findComponent({ name:'ConsentRenewalDialog' }).props('flow')
+    expect(pageRelease).not.toHaveBeenCalled()
+    flow.cancel()
+    await flushPromises()
+    expect(pageRelease).toHaveBeenCalledOnce()
+    expect(dialogRelease).toHaveBeenCalledOnce()
+    expect(h.session.createOrder).not.toHaveBeenCalled()
+    expect(useProductDraft().draft.value.productName).toBe('Товар')
+    expect(wrapper.get('button[type="submit"]').attributes('disabled')).toBeUndefined()
+  })
+  it('renews missing consent in place and resumes the preserved order once', async () => {
+    h.session.customer.value = { id:7 }
+    h.consents.missingKinds.mockResolvedValueOnce([1])
     const { router, wrapper } = await mountView()
     await wrapper.get('input[name="productName"]').setValue('Товар')
     await wrapper.get('input[name="sellerPrice"]').setValue('10')
     await wrapper.get('form').trigger('submit')
-    await vi.waitFor(() => expect(router.currentRoute.value.name).toBe('personal-consents'))
-    expect(router.currentRoute.value.query).toEqual({ returnTo:'product-submit' })
-    expect(useProductDraft().draft.value).toMatchObject({ resumeMode:'consent', boundCustomerId:7 })
-
-    wrapper.unmount()
-    await router.push('/product')
-    const resumed = mount(ProductView, { global:{ plugins:[router], stubs:{ PhoneAuthDialog:true } } })
-    await vi.waitFor(() => expect(h.session.createOrder).toHaveBeenCalledOnce())
-    resumed.unmount()
+    await flushPromises()
+    const flow = wrapper.findComponent({ name:'ConsentRenewalDialog' }).props('flow')
+    expect(flow.state.open).toBe(true)
+    expect(router.currentRoute.value.name).toBe('product')
+    expect(wrapper.get('input[name="productName"]').element.value).toBe('Товар')
+    expect(h.session.createOrder).not.toHaveBeenCalled()
+    flow.state.documents[0].accepted = true
+    await flow.confirm()
+    await flushPromises()
+    expect(h.session.createOrder).toHaveBeenCalledOnce()
+    expect(h.session.createOrder.mock.calls[0][1]).toBe(IDEMPOTENCY_KEY)
+    expect(router.currentRoute.value.name).toBe('orders')
   })
-
   it('revalidates the form when refreshed Ops lower the available total', async () => {
     h.session.customer.value = { id:7 }
     const reduced = {
@@ -732,14 +811,14 @@ describe('ProductView product review', () => {
   it('invalidates submission when customer identity changes and keeps the form', async () => {
     h.session.customer.value = { id:7 }
     let resolveConsent
-    h.consents.hasCurrentPersonalData.mockReturnValue(new Promise(resolve => { resolveConsent = resolve }))
+    h.consents.missingKinds.mockReturnValue(new Promise(resolve => { resolveConsent = resolve }))
     const { wrapper } = await mountView()
     await wrapper.get('input[name="productName"]').setValue('Товар')
     await wrapper.get('input[name="sellerPrice"]').setValue('10')
     await wrapper.get('form').trigger('submit')
     h.session.customer.value = { id:8 }
     await flushPromises()
-    resolveConsent(true)
+    resolveConsent([])
     await flushPromises()
     expect(wrapper.text()).toContain('Проверьте данные заказа и отправьте его ещё раз')
     expect(h.session.createOrder).not.toHaveBeenCalled()
@@ -781,7 +860,7 @@ describe('ProductView product review', () => {
     expect(wrapper.find('.product-view > [role="alert"]').exists()).toBe(false)
   })
 
-  it('handles a consent-renewal race reported by Core through the same return flow', async () => {
+  it('handles a consent-renewal race reported by Core in place', async () => {
     h.session.customer.value = { id:7 }
     h.session.createOrder.mockRejectedValueOnce(new ProblemError({
       type:CORE_PROBLEM_TYPES.personalDataConsentRequired,
@@ -795,8 +874,9 @@ describe('ProductView product review', () => {
     await wrapper.get('input[name="productName"]').setValue('Товар')
     await wrapper.get('input[name="sellerPrice"]').setValue('10')
     await wrapper.get('form').trigger('submit')
-    await vi.waitFor(() => expect(router.currentRoute.value.name).toBe('personal-consents'))
-    expect(useProductDraft().draft.value).toMatchObject({ resumeMode:'consent', boundCustomerId:7 })
+    await vi.waitFor(() => expect(router.currentRoute.value.name).toBe('orders'))
+    expect(h.session.createOrder).toHaveBeenCalledTimes(2)
+    expect(h.session.createOrder.mock.calls[0][1]).toBe(h.session.createOrder.mock.calls[1][1])
   })
 
   it('blocks a submission still bound to another customer', async () => {
@@ -861,14 +941,14 @@ describe('ProductView product review', () => {
   it('prevents concurrent creation submissions', async () => {
     h.session.customer.value = { id:7 }
     let finishConsent
-    h.consents.hasCurrentPersonalData.mockReturnValue(new Promise(resolve => { finishConsent = resolve }))
+    h.consents.missingKinds.mockReturnValue(new Promise(resolve => { finishConsent = resolve }))
     const { wrapper } = await mountView()
     await wrapper.get('input[name="productName"]').setValue('Товар')
     await wrapper.get('input[name="sellerPrice"]').setValue('10')
     await wrapper.get('form').trigger('submit')
     await wrapper.get('form').trigger('submit')
-    expect(h.consents.hasCurrentPersonalData).toHaveBeenCalledOnce()
-    finishConsent(true)
+    expect(h.consents.missingKinds).toHaveBeenCalledOnce()
+    finishConsent([])
     await flushPromises()
   })
 

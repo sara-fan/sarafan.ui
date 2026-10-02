@@ -8,6 +8,9 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
 import PhoneAuthDialog from '../components/PhoneAuthDialog.vue'
+import ConsentRenewalDialog from '../components/ConsentRenewalDialog.vue'
+import { LEGAL_DOCUMENT_KIND } from '../consentFormatting.js'
+import { isConsentRenewalProblem, useConsentRenewal } from '../useConsentRenewal.js'
 import CustomerCostSummary from '../components/CustomerCostSummary.vue'
 import OrderItemFields from '../components/OrderItemFields.vue'
 import UiAlert from '../components/ui/UiAlert.vue'
@@ -37,6 +40,8 @@ const focusRoot = ref(null)
 const router = useRouter()
 const session = useSession()
 const consents = useConsents()
+const renewal = useConsentRenewal()
+const orderConsentKinds = [LEGAL_DOCUMENT_KIND.PERSONAL_DATA_CONSENT, LEGAL_DOCUMENT_KIND.USER_AGREEMENT]
 const drafts = useProductDraft()
 const authenticationReturn = useAuthenticationReturn()
 const problem = ref(null)
@@ -303,12 +308,7 @@ async function authenticatedAction() {
   await submitAuthenticated()
 }
 
-async function requireConsent(customerId) {
-  drafts.markConsentResume(customerId)
-  await router.push({ name:'personal-consents', query:{ returnTo:'product-submit' } })
-}
-
-async function submitAuthenticated() {
+async function submitAuthenticated(retried = false) {
   let payload = currentPayload()
   const customerId = session.customer.value?.id
   if (!payload || !customerId || submitting.value) return
@@ -324,13 +324,7 @@ async function submitAuthenticated() {
   problem.value = null
   acquireConsentProblemOwnership()
   try {
-    const consentCurrent = await consents.hasCurrentPersonalData()
-    if (!isCurrent()) return
-    if (!consentCurrent) {
-      releaseConsentProblemOwnership()
-      await requireConsent(customerId)
-      return
-    }
+    if (!await renewal.ensure(orderConsentKinds, isCurrent) || !isCurrent()) return
     releaseConsentProblemOwnership()
     drafts.clearResume()
 
@@ -351,9 +345,15 @@ async function submitAuthenticated() {
   } catch (value) {
     if (!isCurrent() && !session.isCurrentIdentityInvalidation(value)) return
     const normalized = normalizeProblem(value)
-    if (normalized.type === CORE_PROBLEM_TYPES.personalDataConsentRequired) {
-      releaseConsentProblemOwnership()
-      await requireConsent(customerId)
+    if (isConsentRenewalProblem(normalized) && !retried && isCurrent()) {
+      try {
+        if (await renewal.ensure(orderConsentKinds, isCurrent) && isCurrent()) {
+          submitting.value = false
+          await submitAuthenticated(true)
+        }
+      } catch (failure) {
+        if (isCurrent()) problem.value = normalizeProblem(failure)
+      }
     } else if (normalized.type === CORE_PROBLEM_TYPES.orderValueLimitExceeded
       || normalized.type === CORE_PROBLEM_TYPES.orderLimitRatesUnavailable) {
       problem.value = normalized
@@ -370,7 +370,10 @@ async function submitAuthenticated() {
       problem.value = normalized
     }
   } finally {
-    if (isCurrent()) submitting.value = false
+    if (isCurrent()) {
+      submitting.value = false
+      if (!problem.value) releaseConsentProblemOwnership()
+    }
   }
 }
 
@@ -439,6 +442,7 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  if (draft.value?.resumeMode === 'authentication' && !authenticationReturn.isPending('product')) drafts.clearResume()
   mounted = false
   ++forecastOperation
   globalThis.clearTimeout(forecastTimer)
@@ -460,6 +464,7 @@ const focusAfter = useValidationFocus(focusRoot, { context:() => session.custome
     ref="focusRoot"
     class="page-container product-view"
   >
+    <ConsentRenewalDialog :flow="renewal" />
     <header class="page-heading product-heading">
       <div>
         <button

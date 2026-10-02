@@ -17,6 +17,9 @@ import {
 } from '../errors/problem.js'
 import { useConsents } from '../stores/consents.js'
 import { useSession } from '../stores/session.js'
+import ConsentRenewalDialog from '../components/ConsentRenewalDialog.vue'
+import { LEGAL_DOCUMENT_KIND } from '../consentFormatting.js'
+import { isConsentRenewalProblem, useConsentRenewal } from '../useConsentRenewal.js'
 import UiAlert from '../components/ui/UiAlert.vue'
 import UiButton from '../components/ui/UiButton.vue'
 import UiField from '../components/ui/UiField.vue'
@@ -24,8 +27,14 @@ import UiField from '../components/ui/UiField.vue'
 const photoProblemFields = Object.fromEntries(['invalid-photo-size', 'invalid-photo-type', 'invalid-photo-content'].map(type => [`https://sarafan.sw.consulting/problems/${type}`, ['photo']]))
 const focusRoot = ref(null)
 
-const { customer, deletePhoto, getPhoto, updateProfile, uploadPhoto } = useSession()
+const session = useSession()
+const { customer, deletePhoto, getPhoto, updateProfile, uploadPhoto } = session
+const renewal = useConsentRenewal()
 const consents = useConsents()
+let releaseConsentNoticeSuppression = null
+const pendingPhoto = ref(null)
+let mounted = true
+let writeOperation = 0
 const fields = [
   'lastName', 'firstName', 'patronymic', 'email', 'passportSeries', 'passportNumber',
   'passportIssueDate', 'passportIssuedBy', 'inn', 'postalCode', 'city', 'address'
@@ -86,7 +95,13 @@ async function loadPhoto() {
   }
 }
 
+function releaseConsentProblemOwnership() {
+  releaseConsentNoticeSuppression?.()
+  releaseConsentNoticeSuppression = null
+}
+
 function startEditing() {
+  releaseConsentProblemOwnership()
   fillForm()
   problem.value = null
   saved.value = false
@@ -94,26 +109,60 @@ function startEditing() {
 }
 
 function cancelEditing() {
+  releaseConsentProblemOwnership()
+  pendingPhoto.value = null
   fillForm()
   problem.value = null
   editing.value = false
 }
 
-async function saveAction() {
+async function protectedWrite(action, detail) {
+  if (busy.value) return
+  const previousRelease = releaseConsentNoticeSuppression
+  releaseConsentNoticeSuppression = consents.acquireNoticeSuppression()
+  previousRelease?.()
+  const operation = ++writeOperation
+  const identity = customer.value?.id
+  const isCurrent = () => mounted && operation === writeOperation && customer.value?.id === identity
   busy.value = true
   problem.value = null
-  saved.value = false
   try {
-    await consents.requirePersonalData()
-    const updatedCustomer = await updateProfile(Object.fromEntries(fields.map(field => [field, form[field] || null])))
-    if (!updatedCustomer) return
+    if (!await renewal.ensure([LEGAL_DOCUMENT_KIND.PERSONAL_DATA_CONSENT], isCurrent) || !isCurrent()) return
+    try { await action(isCurrent) }
+    catch (value) {
+      if (!isCurrent() || !isConsentRenewalProblem(value)) throw value
+      if (await renewal.ensure([LEGAL_DOCUMENT_KIND.PERSONAL_DATA_CONSENT], isCurrent) && isCurrent()) await action(isCurrent)
+    }
+  } catch (value) {
+    if (isCurrent() || session.isCurrentIdentityInvalidation(value)) captureProblem(value, detail)
+  } finally {
+    if (isCurrent()) {
+      busy.value = false
+      if (!problem.value) releaseConsentProblemOwnership()
+    }
+  }
+}
+
+async function saveAction() {
+  saved.value = false
+  const payload = Object.fromEntries(fields.map(field => [field, form[field] || null]))
+  await protectedWrite(async isCurrent => {
+    const updatedCustomer = await updateProfile(payload)
+    if (!updatedCustomer || !isCurrent()) return
     saved.value = true
     editing.value = false
-  } catch (value) {
-    captureProblem(value, 'Не удалось сохранить профиль')
-  } finally {
-    busy.value = false
-  }
+  }, 'Не удалось сохранить профиль')
+}
+
+async function uploadSelectedPhoto() {
+  const file = pendingPhoto.value
+  if (!file) return
+  await protectedWrite(async isCurrent => {
+    if (await uploadPhoto(file) && isCurrent()) {
+      pendingPhoto.value = null
+      await loadPhoto()
+    }
+  }, 'Не удалось загрузить фотографию')
 }
 
 async function selectPhotoAction(event) {
@@ -127,19 +176,12 @@ async function selectPhotoAction(event) {
     })
     return
   }
-  busy.value = true
-  problem.value = null
-  try {
-    await consents.requirePersonalData()
-    if (await uploadPhoto(file)) await loadPhoto()
-  } catch (value) {
-    captureProblem(value, 'Не удалось загрузить фотографию')
-  } finally {
-    busy.value = false
-  }
+  pendingPhoto.value = file
+  await uploadSelectedPhoto()
 }
 
 async function removePhoto() {
+  releaseConsentProblemOwnership()
   busy.value = true
   problem.value = null
   try {
@@ -152,14 +194,22 @@ async function removePhoto() {
 }
 
 watch(() => customer.value?.id, async () => {
+  releaseConsentProblemOwnership()
+  ++writeOperation
+  busy.value = false
+  pendingPhoto.value = null
   fillForm()
   problem.value = null
   editing.value = false
   await loadPhoto()
 }, { immediate: true })
 
-onBeforeUnmount(releasePhoto)
+onBeforeUnmount(() => { releaseConsentProblemOwnership(); mounted = false; ++writeOperation; pendingPhoto.value = null; releasePhoto() })
 function save(...args) { return focusAfter(() => saveAction(...args), () => validationFields(problem.value)) }
+
+function retryPhoto() {
+  return focusAfter(uploadSelectedPhoto, () => validationFields(problem.value, { types:photoProblemFields }))
+}
 
 function selectPhoto(event) {
   if (!event.target.files?.[0]) return
@@ -174,6 +224,7 @@ const focusAfter = useValidationFocus(focusRoot, { context:() => customer.value?
     ref="focusRoot"
     class="page-container profile-view"
   >
+    <ConsentRenewalDialog :flow="renewal" />
     <header class="page-heading profile-heading">
       <div>
         <h1>Профиль</h1>
@@ -287,6 +338,13 @@ const focusAfter = useValidationFocus(focusRoot, { context:() => customer.value?
             @click="openPhotoPicker"
           >
             {{ customer?.hasPhoto ? 'Заменить фото' : 'Загрузить фото' }}
+          </UiButton>
+          <UiButton
+            v-if="pendingPhoto"
+            :disabled="busy"
+            @click="retryPhoto"
+          >
+            Продолжить загрузку
           </UiButton>
           <input
             ref="photoInput"

@@ -23,6 +23,7 @@ export const CORE_PROBLEM_TYPES = Object.freeze({
   orderNotCancellable: `${PROBLEM_TYPE_ROOT}order-not-cancellable`,
   orderUpdateConflict: `${PROBLEM_TYPE_ROOT}order-update-conflict`,
   orderValueLimitExceeded: `${PROBLEM_TYPE_ROOT}order-value-limit-exceeded`,
+  userAgreementRequired: `${PROBLEM_TYPE_ROOT}user-agreement-required`,
   personalDataConsentRequired: `${PROBLEM_TYPE_ROOT}personal-data-consent-required`,
   validationFailed: `${PROBLEM_TYPE_ROOT}validation-failed`
 })

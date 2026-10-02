@@ -448,6 +448,7 @@ it('rejects invalid legal effective dates before rendering and permits retry', a
   expect(wrapper.findComponent(LegalDocumentReader).exists()).toBe(true)
 })
 it('refreshes a current legal route at the server document boundary', async () => {
+  vi.useFakeTimers()
   const current = { ...document, title:'Текущая версия' }
   const replacement = { ...document, title:'Новая версия' }
   h.store.current
@@ -459,8 +460,11 @@ it('refreshes a current legal route at the server document boundary', async () =
     .mockResolvedValue({ document:replacement, serverNow:'2026-09-10T08:00:00.100Z', nextChangeAt:null })
   await mountCenter('/legal/personal-data-consent'); await flushPromises()
   expect(wrapper.get('.consent-page__document-title').text()).toBe('Текущая версия')
-  await vi.waitFor(() => expect(wrapper.get('.consent-page__document-title').text()).toBe('Новая версия'))
+  await vi.advanceTimersByTimeAsync(100)
+  await flushPromises()
+  expect(wrapper.get('.consent-page__document-title').text()).toBe('Новая версия')
   expect(h.store.current).toHaveBeenCalledTimes(2)
+  vi.useRealTimers()
 })
 it('recovers a not-yet-effective legal route at its server boundary', async () => {
   const replacement = { ...document, title:'Версия после границы' }
