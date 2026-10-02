@@ -4,6 +4,7 @@
 // This file is a part of the Sarafan application
 
 import { computed, useId } from 'vue'
+import UiDateInput from './UiDateInput.vue'
 
 defineOptions({ inheritAttrs: false })
 
@@ -62,6 +63,19 @@ const describedBy = computed(() => {
       :aria-invalid="errorText ? 'true' : undefined"
       :aria-describedby="describedBy"
       @input="emit('update:modelValue', $event.target.value)"
+    />
+    <UiDateInput
+      v-else-if="type === 'date'"
+      :id="controlId"
+      v-bind="$attrs"
+      :model-value="String(modelValue)"
+      :label="label"
+      :required="required"
+      :readonly="readonly"
+      :disabled="disabled"
+      :aria-invalid="errorText ? 'true' : undefined"
+      :aria-describedby="describedBy"
+      @update:model-value="emit('update:modelValue', $event)"
     />
     <input
       v-else

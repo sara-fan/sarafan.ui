@@ -8,7 +8,8 @@ export const statuses = [
   { value:200, name:'Расчёт истёк', routeAlias:'quote_expired', upperStatusValue:200, upperStatusName:'Расчёт истёк', upperStatusRouteAlias:'quote_expired', isTerminal:false, progressPercent:32 },
   { value:300, name:'Оплачен', routeAlias:'paid', upperStatusValue:300, upperStatusName:'Выполняется', upperStatusRouteAlias:'in_progress', isTerminal:false, progressPercent:48 },
   { value:400, name:'Получен', routeAlias:'received', upperStatusValue:400, upperStatusName:'Завершён', upperStatusRouteAlias:'completed', isTerminal:true, progressPercent:100 },
-  { value:500, name:'Отменён', routeAlias:'cancelled', upperStatusValue:500, upperStatusName:'Отменён', upperStatusRouteAlias:'cancelled', isTerminal:true, progressPercent:100 }
+  { value:500, name:'Отменён', routeAlias:'cancelled', upperStatusValue:500, upperStatusName:'Отменён', upperStatusRouteAlias:'cancelled', isTerminal:true, progressPercent:100 },
+  { value:600, name:'Не можем привезти', routeAlias:'cannot_deliver', upperStatusValue:600, upperStatusName:'Не можем привезти', upperStatusRouteAlias:'cannot_deliver', isTerminal:true, progressPercent:100 }
 ]
 
 export const currencies = [
@@ -56,7 +57,11 @@ export const productLimits = {
   }
 }
 
-export const ops = { statuses, currencies, pricingStates, productSourceUrl, productLimits }
+export const checkoutDeliveries = [
+  { routeAlias:'courier', name:'Курьерская доставка', destination:'Тестовый адрес: Москва, Тестовая улица, 1' },
+  { routeAlias:'pickup', name:'Пункт выдачи', destination:'Тестовый ПВЗ: Москва, Тестовая улица, 2' }
+]
+export const ops = { statuses, currencies, pricingStates, productSourceUrl, productLimits, checkoutDeliveries }
 
 export function product(overrides = {}) {
   return {

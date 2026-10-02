@@ -146,7 +146,7 @@ it.each([0, 120, null])('keeps extra rows visible and interprets confirmed custo
   const wrapper = mount(CustomerCostSummary, { props:{ pricing:{ ...confirmed, customsRub:amount }, ops } })
   expect(wrapper.findAll('.customer-cost__excluded dd')).toHaveLength(2)
   expect(wrapper.findAll('.customer-cost__excluded dd')[1].text()).toBe(amount === null
-    ? 'Проверяем, потребуются ли таможенные платежи' : amount === 0 ? 'Не ожидаются' : 'Предварительно 120,00 ₽')
+    ? 'Будут рассчитаны позже' : amount === 0 ? 'Не ожидаются' : 'Предварительно 120,00 ₽')
   wrapper.unmount()
 })
 
@@ -156,5 +156,12 @@ it('retains cancelled historical unknown wording and published customs context',
   expect(wrapper.findAll('.customer-cost__excluded dd').map(item => item.text())).toEqual(['Рассчёт не проводился', 'Рассчёт не проводился'])
   await wrapper.setProps({ pricing:{ ...confirmed, customsRub:120 } })
   expect(wrapper.findAll('.customer-cost__excluded dd')[1].text()).toBe('Предварительно 120,00 ₽')
+  wrapper.unmount()
+})
+
+it.each([null, 0, 55])('shows separate saved checkout delivery %s without changing the included total', amount => {
+  const wrapper = mount(CustomerCostSummary, { props:{ pricing:{ ...confirmed, domesticDeliveryRub:amount }, ops, deliverySelected:true } })
+  expect(wrapper.findAll('.customer-cost__excluded dd')[0].text()).toBe(amount === null ? 'Будут рассчитаны позже' : 'Предварительно ' + formatRub(amount, '₽'))
+  expect(wrapper.get('.customer-cost__headline strong').text()).toBe(formatRub(confirmed.totalRub, '₽'))
   wrapper.unmount()
 })

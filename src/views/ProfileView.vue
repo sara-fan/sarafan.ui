@@ -18,11 +18,12 @@ import {
 import { useConsents } from '../stores/consents.js'
 import { useSession } from '../stores/session.js'
 import ConsentRenewalDialog from '../components/ConsentRenewalDialog.vue'
-import { LEGAL_DOCUMENT_KIND } from '../consentFormatting.js'
+import { LEGAL_DOCUMENT_KIND, moscowDate } from '../consentFormatting.js'
 import { isConsentRenewalProblem, useConsentRenewal } from '../useConsentRenewal.js'
 import UiAlert from '../components/ui/UiAlert.vue'
 import UiButton from '../components/ui/UiButton.vue'
 import UiField from '../components/ui/UiField.vue'
+import PassportDataFields from '../components/PassportDataFields.vue'
 
 const photoProblemFields = Object.fromEntries(['invalid-photo-size', 'invalid-photo-type', 'invalid-photo-content'].map(type => [`https://sarafan.sw.consulting/problems/${type}`, ['photo']]))
 const focusRoot = ref(null)
@@ -78,7 +79,7 @@ function fillForm() {
 }
 
 function fieldErrors(field) { return problemFieldErrors(problem.value, field) }
-function display(field) { return profile.value[field] || '—' }
+function display(field) { return field === 'passportIssueDate' ? moscowDate(profile.value[field]) : profile.value[field] || '—' }
 function captureProblem(value, detail) { problem.value = normalizeProblem(value, { detail }) }
 function openPhotoPicker() { photoInput.value?.click() }
 
@@ -222,7 +223,7 @@ const focusAfter = useValidationFocus(focusRoot, { context:() => customer.value?
 <template>
   <main
     ref="focusRoot"
-    class="page-container profile-view"
+    class="page-container ui-page profile-view"
   >
     <ConsentRenewalDialog :flow="renewal" />
     <header class="page-heading profile-heading">
@@ -364,12 +365,12 @@ const focusAfter = useValidationFocus(focusRoot, { context:() => customer.value?
         </p>
       </section>
 
-      <div class="profile-details">
-        <section class="profile-details__section">
+      <div class="ui-form-panel">
+        <section class="ui-form-section">
           <h2>Получатель</h2>
           <div
             v-if="editing"
-            class="profile-form-grid profile-form-grid--recipient"
+            class="ui-form-grid ui-form-grid--recipient"
           >
             <UiField
               v-model="form.firstName"
@@ -395,7 +396,7 @@ const focusAfter = useValidationFocus(focusRoot, { context:() => customer.value?
           </div>
           <dl
             v-else
-            class="profile-data-grid profile-data-grid--recipient"
+            class="ui-data-grid ui-data-grid--recipient"
           >
             <div><dt>Имя</dt><dd>{{ display('firstName') }}</dd></div>
             <div><dt>Отчество</dt><dd>{{ display('patronymic') }}</dd></div>
@@ -403,75 +404,37 @@ const focusAfter = useValidationFocus(focusRoot, { context:() => customer.value?
           </dl>
         </section>
 
-        <section class="profile-details__section">
-          <div class="profile-details__heading">
+        <section class="ui-form-section">
+          <div class="ui-form-section__heading">
             <h2>Паспортные данные</h2>
             <p>Нужны для таможенного оформления</p>
           </div>
-          <div
+          <PassportDataFields
             v-if="editing"
-            class="profile-form-grid"
-          >
-            <UiField
-              v-model="form.inn"
-              name="inn"
-              label="ИНН"
-              inputmode="numeric"
-              maxlength="12"
-              :errors="fieldErrors('inn')"
-            />
-            <UiField
-              v-model="form.passportSeries"
-              name="passportSeries"
-              label="Серия паспорта"
-              maxlength="32"
-              :errors="fieldErrors('passportSeries')"
-            />
-            <UiField
-              v-model="form.passportNumber"
-              name="passportNumber"
-              label="Номер паспорта"
-              maxlength="32"
-              :errors="fieldErrors('passportNumber')"
-            />
-            <UiField
-              v-model="form.passportIssueDate"
-              name="passportIssueDate"
-              label="Дата выдачи"
-              type="date"
-              :errors="fieldErrors('passportIssueDate')"
-            />
-            <div class="profile-grid__wide">
-              <UiField
-                v-model="form.passportIssuedBy"
-                name="passportIssuedBy"
-                label="Кем выдан"
-                multiline
-                :rows="2"
-                maxlength="500"
-                :errors="fieldErrors('passportIssuedBy')"
-              />
-            </div>
-          </div>
+            :passport="form"
+            :disabled="busy"
+            :errors-for="fieldErrors"
+            @update:field="(name, value) => form[name] = value"
+          />
           <dl
             v-else
-            class="profile-data-grid"
+            class="ui-data-grid"
           >
             <div><dt>ИНН</dt><dd>{{ display('inn') }}</dd></div>
             <div><dt>Серия паспорта</dt><dd>{{ display('passportSeries') }}</dd></div>
             <div><dt>Номер паспорта</dt><dd>{{ display('passportNumber') }}</dd></div>
             <div><dt>Дата выдачи</dt><dd>{{ display('passportIssueDate') }}</dd></div>
-            <div class="profile-grid__wide">
+            <div class="ui-form-grid__wide">
               <dt>Кем выдан</dt><dd>{{ display('passportIssuedBy') }}</dd>
             </div>
           </dl>
         </section>
 
-        <section class="profile-details__section">
+        <section class="ui-form-section">
           <h2>Доставка</h2>
           <div
             v-if="editing"
-            class="profile-form-grid"
+            class="ui-form-grid"
           >
             <UiField
               v-model="form.postalCode"
@@ -487,7 +450,7 @@ const focusAfter = useValidationFocus(focusRoot, { context:() => customer.value?
               maxlength="150"
               :errors="fieldErrors('city')"
             />
-            <div class="profile-grid__wide">
+            <div class="ui-form-grid__wide">
               <UiField
                 v-model="form.address"
                 name="address"
@@ -501,11 +464,11 @@ const focusAfter = useValidationFocus(focusRoot, { context:() => customer.value?
           </div>
           <dl
             v-else
-            class="profile-data-grid"
+            class="ui-data-grid"
           >
             <div><dt>Индекс</dt><dd>{{ display('postalCode') }}</dd></div>
             <div><dt>Регион, населённый пункт</dt><dd>{{ display('city') }}</dd></div>
-            <div class="profile-grid__wide">
+            <div class="ui-form-grid__wide">
               <dt>Адрес</dt><dd>{{ display('address') }}</dd>
             </div>
           </dl>

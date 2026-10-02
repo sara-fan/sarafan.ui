@@ -16,6 +16,10 @@ export function isOrderDetailPath(path) {
   }
 }
 
+export function isOrderCheckoutPath(path) {
+  return typeof path === 'string' && path.endsWith('/checkout') && isOrderDetailPath(path.slice(0, -'/checkout'.length))
+}
+
 export function isOrderCancelPath(path) {
   return typeof path === 'string' && path.endsWith('/cancel') && isOrderDetailPath(path.slice(0, -'/cancel'.length))
 }

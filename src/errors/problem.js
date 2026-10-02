@@ -20,6 +20,7 @@ export const CORE_PROBLEM_TYPES = Object.freeze({
   anonymousApiTimeout: `${PROBLEM_TYPE_ROOT}anonymous-api-timeout`,
   onboardingConsentExpired: `${PROBLEM_TYPE_ROOT}onboarding-consent-expired`,
   orderLimitRatesUnavailable: `${PROBLEM_TYPE_ROOT}order-limit-rates-unavailable`,
+  orderNotEditable: `${PROBLEM_TYPE_ROOT}order-not-editable`,
   orderNotCancellable: `${PROBLEM_TYPE_ROOT}order-not-cancellable`,
   orderUpdateConflict: `${PROBLEM_TYPE_ROOT}order-update-conflict`,
   orderValueLimitExceeded: `${PROBLEM_TYPE_ROOT}order-value-limit-exceeded`,

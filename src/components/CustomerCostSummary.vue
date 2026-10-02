@@ -11,6 +11,7 @@ const props = defineProps({
   ops: { type: Object, default: null },
   compact: { type: Boolean, default: false },
   historical: { type: Boolean, default: false },
+  deliverySelected: { type: Boolean, default: false },
   preview: { type: Boolean, default: false },
   loading: { type: Boolean, default: false }
 })
@@ -36,10 +37,11 @@ const label = computed(() => props.historical ? 'Последняя рассчи
 const rubSymbol = computed(() => props.ops?.currencies?.find(item => item.routeAlias === 'rub')?.symbol ?? '₽')
 const deliveryText = computed(() => props.historical
   ? props.pricing?.domesticDeliveryRub == null ? 'Рассчёт не проводился' : formatRub(props.pricing.domesticDeliveryRub, rubSymbol.value)
-  : 'Рассчитаем при оформлении заказа')
+  : props.deliverySelected && props.pricing?.domesticDeliveryRub != null ? 'Предварительно ' + formatRub(props.pricing.domesticDeliveryRub, rubSymbol.value)
+  : props.deliverySelected ? 'Будут рассчитаны позже' : 'Рассчитаем при оформлении заказа')
 const customsText = computed(() => {
   const amount = props.pricing?.state === 0 ? null : props.pricing?.customsRub
-  if (amount == null) return props.historical ? 'Рассчёт не проводился' : 'Проверяем, потребуются ли таможенные платежи'
+  if (amount == null) return props.historical ? 'Рассчёт не проводился' : props.pricing?.state === 0 ? 'Проверяем, потребуются ли таможенные платежи' : 'Будут рассчитаны позже'
   return amount === 0 ? 'Не ожидаются' : 'Предварительно ' + formatRub(amount, rubSymbol.value)
 })
 </script>

@@ -20,6 +20,12 @@ export function moscowTime(value) {
   if (!Number.isFinite(date.getTime())) return '—'
   return `${new Intl.DateTimeFormat('ru-RU', { dateStyle:'short', timeStyle:'short', timeZone:'Europe/Moscow' }).format(date)} МСК`
 }
+export function moscowDate(value) {
+  if (!value) return '—'
+  const date = new Date(value)
+  if (!Number.isFinite(date.getTime())) return '—'
+  return new Intl.DateTimeFormat('ru-RU', { dateStyle:'short', timeZone:'Europe/Moscow' }).format(date)
+}
 export function documentNodes(html) {
   if (typeof html !== 'string' || html.length > 2 * 1024 * 1024) throw createInternalProblem('protocolError')
   // A template is inert. Only allowlisted elements/attributes become Vue nodes; source HTML is never mounted.

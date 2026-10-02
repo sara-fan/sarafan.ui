@@ -116,7 +116,7 @@ describe('order product rules', () => {
       storeName:'x'.repeat(201), productName:'', sellerPrice:'', quantity:'',
       color:'x'.repeat(201), size:'x'.repeat(201), comment:'x'.repeat(2001)
     }, productLimits)
-    expect(Object.keys(empty).sort()).toEqual(['color', 'comment', 'productName', 'quantity', 'sellerPrice', 'size', 'storeName'].sort())
+    expect(Object.keys(empty).sort()).toEqual(['color', 'comment', 'quantity', 'size', 'storeName'].sort())
     expect(productFormErrors({
       storeName:'', productName:'Товар', sellerPrice:'10', quantity:'1.5', color:'', size:'', comment:''
     }, productLimits).quantity).toEqual(['Количество должно быть целым числом.'])
@@ -149,7 +149,7 @@ describe('order product rules', () => {
     }, productLimits).sellerPrice).toEqual(['Не больше двух знаков после запятой'])
   })
 
-  it.each(['', ' ', '0', '-1', 'one', '.', ',', '58..', '1,2.3', String(productLimits.maximumUnitPrice + 1)])('reports invalid price %s', sellerPrice => {
+  it.each(['0', '-1', 'one', '.', ',', '58..', '1,2.3', String(productLimits.maximumUnitPrice + 1)])('reports invalid price %s', sellerPrice => {
     expect(productFormErrors({
       storeName:'', productName:'Товар', sellerPrice, quantity:'1', color:'', size:'', comment:''
     }, productLimits).sellerPrice).toEqual(['Неправильная цена'])

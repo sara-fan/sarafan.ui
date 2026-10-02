@@ -4,23 +4,24 @@
 // This file is a part of the Sarafan application
 
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 
 import CustomerCostSummary from '../components/CustomerCostSummary.vue'
-import OrderItemFields from '../components/OrderItemFields.vue'
+import OrderItemCard from '../components/OrderItemCard.vue'
 import UiAlert from '../components/ui/UiAlert.vue'
 import UiButton from '../components/ui/UiButton.vue'
 import UiDialog from '../components/ui/UiDialog.vue'
 import UiField from '../components/ui/UiField.vue'
 import { CORE_PROBLEM_TYPES, createInternalProblem, normalizeProblem, presentProblem, presentProblemTitle, problemFieldErrors } from '../errors/problem.js'
-import { formatMoneyAmount } from '../moneyFormatting.js'
 import { isOrderNumber } from '../orderNumber.js'
-import { priceCents } from '../orderProduct.js'
 import { validateCustomerOrder, validateOrderOps } from '../stores/orders.js'
 import { useSession } from '../stores/session.js'
 import { useValidationFocus, validationFields } from '../validationFocus.js'
 
 const route = useRoute()
+const router = useRouter()
+const expired = ref(false)
+let expiryTimer
 const session = useSession()
 const order = ref(null)
 const ops = ref(null)
@@ -38,7 +39,25 @@ let inFlight = null
 
 const error = computed(() => presentProblem(problem.value))
 const errorTitle = computed(() => presentProblemTitle(problem.value))
-const status = computed(() => ops.value?.statuses.find(item => item.value === order.value?.status))
+const status = computed(() => ops.value?.statuses.find(item => expired.value && order.value?.status === 100 ? item.routeAlias === "quote_expired" : item.value === order.value?.status))
+watch(() => order.value?.pricing, pricing => {
+  globalThis.clearTimeout(expiryTimer)
+  expired.value = pricing?.state === 200
+  if (pricing?.state === 100) {
+    const delay = Date.parse(pricing.validUntil) - Date.parse(pricing.asOf)
+    if (delay <= 0) expired.value = true
+    else expiryTimer = globalThis.setTimeout(() => { expired.value = true; void load() }, Math.min(delay, 2147483647))
+  }
+})
+const canCheckout = computed(() => status.value?.routeAlias === 'quote_ready' && order.value?.pricing.state === 100 && !expired.value)
+async function checkout() {
+  const customerId = session.customer.value?.id
+  const expectedNumber = orderNumber()
+  await load()
+  if (customerId !== session.customer.value?.id || expectedNumber !== orderNumber() || !canCheckout.value) return
+  try { await router.push({ name:'checkout', params:{ orderNumber:expectedNumber } }) }
+  catch (value) { if (customerId === session.customer.value?.id && expectedNumber === orderNumber()) problem.value = normalizeProblem(value) }
+}
 const headingDetail = computed(() => {
   if (!order.value) return ''
   const creation = createdAt(order.value.createdAt)
@@ -52,19 +71,6 @@ const headingDetail = computed(() => {
 const cancelReasonErrors = computed(() => problemFieldErrors(cancelProblem.value, 'reason'))
 const cancelError = computed(() => cancelProblem.value && cancelReasonErrors.value.length === 0 ? presentProblem(cancelProblem.value) : '')
 const cancelErrorTitle = computed(() => cancelProblem.value ? presentProblemTitle(cancelProblem.value) : '')
-const product = computed(() => order.value?.product)
-const totalPrice = computed(() => product.value?.sellerPrice
-  ? sellerPrice(product.value.sellerPrice, product.value.quantity)
-  : '')
-const reviewItem = computed(() => ({
-  productName:display(product.value?.productName),
-  storeName:display(product.value?.storeName),
-  sellerPrice:sellerPrice(product.value?.sellerPrice),
-  quantity:product.value?.quantity ?? '',
-  color:display(product.value?.color),
-  size:display(product.value?.size),
-  comment:display(product.value?.comment)
-}))
 function orderNumber() {
   const value = String(route.params.orderNumber ?? '')
   const rawSegment = route.path.startsWith('/orders/') ? route.path.slice('/orders/'.length) : ''
@@ -75,18 +81,12 @@ function orderNumber() {
   }
   return isOrderNumber(value) ? value : null
 }
-function display(value) { return value?.trim() || 'Не указано' }
 function createdAt(value) {
   return new Intl.DateTimeFormat('ru-RU', {
     day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit'
   }).format(new Date(value))
 }
-function sellerPrice(value, quantity = 1) {
-  if (!value) return 'Не указано'
-  const currency = ops.value.currencies.find(item => item.value === value.currency)
-  const cents = priceCents(value.amount) * BigInt(quantity)
-  return `${formatMoneyAmount(Number(cents) / 100)} ${currency.symbol}`
-}
+
 function openCancellation() {
   cancelReason.value = ''
   cancelProblem.value = null
@@ -211,6 +211,7 @@ const stopWatch = watch(
 onMounted(() => globalThis.document.addEventListener('visibilitychange', revisit))
 
 onBeforeUnmount(() => {
+  globalThis.clearTimeout(expiryTimer)
   loadGeneration++
   cancellationGeneration++
   inFlight = null
@@ -232,6 +233,14 @@ onBeforeUnmount(() => {
         v-if="order"
         class="order-details-heading__actions"
       >
+        <UiButton
+          v-if="canCheckout"
+          variant="primary"
+          :disabled="loading || cancelBusy"
+          @click="checkout"
+        >
+          Оформить заказ
+        </UiButton>
         <UiButton
           :loading="loading"
           :disabled="cancelBusy"
@@ -284,42 +293,26 @@ onBeforeUnmount(() => {
       <p>Загружаем заказ…</p>
     </section>
 
-    <template v-else-if="order && product">
+    <template v-else-if="order">
+      <UiAlert
+        v-if="order.reviewReason"
+        title="Не можем привезти"
+      >
+        {{ order.reviewReason }}
+      </UiAlert>
+      <p v-if="order.estimatedDelivery">
+        Ориентировочный срок доставки: {{ order.estimatedDelivery.minimumDays }}–{{ order.estimatedDelivery.maximumDays }} дней
+      </p>
       <CustomerCostSummary
         :pricing="order.pricing"
+        :delivery-selected="Boolean(order.checkout)"
         :ops="ops"
-        :historical="status?.routeAlias === 'cancelled'"
+        :historical="['cancelled', 'cannot_deliver'].includes(status?.routeAlias)"
       />
-      <section
-        class="order-review-card"
-        aria-labelledby="order-product-title"
-      >
-        <div class="order-review-card__heading">
-          <div>
-            <p
-              v-if="order.showReviewFields"
-              class="page-kicker"
-            >
-              НА ПРОВЕРКЕ
-            </p>
-            <h2 id="order-product-title">
-              Товар
-            </h2>
-          </div>
-        </div>
-        <p
-          v-if="order.showReviewFields"
-          class="order-review-card__notice"
-        >
-          Проверим данные в течение двух часов.
-        </p>
-        <OrderItemFields
-          :source-url="order.sourceUrl"
-          :item="reviewItem"
-          :total-price="totalPrice"
-          readonly
-        />
-      </section>
+      <OrderItemCard
+        :order="order"
+        :ops="ops"
+      />
     </template>
 
     <UiDialog
