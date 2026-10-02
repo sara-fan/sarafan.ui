@@ -203,7 +203,7 @@ onBeforeUnmount(() => {
             </p>
             <p class="order-card__details">
               <span>Создан {{ createdAt(order.createdAt) }}</span>
-              <span>Срок доставки уточняется</span>
+              <span>{{ order.estimatedDelivery ? `${order.estimatedDelivery.minimumDays}–${order.estimatedDelivery.maximumDays} дней` : 'Срок доставки уточняется' }}</span>
             </p>
 
             <div class="order-card__progress">

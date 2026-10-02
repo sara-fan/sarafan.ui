@@ -3,7 +3,7 @@
 // This file is a part of the Sarafan application
 
 import { readonly, ref } from 'vue'
-import { isOrderCancelPath, isOrderDetailPath } from '../orderNumber.js'
+import { isOrderCancelPath, isOrderCheckoutPath, isOrderDetailPath } from '../orderNumber.js'
 
 import { API_BASE_PATH } from '../api.js'
 import { createApiClient } from '../api/client.js'
@@ -314,7 +314,7 @@ async function orderRequest(path, options = {}, isCurrent = () => true, validate
   if (path === `${API_BASE_PATH}/orders/ops`) {
     return identityScopedRequest(path, options, {}, validateResponse, isCurrent, false)
   }
-  if (path !== `${API_BASE_PATH}/orders` && !isOrderDetailPath(path) && !isOrderCancelPath(path)) {
+  if (path !== `${API_BASE_PATH}/orders` && !isOrderDetailPath(path) && !isOrderCancelPath(path) && !isOrderCheckoutPath(path)) {
     throw createInternalProblem('invalidInput')
   }
   return authorizedRequest(path, options, {}, validateResponse, isCurrent)
@@ -429,12 +429,27 @@ function isCurrentIdentityInvalidation(error) {
   return identityInvalidations.get(error) === identityGeneration
 }
 
-async function updateProfile(profile) {
+async function refreshCustomer() {
+  if (!customer.value) return null
+  const { id, phone } = customer.value
+  const generation = identityGeneration
+  const result = await authorizedRequest(
+    API_BASE_PATH + '/customers/me', {}, {}, value => {
+      if (!isValidActiveCustomer(value) || value.id !== id || value.phone !== phone) throw createInternalProblem('protocolError')
+    }, () => generation === identityGeneration)
+  if (!result || generation !== identityGeneration) return null
+  customer.value = result
+  return result
+}
+
+function updateProfile(profile) { return updateCustomerProfile(profile, '') }
+function updateDeliveryAddress(address) { return updateCustomerProfile(address, '/delivery-address') }
+async function updateCustomerProfile(profile, suffix) {
   if (!customer.value) throw createInternalProblem('invalidInput')
   const { id, phone } = customer.value
   const generation = identityGeneration
   const updatedCustomer = await authorizedRequest(
-    `${API_BASE_PATH}/customers/me`,
+    `${API_BASE_PATH}/customers/me${suffix}`,
     jsonOptions('PUT', profile),
     {},
     value => {
@@ -510,6 +525,8 @@ export function useSession() {
     verifyCode,
     logout,
     updateProfile,
+    updateDeliveryAddress,
+    refreshCustomer,
     uploadPhoto,
     deletePhoto,
     getPhoto,

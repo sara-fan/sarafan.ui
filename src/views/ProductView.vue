@@ -71,14 +71,14 @@ let releaseConsentNoticeSuppression = null
 const draft = computed(() => drafts.draft.value)
 const sourceUrl = computed(() => draft.value.sourceUrl)
 const busy = computed(() => previewLoading.value || submitting.value)
-const ratesUnavailable = computed(() => previewReady.value && ops.value && !ops.value.productLimits.valueLimit.available)
+const ratesUnavailable = computed(() => previewReady.value && ops.value && !ops.value.productLimits.valueLimit.available && Boolean(draft.value.sellerPrice.trim()))
 const localErrors = computed(() => productFormErrors(draft.value, ops.value.productLimits))
 const pageProblem = computed(() => hasOnlyPresentedFieldErrors(problem.value, PRODUCT_FIELDS) ? null : problem.value)
 const error = computed(() => presentProblem(pageProblem.value))
 const errorTitle = computed(() => presentProblemTitle(pageProblem.value))
 const previewNotice = computed(() => draft.value?.previewOutcome === 'recognized'
   ? 'Проверьте распознанные данные и при необходимости исправьте их.'
-  : 'Не получилось получить все данные о товаре автоматически. Заполните их вручную.')
+  : 'Не получилось получить данные о товаре автоматически. Проверим его по ссылке.')
 const showForecast = computed(() => Boolean(forecastInput())
   && (forecastLoading.value || pricing.value || forecastProblem.value))
 const sellerCurrencySymbol = computed(() => ops.value?.currencies

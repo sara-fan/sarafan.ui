@@ -48,7 +48,7 @@ const focusAfter = useValidationFocus(focusRoot, {
     :model-value="state.open"
     title="Подтверждение документов"
     :persistent="state.busy"
-    :max-width="720"
+    :max-width="480"
     @update:model-value="open => { if (!open) flow.cancel() }"
   >
     <div ref="focusRoot">
@@ -73,29 +73,34 @@ const focusAfter = useValidationFocus(focusRoot, {
       </template>
       <div
         v-else
-        class="consent-renewal__choices"
+        class="consent-registration"
       >
         <div
           v-for="row in state.documents"
           :key="row.document.id"
+          class="consent-registration__item"
         >
-          <UiSelectionControl
-            v-model="row.accepted"
-            :name="fieldName(row.document.kind)"
-            :error="fieldErrors(row).length > 0"
-            :aria-describedby="fieldErrors(row).length ? fieldName(row.document.kind) + '-renewal-error' : undefined"
-            :disabled="state.busy"
-          >
-            {{ row.document.kind === LEGAL_DOCUMENT_KIND.USER_AGREEMENT ? 'Я принимаю' : 'Я даю' }}
+          <div class="consent-inline-acceptance">
+            <UiSelectionControl
+              v-model="row.accepted"
+              :name="fieldName(row.document.kind)"
+              :error="fieldErrors(row).length > 0"
+              :aria-labelledby="fieldName(row.document.kind) + '-renewal-label ' + fieldName(row.document.kind) + '-renewal-document'"
+              :aria-describedby="fieldErrors(row).length ? fieldName(row.document.kind) + '-renewal-error' : undefined"
+              :disabled="state.busy"
+            >
+              <span :id="fieldName(row.document.kind) + '-renewal-label'">{{ row.document.kind === LEGAL_DOCUMENT_KIND.USER_AGREEMENT ? 'Я принимаю' : 'Я даю' }}</span>
+            </UiSelectionControl>
             <button
+              :id="fieldName(row.document.kind) + '-renewal-document'"
               type="button"
-              class="consent-renewal__link"
+              class="consent-document-link"
               :disabled="state.busy"
               @click.prevent="state.reading = row.document"
             >
               {{ consents.kindName(row.document.kind) }}
             </button>
-          </UiSelectionControl>
+          </div>
           <p
             v-if="fieldErrors(row).length"
             :id="fieldName(row.document.kind) + '-renewal-error'"
@@ -128,6 +133,5 @@ const focusAfter = useValidationFocus(focusRoot, {
 </template>
 
 <style scoped>
-.consent-renewal__choices { display:grid; gap:1.25rem; }
-.consent-renewal__link { color:var(--sarafan-secondary); text-decoration:underline; text-underline-offset:0.2em; }
+.consent-document-link { padding:0; border:0; background:transparent; text-align:left; cursor:pointer; }
 </style>

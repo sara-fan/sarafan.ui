@@ -74,7 +74,7 @@ it('shows separate unchecked confirmations and reads the exact artifact without 
   expect(wrapper.findAll('input').every(input => !input.element.checked)).toBe(true)
   await flow.confirm()
   expect(h.store.grant).not.toHaveBeenCalled()
-  await wrapper.get('.consent-renewal__link').trigger('click')
+  await wrapper.findAll('button').find(button => button.text() === 'Согласие').trigger('click')
   expect(wrapper.text()).toContain('Точный текст документа')
   expect(flow.state.documents[0].accepted).toBe(false)
   await wrapper.findAll('button').find(button => button.text() === 'Вернуться к подтверждению').trigger('click')
