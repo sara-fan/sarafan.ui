@@ -11,11 +11,16 @@ import { createSarafanVuetify } from '../src/plugins/vuetify.js'
 import { createAppRouter } from '../src/router.js'
 import { resetSessionForTests, useSession } from '../src/stores/session.js'
 import ProfileView from '../src/views/ProfileView.vue'
+import ConsentRenewalDialog from '../src/components/ConsentRenewalDialog.vue'
 import { problemResponse, response } from './fixtures/http.js'
 import { customerDto } from './fixtures/customer.js'
 
 const consent = vi.hoisted(() => ({
-  requirePersonalData: vi.fn(),
+  missingKinds: vi.fn(),
+  acquireNoticeSuppression: () => () => {},
+  current: vi.fn(),
+  grant: vi.fn(),
+  kindName: () => 'Согласие на обработку персональных данных',
   ops: { value: { kinds: [{ value:1, routeAlias: 'personal-data-consent' }] } }
 }))
 vi.mock('../src/stores/consents.js', () => ({ useConsents: () => consent }))
@@ -69,7 +74,7 @@ async function startEditing(wrapper) {
 describe('ProfileView', () => {
   beforeEach(() => {
     resetSessionForTests()
-    consent.requirePersonalData.mockReset().mockResolvedValue()
+    consent.missingKinds.mockReset().mockResolvedValue([])
     vi.stubGlobal('URL', {
       createObjectURL: vi.fn().mockReturnValue('blob:profile-photo'),
       revokeObjectURL: vi.fn()
@@ -186,6 +191,80 @@ describe('ProfileView', () => {
     expect(wrapper.findAll('button').some(item => item.text() === 'Выйти')).toBe(false)
   })
 
+  it.each(['profile', 'photo'])('preserves the %s draft through document reading, cancellation and renewal', async action => {
+    const customer = customerDto({ id:19, profile:{ firstName:'Мария' }, hasPhoto:false })
+    const fetch = vi.fn((url, options) => Promise.resolve(opsResponse(url) || (
+      url === '/api/v1/customers/me/photo' ? response(200, { ...customer, hasPhoto:true }) :
+      url === '/api/v1/customers/me' ? response(200, { ...customer, profile:{ ...customer.profile, ...JSON.parse(options.body) } }) :
+      sessionResponse(customer))))
+    vi.stubGlobal('fetch', fetch)
+    await useSession().verifyCode({ phone:customer.phone, code:'1111' })
+    const wrapper = mountView()
+    await flushPromises()
+    await startEditing(wrapper)
+    await wrapper.get('input[name="firstName"]').setValue('Черновик')
+    consent.current.mockResolvedValue({ document:{ id:'pd', kind:1, title:'Согласие', contentHash:'a'.repeat(64), displayVersion:'1', effectiveAt:'2026-09-01T00:00:00Z', html:'<p>Документ</p>' } })
+    consent.grant.mockResolvedValue()
+    consent.missingKinds.mockResolvedValue([1])
+    const file = new globalThis.File(['png'], 'photo.png', { type:'image/png' })
+    if (action === 'profile') await wrapper.get('form').trigger('submit')
+    else await setFile(wrapper.get('input[type="file"]').element, file)
+    await flushPromises()
+    const flow = wrapper.findComponent(ConsentRenewalDialog).props('flow')
+    expect(flow.state.open).toBe(true)
+    expect(wrapper.get('input[name="firstName"]').element.value).toBe('Черновик')
+    flow.state.reading = flow.state.documents[0].document
+    await flushPromises()
+    expect(wrapper.get('input[name="firstName"]').element.value).toBe('Черновик')
+    flow.cancel()
+    await flushPromises()
+    expect(fetch.mock.calls.filter(([url]) => url === '/api/v1/customers/me' || url === '/api/v1/customers/me/photo')).toHaveLength(0)
+    if (action === 'profile') await wrapper.get('form').trigger('submit')
+    else await wrapper.findAll('button').find(button => button.text() === 'Продолжить загрузку').trigger('click')
+    await flushPromises()
+    flow.state.documents[0].accepted = true
+    consent.missingKinds.mockResolvedValue([])
+    await flow.confirm()
+    await flushPromises()
+    const writes = fetch.mock.calls.filter(([url, options]) => (url === '/api/v1/customers/me' || url === '/api/v1/customers/me/photo') && options.method === 'PUT')
+    expect(writes).toHaveLength(1)
+    if (action === 'profile') expect(JSON.parse(writes[0][1].body).firstName).toBe('Черновик')
+    else expect(writes[0][1].body.get('file')).toBe(file)
+    expect(fetch.mock.calls.filter(([url]) => url === '/api/v1/auth/code/verify')).toHaveLength(1)
+  })
+
+  it('recovers a server-side consent rejection without changing the submitted profile draft', async () => {
+    const customer = customerDto({ id:20 })
+    let writes = 0
+    const fetch = vi.fn((url, options) => {
+      if (url === '/api/v1/customers/me') {
+        writes++
+        return Promise.resolve(writes === 1
+          ? problemResponse(409, 'personal-data-consent-required', { title:'Требуется согласие', detail:'Подтвердите документ' })
+          : response(200, { ...customer, profile:{ ...customer.profile, ...JSON.parse(options.body) } }))
+      }
+      return Promise.resolve(opsResponse(url) || sessionResponse(customer))
+    })
+    vi.stubGlobal('fetch', fetch)
+    await useSession().verifyCode({ phone:customer.phone, code:'1111' })
+    const wrapper = mountView()
+    await flushPromises()
+    await startEditing(wrapper)
+    await wrapper.get('input[name="firstName"]').setValue('Черновик')
+    consent.missingKinds.mockResolvedValueOnce([]).mockResolvedValue([1])
+    consent.current.mockResolvedValue({ document:{ id:'pd', kind:1, title:'Согласие', contentHash:'a'.repeat(64), html:'<p>Текст</p>' } })
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    const flow = wrapper.findComponent(ConsentRenewalDialog).props('flow')
+    expect(flow.state.open).toBe(true)
+    flow.state.documents[0].accepted = true
+    consent.missingKinds.mockResolvedValue([])
+    await flow.confirm()
+    await flushPromises()
+    expect(writes).toBe(2)
+    expect(fetch.mock.calls.filter(([url]) => url === '/api/v1/customers/me').map(([, options]) => JSON.parse(options.body).firstName)).toEqual(['Черновик', 'Черновик'])
+  })
+
   it('retains editable data when current personal-data consent is required', async () => {
     const customer = customerDto({ id: 13, phone: '+79991234567', state:0, hasPhoto: false, profile: { firstName: 'Мария' } })
     const fetch = vi.fn(url => Promise.resolve(opsResponse(url) || sessionResponse(customer)))
@@ -193,12 +272,13 @@ describe('ProfileView', () => {
     await useSession().verifyCode({ phone: customer.phone, code: '4567' })
     const wrapper = mountView()
     await startEditing(wrapper)
-    consent.requirePersonalData.mockRejectedValue(createInternalProblem('invalidInput', { detail: 'Требуется актуальное согласие' }))
+    consent.missingKinds.mockRejectedValue(createInternalProblem('invalidInput', { detail: 'Требуется актуальное согласие' }))
     await wrapper.get('form').trigger('submit')
+    await flushPromises()
     expect(wrapper.text()).toContain('Требуется актуальное согласие')
     expect(wrapper.findAll('form .ui-field__control')[1].element.value).toBe('Мария')
     await setFile(wrapper.get('input[type="file"]').element, new globalThis.File(['png'], 'photo.png', { type: 'image/png' }))
-    expect(consent.requirePersonalData).toHaveBeenCalledTimes(2)
+    expect(consent.missingKinds).toHaveBeenCalledTimes(2)
     expect(fetch.mock.calls.filter(([url]) => url === '/api/v1/auth/code/verify')).toHaveLength(1)
   })
 
@@ -208,7 +288,7 @@ describe('ProfileView', () => {
     await useSession().verifyCode({ phone:customer.phone, code:'0018' })
     const wrapper = mountView()
     await startEditing(wrapper)
-    consent.requirePersonalData.mockRejectedValue(createInternalProblem('protocolError'))
+    consent.missingKinds.mockRejectedValue(createInternalProblem('protocolError'))
 
     await wrapper.get('form').trigger('submit')
     await flushPromises()
@@ -269,6 +349,35 @@ describe('ProfileView', () => {
     expect(globalThis.URL.createObjectURL).not.toHaveBeenCalled()
   })
 
+  it('focuses the visible photo picker after each failed retained-file retry', async () => {
+    const customer = customerDto({ id:15, hasPhoto:false, profile:{} })
+    const fetch = vi.fn((url, options = {}) => {
+      const standard = opsResponse(url)
+      if (standard) return Promise.resolve(standard)
+      if (url === '/api/v1/auth/code/verify') return Promise.resolve(sessionResponse(customer))
+      if (url === '/api/v1/customers/me/photo' && options.method === 'PUT')
+        return Promise.resolve(problemResponse(400, 'invalid-photo-content', { detail:'Фото не загружено' }))
+      throw new Error('Unexpected request: ' + url)
+    })
+    vi.stubGlobal('fetch', fetch)
+    await useSession().verifyCode({ phone:customer.phone, code:'1111' })
+    const wrapper = mountView()
+    await flushPromises()
+    await startEditing(wrapper)
+    const file = new globalThis.File(['png'], 'valid.png', { type:'image/png' })
+    await setFile(wrapper.get('input[type="file"]').element, file)
+    const retry = wrapper.findAll('button').find(button => button.text() === 'Продолжить загрузку')
+    for (let attempt = 0; attempt < 2; attempt++) {
+      retry.element.focus()
+      await retry.trigger('click')
+      await flushPromises()
+      expect(wrapper.get('#profile-photo-error').text()).toBe('Фото не загружено')
+      expect(document.activeElement).toBe(wrapper.get('[data-validation-field="photo"]').element)
+    }
+    const writes = fetch.mock.calls.filter(([url, options]) => url === '/api/v1/customers/me/photo' && options.method === 'PUT')
+    expect(writes).toHaveLength(3)
+    expect(writes.every(([, options]) => options.body.get('file') === file)).toBe(true)
+  })
   it('keeps editing usable when profile and photo operations fail or input is invalid', async () => {
     const customer = customerDto({ id: 15, phone: '+79990000015', state:0, hasPhoto: true, profile: {} })
     const fetch = vi.fn((url, options = {}) => {

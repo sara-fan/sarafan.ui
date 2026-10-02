@@ -323,3 +323,26 @@ describe('safe legal reader formatting', () => {
     await vi.runOnlyPendingTimersAsync(); expect(revoke).toHaveBeenCalledWith('blob:test')
   })
 })
+
+it('checks both acceptance statuses before a new order', async () => {
+  session.customer.value = { id:7 }
+  session.consentRequest.mockResolvedValue({ ...history, statuses:[
+    { kind:1, status:'current' }, { kind:2, status:'renewal-required' }
+  ] })
+  await expect(store.missingKinds([1, 2])).resolves.toEqual([2])
+  await expect(store.missingKinds([1])).resolves.toEqual([])
+  session.consentRequest.mockRejectedValueOnce(new Error('offline'))
+  await expect(store.missingKinds([1, 2])).rejects.toThrow('offline')
+})
+
+it('records an explicit agreement grant with the same retry key and refreshes statuses', async () => {
+  session.customer.value = { id:7 }
+  session.consentRequest.mockResolvedValue(history)
+  await store.grant({ ...document, kind:2 }, 'agreement-retry-key')
+  expect(session.consentRequest.mock.calls[0][0]).toBe('/api/v1/consents/me/user-agreement')
+  expect(JSON.parse(session.consentRequest.mock.calls[0][1].body)).toEqual({
+    documentId:document.id, contentHash:document.contentHash, decision:'grant', idempotencyKey:'agreement-retry-key'
+  })
+  expect(session.consentRequest.mock.calls[0][2]).toBe(true)
+  expect(session.consentRequest.mock.calls[1][0]).toBe('/api/v1/consents/me')
+})

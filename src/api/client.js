@@ -17,6 +17,7 @@ const API_ROUTE_TEMPLATES = new Set([
   '/api/v1/legal/documents/{id}/source',
   '/api/v1/consents/me',
   '/api/v1/consents/me/personal-data',
+  '/api/v1/consents/me/user-agreement',
   '/api/v1/consents/me/withdrawal-request',
   '/api/v1/auth/code/request',
   '/api/v1/auth/code/verify',

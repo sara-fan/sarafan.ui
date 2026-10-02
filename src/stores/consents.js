@@ -121,6 +121,10 @@ export function createConsentStore(session) {
       }
     } catch (problem) { if (epoch === generation && requestId === mineGeneration) personalProblem.value = problem; throw problem }
   }
+  async function missingKinds(kinds) {
+    await loadMine()
+    return kinds.filter(kind => mine.value?.statuses.find(row => row.kind === kind)?.status !== 'current')
+  }
   async function requirePersonalData() {
     await loadMine()
     if (mine.value?.statuses.find(x => x.kind === LEGAL_DOCUMENT_KIND.PERSONAL_DATA_CONSENT)?.status !== 'current') {
@@ -141,7 +145,8 @@ export function createConsentStore(session) {
     }
   }
   async function grant(document, key = globalThis.crypto.randomUUID()) {
-    await session.consentRequest('/api/v1/consents/me/personal-data', json('POST', {
+    const endpoint = document.kind === LEGAL_DOCUMENT_KIND.USER_AGREEMENT ? 'user-agreement' : 'personal-data'
+    await session.consentRequest(`/api/v1/consents/me/${endpoint}`, json('POST', {
       documentId:document.id, contentHash:document.contentHash, decision:'grant', idempotencyKey:key
     }), true)
     await loadMine()
@@ -158,7 +163,7 @@ export function createConsentStore(session) {
   return { mine:readonly(mine), ops:readonly(ops), opsProblem:readonly(opsProblem),
     personalProblem:readonly(personalProblem), noticeSuppressed:readonly(noticeSuppressed),
     current, read, source, loadOps, ensureOps,
-    kindByAlias, kindName, routeAlias, loadMine, requirePersonalData, hasCurrentPersonalData,
+    kindByAlias, kindName, routeAlias, loadMine, missingKinds, requirePersonalData, hasCurrentPersonalData,
     acquireNoticeSuppression, grant, requestWithdrawal, resetCustomer, dispose }
 }
 let store
