@@ -4,6 +4,7 @@
 
 import { createRouter, createWebHistory } from 'vue-router'
 
+import CheckoutView from './views/CheckoutView.vue'
 import ConsentsView from './views/ConsentsView.vue'
 import StoresView from './views/StoresView.vue'
 import HomeView from './views/HomeView.vue'
@@ -27,7 +28,7 @@ export const routes = [
   { path: '/product', name: 'product', component: ProductView, meta: { access: ACCESS.PUBLIC, navigationSection: 'home' } },
   { path: '/orders', name: 'orders', component: OrdersView, meta: { access: ACCESS.CUSTOMER, navigationSection: 'orders' } },
   { path: '/orders/:orderNumber', name: 'order-details', component: OrderDetailsView, meta: { access: ACCESS.CUSTOMER, navigationSection: 'orders' } },
-  { path: '/orders/:orderNumber/checkout', name: 'checkout', component: PendingView, props: { title: 'Оформление заказа', copy: 'Оформление заказа будет подключено отдельной задачей MVP.' }, meta: { access: ACCESS.CUSTOMER, navigationSection: 'orders' } },
+  { path: '/orders/:orderNumber/checkout', name: 'checkout', component: CheckoutView, meta: { access: ACCESS.CUSTOMER, navigationSection: 'orders' } },
   { path: '/orders/:orderNumber/payment', name: 'payment', component: PendingView, props: { title: 'Оплата', copy: 'Демонстрационная оплата будет подключена отдельной задачей MVP.' }, meta: { access: ACCESS.CUSTOMER, navigationSection: 'orders' } },
   { path: '/profile', name: 'profile', component: ProfileView, meta: { access: ACCESS.CUSTOMER, navigationSection: 'profile' } },
   { path: '/legal/:documentRef', name: 'legal-document', component: LegalDocumentView, meta: { access: ACCESS.LIMITED } },

@@ -69,7 +69,7 @@ const requirementsReady = computed(() => (!requiresAgreement.value || termsAccep
 const isRegistration = computed(() => resolution.value?.nextStep === session.flowValue('registration'))
 const dialogTitle = computed(() => ({
   phone: 'Вход или регистрация',
-  requirements: isRegistration.value ? 'Регистрация' : 'Подтверждение соглашения',
+  requirements: isRegistration.value ? 'Регистрация' : 'Подтверждение документов',
   code: 'Введите код'
 })[step.value])
 const error = computed(() => problem.value ? presentProblem(problem.value) : session.notice.value)
@@ -217,7 +217,7 @@ async function loadRequiredDocuments(value, operation) {
   const personalData = personalDataKind.value
   if (required.some(kind => !consentStore.kindName(kind))) throw createInternalProblem('protocolError')
   if (value.nextStep === session.flowValue('agreement')
-      && (required.length !== 1 || required[0] !== agreement)
+      && (!required.length || required.some(kind => kind !== agreement && kind !== personalData))
     || value.nextStep === session.flowValue('registration')
       && (!required.includes(personalData)
         || required.some(kind => kind !== agreement && kind !== personalData))) {
@@ -242,7 +242,7 @@ function validateResolution(value) {
   const agreementStep = session.flowValue('agreement')
   const registrationStep = session.flowValue('registration')
   if (value.nextStep === codeStep && value.requiredDocumentKinds.length === 0) return
-  if (value.nextStep === agreementStep && value.requiredDocumentKinds.length === 1) return
+  if (value.nextStep === agreementStep && value.requiredDocumentKinds.length >= 1) return
   if (value.nextStep === registrationStep && value.requiredDocumentKinds.length >= 1) return
   throw createInternalProblem('protocolError')
 }

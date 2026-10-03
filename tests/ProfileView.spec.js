@@ -109,12 +109,12 @@ describe('ProfileView', () => {
       phone: '+79991234567',
       state: 0,
       hasPhoto: true,
-      profile: { lastName: 'Старая', firstName: null }
+      profile: { lastName: 'Старая', firstName: null, passportIssueDate:'2010-02-03' }
     })
     const updated = customerDto({
       ...customer,
       state: 1,
-      profile: { ...customer.profile, lastName: 'Новая', firstName: 'Мария' }
+      profile: { ...customer.profile, lastName: 'Новая', firstName: 'Мария', passportIssueDate:'2020-01-02' }
     })
     const photo = new globalThis.Blob(['photo'], { type: 'image/png' })
     const fetch = vi.fn((url, options = {}) => {
@@ -133,16 +133,18 @@ describe('ProfileView', () => {
     const wrapper = mountView()
     await vi.waitFor(() => expect(wrapper.find('.profile-avatar img').exists()).toBe(true))
     expect(wrapper.text()).toContain('Старая')
+    expect(wrapper.text()).toContain('03.02.2010')
+    expect(wrapper.text()).not.toContain('2010-02-03')
     expect(wrapper.find('.profile-privacy').exists()).toBe(false)
     expect(wrapper.findAll('.profile-account-panel')).toHaveLength(1)
-    expect(wrapper.findAll('.profile-details')).toHaveLength(1)
-    expect(wrapper.findAll('.profile-details__section')).toHaveLength(3)
-    expect(wrapper.findAll('.profile-data-grid dd')).toHaveLength(11)
-    expect(wrapper.findAll('.profile-data-grid .profile-grid__wide')).toHaveLength(2)
-    expect(wrapper.findAll('.profile-details__section')[0].findAll('dt').map(item => item.text())).toEqual([
+    expect(wrapper.findAll('.ui-form-panel')).toHaveLength(1)
+    expect(wrapper.findAll('.ui-form-section')).toHaveLength(3)
+    expect(wrapper.findAll('.ui-data-grid dd')).toHaveLength(11)
+    expect(wrapper.findAll('.ui-data-grid .ui-form-grid__wide')).toHaveLength(2)
+    expect(wrapper.findAll('.ui-form-section')[0].findAll('dt').map(item => item.text())).toEqual([
       'Имя', 'Отчество', 'Фамилия'
     ])
-    expect(wrapper.findAll('.profile-details__section')[2].findAll('dt').map(item => item.text())).toEqual([
+    expect(wrapper.findAll('.ui-form-section')[2].findAll('dt').map(item => item.text())).toEqual([
       'Индекс', 'Регион, населённый пункт', 'Адрес'
     ])
     expect(wrapper.get('.profile-account-panel__email-value strong').text()).toBe('—')
@@ -150,11 +152,12 @@ describe('ProfileView', () => {
     expect(wrapper.findAll('button').find(item => item.text() === 'Редактировать').classes()).toContain('ui-button--primary')
     await startEditing(wrapper)
     expect(wrapper.findAll('.profile-account-panel')).toHaveLength(1)
-    expect(wrapper.findAll('.profile-details')).toHaveLength(1)
+    expect(wrapper.findAll('.ui-form-panel')).toHaveLength(1)
     expect(wrapper.get('form').classes()).toContain('profile-layout')
     expect(wrapper.get('form').attributes('id')).toBe('profile-edit-form')
+    expect(wrapper.get('input[name="passportIssueDate"]').element.value).toBe('03.02.2010')
     expect(wrapper.find('.profile-form-actions').exists()).toBe(false)
-    expect(wrapper.findAll('form .profile-grid__wide')).toHaveLength(2)
+    expect(wrapper.findAll('form .ui-form-grid__wide')).toHaveLength(2)
     expect(wrapper.findAll('button').find(item => item.text() === 'Сохранить').attributes()).toMatchObject({ type: 'submit', form: 'profile-edit-form' })
     expect(wrapper.findAll('button').find(item => item.text() === 'Заменить фото').classes()).toContain('ui-button--primary')
     expect(wrapper.get('.photo-remove').classes()).toContain('ui-button--danger')
@@ -172,11 +175,16 @@ describe('ProfileView', () => {
     for (const [index, input] of inputs.entries()) await input.setValue(values[index])
     await wrapper.get('form').trigger('submit')
     await vi.waitFor(() => expect(wrapper.text()).toContain('Профиль сохранён'))
+    expect(wrapper.text()).toContain('02.01.2020')
     const updateCall = fetch.mock.calls.find(([url]) => url === '/api/v1/customers/me')
     expect(JSON.parse(updateCall[1].body)).toMatchObject({
       lastName: 'Новая',
       firstName: 'Мария',
-      passportIssueDate: '2020-01-02'
+      inn: '770123456789',
+      passportSeries: '45 00',
+      passportNumber: '123456',
+      passportIssueDate: '2020-01-02',
+      passportIssuedBy: 'ОВД'
     })
 
     await startEditing(wrapper)

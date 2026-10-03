@@ -103,8 +103,7 @@ export function priceCents(value) {
 export function productFormErrors(form, limits) {
   const errors = {}
   const name = form.productName.trim()
-  if (!name) errors.productName = ['Укажите название товара.']
-  else if (name.length > limits.productNameMaximumLength) {
+  if (name.length > limits.productNameMaximumLength) {
     errors.productName = [`Не более ${limits.productNameMaximumLength} символов.`]
   }
   for (const [key, maximum] of [
@@ -133,6 +132,7 @@ export function productFormErrors(form, limits) {
 
   const rawPrice = form.sellerPrice.trim()
   const cents = priceCents(rawPrice)
+  if (!rawPrice) return errors
   if (/^\d+[.,]\d{3,}$/u.test(rawPrice)) {
     errors.sellerPrice = ['Не больше двух знаков после запятой']
   }
@@ -151,8 +151,8 @@ export function productPayload(form, limits) {
     sourceUrl:form.sourceUrl,
     product:{
       storeName:form.storeName.trim() || null,
-      productName:form.productName.trim(),
-      sellerPrice:{ amount:Number(cents) / 100, currency:limits.sellerPriceCurrency },
+      productName:form.productName.trim() || null,
+      sellerPrice:form.sellerPrice.trim() ? { amount:Number(cents) / 100, currency:limits.sellerPriceCurrency } : null,
       color:form.color.trim() || null,
       size:form.size.trim() || null
     },

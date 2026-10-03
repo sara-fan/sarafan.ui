@@ -1394,3 +1394,45 @@ describe('session store', () => {
     expect(session.notice.value).toBe('Сервис временно недоступен. Пожалуйста, повторите позже')
   })
 })
+
+describe('checkout session synchronization', () => {
+  beforeEach(() => { resetSessionForTests(); loggerMocks.log.mockClear() })
+  afterEach(() => vi.unstubAllGlobals())
+  async function login(handler) {
+    const customer = customerDto({ id:1, phone:'+79990000001', profile:{ phone:'+79990000001' } })
+    const fetch = withOps((url, options) => url === '/api/v1/auth/code/verify'
+      ? Promise.resolve(response(200, { accessToken:'checkout-token', expiresAt:'2026-08-30T00:15:00Z', customer })) : handler(url, options, customer))
+    vi.stubGlobal('fetch', fetch)
+    const session = useSession(); await session.verifyCode({ phone:customer.phone, code:'1111' })
+    return { session, fetch }
+  }
+  it('does not refresh an anonymous profile', async () => { expect(await useSession().refreshCustomer()).toBeNull() })
+  it('refreshes saved recipient fields and authorizes checkout requests', async () => {
+    const { session, fetch } = await login((url, options, customer) => {
+      if (url.endsWith('/checkout')) return Promise.resolve(response(200, { saved:true }))
+      return Promise.resolve(response(200, { ...customer, profile:{ ...customer.profile, firstName:'Иван', passportIssueDate:'2010-01-01' } }))
+    })
+    await session.refreshCustomer()
+    expect(session.customer.value.profile.firstName).toBe('Иван')
+    expect(session.customer.value.phone).toBe('+79990000001')
+    const validate = vi.fn()
+    expect(await session.orderRequest('/api/v1/orders/12345678-3/checkout', { method:'POST' }, () => true, validate)).toEqual({ saved:true })
+    expect(validate).toHaveBeenCalledWith({ saved:true })
+    expect(fetch.mock.calls.find(([path]) => path.endsWith('/checkout'))[1].headers.get('Authorization')).toBe('Bearer checkout-token')
+  })
+  it.each([
+    ['id', 2], ['phone', '+79990000002'], ['firstName', 123], ['passportIssueDate', 'invalid']
+  ])('rejects invalid refreshed identity/profile %s %#', async (field, value) => {
+    const { session } = await login((_url, _options, customer) => Promise.resolve(response(200,
+      ['id', 'phone'].includes(field) ? { ...customer, [field]:value } : { ...customer, profile:{ ...customer.profile, [field]:value } })))
+    await expect(session.refreshCustomer()).rejects.toBeDefined()
+    expect(session.customer.value).toBeNull()
+  })
+  it('discards refresh responses after the identity is cleared', async () => {
+    let finish
+    const { session } = await login((_url, _options, customer) => new Promise(resolve => { finish = () => resolve(response(200, customer)) }))
+    const pending = session.refreshCustomer()
+    resetSessionForTests(); finish()
+    expect(await pending).toBeNull(); expect(session.customer.value).toBeNull()
+  })
+})
