@@ -162,8 +162,8 @@ describe('order store', () => {
     expect(store.progressFor(0)).toBe(14)
     expect(store.progressFor(300)).toBe(48)
     expect(store.progressFor(400)).toBe(100)
-    expect(store.progressFor(999)).toBeUndefined()
-    expect(store.statusFor(999)).toBeUndefined()
+    expect(store.progressFor(999)).toBe(0)
+    expect(store.statusFor(999)).toMatchObject({ name:'Статус 999', isTerminal:false, routeAlias:null })
     expect(store.currencyFor(999)).toBeUndefined()
   })
 
@@ -298,7 +298,7 @@ describe('order store', () => {
     null,
     {},
     [{ ...orders[0], orderNumber:' ' }],
-    [{ ...orders[0], status:999 }],
+    [{ ...orders[0], status:'999' }],
     [{ ...orders[0], sourceUrl:'ftp://shop.example.com/item' }],
     [{ ...orders[0], sourceUrl:'https://alice:secret@shop.example.com/item' }],
     [{ ...orders[0], imageUrl:'invalid' }],
@@ -339,4 +339,12 @@ describe('order store', () => {
     })
     expect(validateCustomerOrders([{ ...orders[0], sourceUrl }], extendedOps)[0].sourceUrl).toBe(sourceUrl)
   })
+})
+
+it('accepts unknown numeric status reads but never cancellable unknown orders', () => {
+  const metadata = validateOrderOps(ops)
+  expect(validateCustomerOrders([{ ...orders[0], status:999 }], metadata)[0].status).toBe(999)
+  const value = completeOrder({ status:999, canCancel:false })
+  expect(validateCustomerOrder(value, metadata, value.orderNumber).status).toBe(999)
+  expect(() => validateCustomerOrder({ ...value, canCancel:true }, metadata, value.orderNumber)).toThrow()
 })

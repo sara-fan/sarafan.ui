@@ -658,7 +658,7 @@ describe('PhoneAuthDialog', () => {
     await wrapper.get('.auth-form').trigger('submit')
     await flushPromises()
 
-    expect(wrapper.get('h2').text()).toBe('Подтверждение соглашения')
+    expect(wrapper.get('h2').text()).toBe('Подтверждение документов')
     expect(wrapper.find('.auth-form > p').exists()).toBe(false)
     expect(wrapper.text()).not.toContain('Версия 1')
     expect(wrapper.get('.consent-document-link').text()).toBe(agreementName)
@@ -790,7 +790,7 @@ describe('PhoneAuthDialog', () => {
       expect(wrapper.emitted('update:modelValue').at(-1)).toEqual([!scenario.parentRemainsOpen])
       if (!scenario.parentRemainsOpen) await wrapper.setProps({ modelValue:true })
       await flushPromises()
-      expect(wrapper.get('h2').text()).toBe(scenario.nextStep === 2 ? 'Регистрация' : 'Подтверждение соглашения')
+      expect(wrapper.get('h2').text()).toBe(scenario.nextStep === 2 ? 'Регистрация' : 'Подтверждение документов')
       expect(wrapper.findAll('input[type="checkbox"]').map(item => item.element.checked)).toEqual(choices)
       expect(fetch.mock.calls.filter(([url]) => url === '/api/v1/auth/phone/resolve')).toHaveLength(1)
       expect(fetch.mock.calls.some(([url]) => url === '/api/v1/auth/code/request')).toBe(false)
@@ -968,8 +968,8 @@ describe('PhoneAuthDialog', () => {
 
   it.each([
     { title:'unknown legal kind', nextStep:2, required:[2, 99] },
-    { title:'agreement with the wrong document', nextStep:1, required:[1] },
-    { title:'agreement with multiple documents', nextStep:1, required:[2, 1] },
+    { title:'agreement with an unrelated document', nextStep:1, required:[3] },
+    { title:'agreement without documents', nextStep:1, required:[] },
     { title:'registration without personal-data consent', nextStep:2, required:[2] },
     { title:'registration with an unrelated document', nextStep:2, required:[1, 4] },
     { title:'code flow with documents', nextStep:0, required:[2] },
@@ -1096,7 +1096,8 @@ describe('PhoneAuthDialog', () => {
   })
 
   it.each([
-    { nextStep:1, required:[2], title:'Подтверждение соглашения', checkbox:'authentication-terms', omitted:'personalDataConsent' },
+    { nextStep:1, required:[2], title:'Подтверждение документов', checkbox:'authentication-terms', omitted:'personalDataConsent' },
+    { nextStep:1, required:[1], title:'Подтверждение документов', checkbox:'authentication-personal-data', omitted:'termsAccepted' },
     { nextStep:2, required:[1], title:'Регистрация', checkbox:'authentication-personal-data', omitted:'termsAccepted' }
   ])('renders only the requirements selected by Ops for $title', async scenario => {
     const fetch = vi.fn(url => {
@@ -1127,12 +1128,12 @@ describe('PhoneAuthDialog', () => {
     expect(body).not.toHaveProperty(scenario.omitted)
   })
 
-  it('keeps registration submission disabled until both documents are accepted without showing missing-consent errors', async () => {
+  it.each([1, 2])('keeps flow %s disabled until both required documents are accepted', async nextStep => {
     const fetch = vi.fn(url => {
       const standard = standardResponse(url)
       if (standard) return Promise.resolve(standard)
       if (url === '/api/v1/auth/phone/resolve') {
-        return Promise.resolve(response(200, { nextStep:2, requiredDocumentKinds:[2, 1] }))
+        return Promise.resolve(response(200, { nextStep, requiredDocumentKinds:[2, 1] }))
       }
       if (url === '/api/v1/auth/code/request') {
         return Promise.resolve(response(202, { onboardingToken:'synthetic-onboarding-receipt-at-least-32-characters' }))
@@ -1412,7 +1413,7 @@ describe('PhoneAuthDialog', () => {
     await wrapper.get('.auth-form').trigger('submit')
     await flushPromises()
 
-    expect(wrapper.get('h2').text()).toBe('Подтверждение соглашения')
+    expect(wrapper.get('h2').text()).toBe('Подтверждение документов')
     expect(wrapper.vm.$.setupState.phone).toBe('+79991234567')
     expect(wrapper.find('input[name="code"]').exists()).toBe(false)
     expect(resolves).toBe(2)

@@ -112,6 +112,19 @@ describe('ProductView product review', () => {
     startDraft()
   })
 
+  it('submits an unrecognized unpriced product without a name or FX pair', async () => {
+    h.session.customer.value = { id:7 }
+    const unavailable = { ...ops, productLimits:{ ...ops.productLimits, valueLimit:{ ...ops.productLimits.valueLimit, available:false, sourceEffectiveDate:null, maximumTotalUsd:null } } }
+    h.session.orderRequest.mockImplementation(async (_path, _options, isCurrent, validate) => { if (isCurrent()) validate(unavailable); return unavailable })
+    const { wrapper, router } = await mountView()
+    expect(wrapper.get('button[type="submit"]').attributes('disabled')).toBeUndefined()
+    await wrapper.get('form').trigger('submit'); await flushPromises()
+    expect(h.session.createOrder).toHaveBeenCalledOnce()
+    expect(h.session.createOrder.mock.calls[0][0].product).toMatchObject({ productName:null, sellerPrice:null })
+    expect(h.session.forecastOrder).not.toHaveBeenCalled()
+    expect(router.currentRoute.value.name).toBe('orders')
+  })
+
   it('shows loading, canonical source, and the complete manual form', async () => {
     let resolvePreview
     h.session.previewOrder.mockImplementation((_sourceUrl, isCurrent, validate) => new Promise(resolve => {
@@ -127,7 +140,7 @@ describe('ProductView product review', () => {
     resolvePreview({ sourceUrl:'https://shop.example.com/canonical', outcome:'manual_review', product:null })
     await flushPromises()
 
-    expect(wrapper.text()).toContain('Не получилось получить все данные о товаре автоматически')
+    expect(wrapper.text()).toContain('Не получилось получить данные о товаре автоматически. Проверим его по ссылке.')
     expect(wrapper.get('.order-item-fields__source a').attributes('href')).toBe('https://shop.example.com/canonical')
     expect(wrapper.get('input[name="quantity"]').element.value).toBe('1')
     expect(wrapper.findAll('.product-review__form .order-item-fields .ui-field')).toHaveLength(9)
@@ -441,7 +454,7 @@ describe('ProductView product review', () => {
         if (isCurrent()) validate(ops)
         return ops
       })
-    const { wrapper } = await mountView()
+    const { wrapper } = (useProductDraft().update({ sellerPrice:'10' }), await mountView())
     expect(wrapper.text()).toContain('Проверка лимита временно недоступна')
     expect(wrapper.get('button[type="submit"]').attributes('disabled')).toBeDefined()
     await wrapper.get('.product-review__actions .ui-alert button').trigger('click')
@@ -463,7 +476,7 @@ describe('ProductView product review', () => {
         return unavailable
       })
       .mockRejectedValueOnce(createInternalProblem('networkUnavailable'))
-    const { wrapper } = await mountView()
+    const { wrapper } = (useProductDraft().update({ sellerPrice:'10' }), await mountView())
     await wrapper.get('.product-review__actions .ui-alert button').trigger('click')
     await flushPromises()
     expect(wrapper.get('.product-view > [role="alert"]').text()).toContain('Проверьте подключение к интернету')
@@ -899,9 +912,7 @@ describe('ProductView product review', () => {
   ])('marks %s as touched on blur', async field => {
     const { wrapper } = await mountView()
     await wrapper.get(`[name="${field}"]`).trigger('blur')
-    if (field === 'productName' || field === 'sellerPrice') {
-      expect(wrapper.get(`[name="${field}"]`).element.closest('.ui-field').classList.contains('ui-field--error')).toBe(true)
-    }
+    expect(wrapper.get(`[name="${field}"]`).element.closest('.ui-field').classList.contains('ui-field--error')).toBe(false)
   })
 
   it('resumes an authentication-bound draft for both signed-in and anonymous states', async () => {

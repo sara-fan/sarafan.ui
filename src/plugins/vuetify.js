@@ -3,6 +3,7 @@
 // This file is a part of the Sarafan application
 
 import { createVuetify } from 'vuetify'
+import { ru } from 'vuetify/locale'
 import { aliases, mdi } from 'vuetify/iconsets/mdi-svg'
 
 const sarafanAliases = {
@@ -19,6 +20,8 @@ const sarafanAliases = {
 
 export function createSarafanVuetify() {
   return createVuetify({
+    locale: { locale: 'ru', messages: { ru } },
+    date: { locale: { ru: 'ru-RU' } },
     icons: {
       defaultSet: 'mdi',
       aliases: sarafanAliases,

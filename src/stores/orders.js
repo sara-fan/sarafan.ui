@@ -9,6 +9,7 @@ import { isIsoDate, isRfc3339DateTime } from '../api/validation.js'
 import { createInternalProblem } from '../errors/problem.js'
 import { validatePricing, validatePricingStates } from '../orders/customerPricing.js'
 import { priceCents, validatePreviewProductDto, validateProductDto, validateProductLimits } from '../orderProduct.js'
+import { validateCheckout, validateCheckoutDeliveries } from '../orders/checkout.js'
 import { normalizeProductAddress } from '../productAddress.js'
 
 const ROUTE_ALIAS_PATTERN = /^[a-z0-9]+(?:_[a-z0-9]+)*$/u
@@ -92,7 +93,8 @@ export function validateOrderOps(value) {
       ...value.productSourceUrl,
       topLevelDomains:[...value.productSourceUrl.topLevelDomains]
     },
-    productLimits
+    productLimits,
+    ...(value.checkoutDeliveries === undefined ? {} : { checkoutDeliveries:validateCheckoutDeliveries(value.checkoutDeliveries) })
   }
 }
 
@@ -104,9 +106,9 @@ function validateSellerPrice(value, currencyValues, limits) {
     || priceCents(value.amount) === null || value.amount > limits.maximumUnitPrice) protocolError()
 }
 
-function validateOrderIdentityAndProduct(item, statusValues, currencyValues, limits, sourceUrlMaximumLength) {
+function validateOrderIdentityAndProduct(item, currencyValues, limits, sourceUrlMaximumLength) {
   if (!item || Object.hasOwn(item, 'id') || !isOrderNumber(item.orderNumber)
-    || !Number.isInteger(item.status) || !statusValues.has(item.status)
+    || !Number.isInteger(item.status)
     || !validHttpUrl(item.sourceUrl, sourceUrlMaximumLength) || !validNullableText(item.productName, limits.productNameMaximumLength)
     || !validNullableText(item.storeName, limits.storeNameMaximumLength)
     || item.imageUrl !== null && !validHttpUrl(item.imageUrl)
@@ -126,12 +128,24 @@ export function validateProductPreview(value, ops) {
   }
 }
 
+export function validateDeliveryEstimate(value) {
+  if (value == null) return null
+  if (!Number.isSafeInteger(value.minimumDays) || !Number.isSafeInteger(value.maximumDays)
+    || value.minimumDays < 1 || value.maximumDays < value.minimumDays || value.maximumDays > 365) protocolError()
+  return { ...value }
+}
+
 function validateCompleteOrder(value, ops) {
   const statusValues = new Set(ops.statuses.map(item => item.value))
   const currencyValues = new Set(ops.currencies.map(item => item.value))
-  validateOrderIdentityAndProduct(value, statusValues, currencyValues, ops.productLimits, ops.productSourceUrl.maximumLength)
+  validateOrderIdentityAndProduct(value, currencyValues, ops.productLimits, ops.productSourceUrl.maximumLength)
   const product = validateProductDto(value.product, ops.currencies, ops.productLimits)
   const pricing = validatePricing(value.pricing)
+  const estimate = validateDeliveryEstimate(value.estimatedDelivery)
+  const checkout = value.checkout == null ? null : validateCheckout(value.checkout, ops.checkoutDeliveries)
+  if (value.reviewReason != null && !validText(value.reviewReason, 2000)
+    || value.reviewCompletedAt != null && (!isRfc3339DateTime(value.reviewCompletedAt) || Date.parse(value.reviewCompletedAt) < Date.parse(value.createdAt) || Date.parse(value.reviewCompletedAt) > Date.parse(value.updatedAt))
+    || value.status === 600 && (!value.reviewReason || !value.reviewCompletedAt || value.canCancel)) protocolError()
   if (!validNullableText(value.comment, ops.productLimits.commentMaximumLength)
     || !isRfc3339DateTime(value.createdAt)
     || !isRfc3339DateTime(value.updatedAt) || Date.parse(value.updatedAt) < Date.parse(value.createdAt)
@@ -140,7 +154,7 @@ function validateCompleteOrder(value, ops) {
       || Date.parse(value.cancelledAt) < Date.parse(value.createdAt)
       || Date.parse(value.cancelledAt) > Date.parse(value.updatedAt))
     || value.cancelledAt !== null && ops.statuses.find(item => item.value === value.status)?.routeAlias !== 'cancelled'
-    || value.canCancel && (value.cancelledAt !== null || ops.statuses.find(item => item.value === value.status)?.isTerminal)
+    || value.canCancel && (!statusValues.has(value.status) || value.cancelledAt !== null || ops.statuses.find(item => item.value === value.status)?.isTerminal)
     || typeof value.showReviewFields !== 'boolean'
     || value.dimensions !== null && (!value.dimensions
       || ['lengthCm', 'widthCm', 'heightCm'].some(field => typeof value.dimensions[field] !== 'number'
@@ -166,7 +180,9 @@ function validateCompleteOrder(value, ops) {
     || value.sellerPrice?.currency !== product.sellerPrice?.currency) protocolError()
   return {
     ...value,
+    ...(value.checkout === undefined ? {} : { checkout }),
     pricing,
+    ...(estimate ? { estimatedDelivery:estimate } : {}),
     product,
     sellerPrice:value.sellerPrice ? { ...value.sellerPrice } : null,
     dimensions:value.dimensions ? { ...value.dimensions } : null,
@@ -189,20 +205,26 @@ export function validateCustomerOrder(value, ops, expectedNumber) {
 
 export function validateCustomerOrders(value, ops) {
   if (!Array.isArray(value)) protocolError()
-  const statusValues = new Set(ops.statuses.map(item => item.value))
   const currencyValues = new Set(ops.currencies.map(item => item.value))
   const orderNumbers = new Set()
   let previous = null
   for (const item of value) {
-    validateOrderIdentityAndProduct(item, statusValues, currencyValues, ops.productLimits, ops.productSourceUrl.maximumLength)
+    validateOrderIdentityAndProduct(item, currencyValues, ops.productLimits, ops.productSourceUrl.maximumLength)
     validatePricing(item.pricing)
+    validateDeliveryEstimate(item.estimatedDelivery)
     if (orderNumbers.has(item.orderNumber) || !isRfc3339DateTime(item.createdAt)) protocolError()
     const createdAt = Date.parse(item.createdAt)
     if (previous !== null && createdAt > previous) protocolError()
     orderNumbers.add(item.orderNumber)
     previous = createdAt
   }
-  return value.map(item => ({ ...item, pricing:{ ...item.pricing }, sellerPrice:item.sellerPrice ? { ...item.sellerPrice } : null }))
+  return value.map(item => ({ ...item, ...(item.estimatedDelivery ? { estimatedDelivery:validateDeliveryEstimate(item.estimatedDelivery) } : {}), pricing:{ ...item.pricing }, sellerPrice:item.sellerPrice ? { ...item.sellerPrice } : null }))
+}
+
+export function orderStatusFor(ops, value) {
+  const name = `Статус ${value}`
+  return ops?.statuses.find(item => item.value === value)
+    ?? { value, name, routeAlias:null, upperStatusValue:value, upperStatusName:name, upperStatusRouteAlias:null, isTerminal:false, progressPercent:0 }
 }
 
 export function createOrderStore(session) {
@@ -245,7 +267,7 @@ export function createOrderStore(session) {
     }
   }
 
-  function statusFor(value) { return ops.value?.statuses.find(item => item.value === value) }
+  function statusFor(value) { return orderStatusFor(ops.value, value) }
   function currencyFor(value) { return ops.value?.currencies.find(item => item.value === value) }
   function progressFor(value) { return statusFor(value)?.progressPercent }
   function reset() { generation++; inFlight = null; loading.value = false; orders.value = []; ops.value = null }

@@ -4,7 +4,7 @@
 import { ref } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createConsentStore } from '../src/stores/consents.js'
-import { LEGAL_DOCUMENT_KIND, documentNodes, isDocumentId, moscowTime, downloadBytes } from '../src/consentFormatting.js'
+import { LEGAL_DOCUMENT_KIND, documentNodes, isDocumentId, moscowDate, moscowTime, downloadBytes } from '../src/consentFormatting.js'
 
 const id = '11111111-1111-1111-1111-111111111111'
 const now = '2026-09-07T12:00:00Z'
@@ -313,6 +313,9 @@ describe('safe legal reader formatting', () => {
     for (const html of [null, 'x'.repeat(2097153), '<script>bad</script>', '<!-- comment -->', '<p onclick="bad()">bad</p>', '<a href="javascript:alert(1)">bad</a>', '<a href="relative">bad</a>', '<img src="https://example.test">', '<td style="color:red">bad</td>', '<ol start="bad"><li>bad</li></ol>']) expect(() => documentNodes(html)).toThrow()
     expect(isDocumentId(id)).toBe(true); expect(isDocumentId(null)).toBe(false)
     expect(moscowTime(null)).toBe('—'); expect(moscowTime('bad')).toBe('—'); expect(moscowTime(now)).toContain('15:00')
+    expect(moscowDate(null)).toBe('—'); expect(moscowDate('bad')).toBe('—')
+    expect(moscowDate('2010-02-03')).toBe('03.02.2010')
+    expect(moscowDate('2026-09-30T21:30:00Z')).toBe('01.10.2026')
   })
   it('downloads exact bytes with a fixed filename and releases the URL', async () => {
     const create = vi.fn(() => 'blob:test'), revoke = vi.fn()
