@@ -635,6 +635,20 @@ describe('OrderDetailsView', () => {
 
     expect(h.session.orderRequest).toHaveBeenCalledTimes(2)
   })
+  it.each([500, 600])('shows the final unknown-price wording in order details for status %s', async status => {
+    h.session.orderRequest.mockImplementation(async (path, _options, isCurrent, validate) => {
+      const value = path.endsWith('/ops') ? ops : completeOrder({
+        status, showReviewFields:false,
+        reviewReason:status === 600 ? 'Магазин не отправляет товар' : null,
+        reviewCompletedAt:status === 600 ? '2026-09-15T10:00:00Z' : null
+      })
+      if (isCurrent()) validate(value)
+      return value
+    })
+    const { wrapper } = await mountAt()
+    expect(wrapper.get('.customer-cost__headline strong').text()).toBe('Рассчёт не проводился')
+    expect(wrapper.text()).not.toContain('Стоимость уточняется')
+  })
 })
 
 it('displays an unknown numeric status and offers no checkout or cancellation', async () => {

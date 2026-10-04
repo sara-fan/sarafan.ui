@@ -203,7 +203,7 @@ onBeforeUnmount(() => {
             </p>
             <p class="order-card__details">
               <span>Создан {{ createdAt(order.createdAt) }}</span>
-              <span>{{ order.estimatedDelivery ? `${order.estimatedDelivery.minimumDays}–${order.estimatedDelivery.maximumDays} дней` : 'Срок доставки уточняется' }}</span>
+              <span v-if="!['cancelled', 'cannot_deliver'].includes(status(order)?.routeAlias)">{{ order.estimatedDelivery ? `${order.estimatedDelivery.minimumDays}–${order.estimatedDelivery.maximumDays} дней` : 'Срок доставки уточняется' }}</span>
             </p>
 
             <div class="order-card__progress">
@@ -230,7 +230,7 @@ onBeforeUnmount(() => {
           >
             <CustomerCostSummary
               :pricing="order.pricing"
-              :historical="status(order)?.routeAlias === 'cancelled'"
+              :historical="['cancelled', 'cannot_deliver'].includes(status(order)?.routeAlias)"
               :ops="store.ops.value"
               compact
             />
@@ -293,7 +293,7 @@ onBeforeUnmount(() => {
             </p>
             <p class="order-card__details">
               <span>Создан {{ createdAt(order.createdAt) }}</span>
-              <span v-if="status(order)?.routeAlias !== 'cancelled'">Срок доставки уточняется</span>
+              <span v-if="!['cancelled', 'cannot_deliver'].includes(status(order)?.routeAlias)">Срок доставки уточняется</span>
             </p>
           </div>
           <div
@@ -301,7 +301,7 @@ onBeforeUnmount(() => {
           >
             <CustomerCostSummary
               :pricing="order.pricing"
-              :historical="status(order)?.routeAlias === 'cancelled'"
+              :historical="['cancelled', 'cannot_deliver'].includes(status(order)?.routeAlias)"
               :ops="store.ops.value"
               compact
             />

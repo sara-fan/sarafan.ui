@@ -19,7 +19,7 @@ const h = vi.hoisted(() => ({ session:{}, store:{} }))
 vi.mock('../src/stores/session.js', () => ({ useSession:() => h.session }))
 vi.mock('../src/stores/consents.js', () => ({ useConsents:() => h.store }))
 const id = '11111111-1111-1111-1111-111111111111'
-const document = { id, title:'Согласие', displayVersion:'2', contentHash:'a'.repeat(64), html:'<p>Отдельный текст согласия.</p>', effectiveAt:'2026-09-07T09:00:00Z' }
+const document = { id, kind:1, title:'Согласие', displayVersion:'2', contentHash:'a'.repeat(64), html:'<p>Отдельный текст согласия.</p>', effectiveAt:'2026-09-07T09:00:00Z' }
 const kinds = [
   { value:1, name:'Согласие на обработку персональных данных', routeAlias:'personal-data-consent' },
   { value:2, name:'Пользовательское соглашение', routeAlias:'user-agreement' },
@@ -44,7 +44,7 @@ async function mountCenter(path = '/', attachToDocument = false) {
   wrapper = mount(ConsentCenter, {
     props:{ mode, section },
     ...(attachToDocument ? { attachTo:globalThis.document.body } : {}),
-    global:{ plugins:[createSarafanVuetify(), router] }
+    global:{ plugins:[createSarafanVuetify(), router], stubs:{ VDialog:{ props:['modelValue'], template:'<section v-if="modelValue"><slot /></section>' } } }
   })
   return wrapper
 }
@@ -58,26 +58,21 @@ beforeEach(() => {
     kindName:vi.fn(kind => kinds.find(item => item.value === kind)?.name),
     routeAlias:vi.fn(kind => kinds.find(item => item.value === kind)?.routeAlias),
     loadMine:vi.fn().mockResolvedValue(),
-    grant:vi.fn().mockResolvedValue(), requestWithdrawal:vi.fn().mockResolvedValue(), resetCustomer:vi.fn(), dispose:vi.fn()
+    acquireNoticeSuppression:vi.fn(() => vi.fn()),
+    missingKinds:vi.fn(async requested => {
+      await h.store.loadMine()
+      return requested.filter(kind => h.store.mine.value?.statuses.find(row => row.kind === kind)?.status !== 'current')
+    }),
+    grant:vi.fn(async artifact => {
+      const row = h.store.mine.value.statuses.find(row => row.kind === artifact.kind)
+      row.status = 'current'
+    }), requestWithdrawal:vi.fn().mockResolvedValue(), resetCustomer:vi.fn(), dispose:vi.fn()
   })
   globalThis.history.replaceState(null, '', '/')
   globalThis.URL.createObjectURL = vi.fn(() => 'blob:test'); globalThis.URL.revokeObjectURL = vi.fn()
   vi.spyOn(globalThis.HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
 })
 afterEach(() => { wrapper?.unmount(); vi.useRealTimers(); vi.restoreAllMocks(); globalThis.history.replaceState(null, '', '/') })
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 it('loads legal footer links on a fresh anonymous public visit', async () => {
   h.store.ops.value = null
@@ -211,172 +206,6 @@ it('does not present a consent-history failure outside consent routes', async ()
   expect(h.store.loadMine).not.toHaveBeenCalled()
   expect(wrapper.find('.service-unavailable-page').exists()).toBe(false)
   expect(wrapper.find('.consent-recovery-notice').exists()).toBe(false)
-})
-
-it('renews personal consent and shows the latest manual request', async () => {
-  h.session.customer.value = { id:7 }
-  h.store.kindName.mockImplementation(kind => kind === LEGAL_DOCUMENT_KIND.PERSONAL_DATA_CONSENT
-    ? 'Серверное название согласия'
-    : kinds.find(item => item.value === kind)?.name)
-  h.store.mine.value = {
-    statuses:[{ kind:LEGAL_DOCUMENT_KIND.PERSONAL_DATA_CONSENT, status:'renewal-required' }],
-    history:[{ id:'1', kind:LEGAL_DOCUMENT_KIND.PERSONAL_DATA_CONSENT, decision:'grant', at:'2026-09-01T10:00:00Z', documentId:id, displayVersion:'1' }],
-    withdrawalRequest:{ customerId:7, requestedAt:'2026-09-01T10:00:00Z', processed:true }
-  }
-  await mountCenter('/consents'); await flushPromises()
-  expect(wrapper.get('h1').text()).toBe('Серверное название согласия')
-  expect(wrapper.find('.page-kicker').exists()).toBe(false)
-  expect(wrapper.text()).not.toContain('Здесь можно проверить актуальность согласия')
-  expect(wrapper.text()).not.toContain('Состояние согласия')
-  expect(wrapper.text()).toContain('Действующий документ')
-  expect(wrapper.get('.consent-history-section').attributes('open')).toBeUndefined()
-  expect(wrapper.findAll('.consent-history a').map(link => link.attributes('href'))).toEqual([`/legal/${id}`])
-  expect(wrapper.text()).toContain('Обработан')
-  expect(wrapper.text()).not.toContain('не отключает учётную запись')
-  await state().grant(); expect(h.store.grant).not.toHaveBeenCalled()
-  await wrapper.find('.consent-page__panel--personal input[type=checkbox]').setValue(true)
-  await click('Дать согласие'); expect(h.store.grant).toHaveBeenCalledWith(document, expect.any(String))
-  expect(wrapper.emitted('personal-consent-granted')).toHaveLength(1)
-  await click('Прекратить использовать систему и отозвать согласие на хранение и обработку персональных данных')
-  expect(h.store.requestWithdrawal).toHaveBeenCalledWith()
-  await state().openPersonal(); await flushPromises()
-  expect(wrapper.findComponent(LegalDocumentReader).exists()).toBe(true)
-  h.store.loadMine.mockClear()
-  vi.spyOn(globalThis.document, 'visibilityState', 'get').mockReturnValue('visible')
-  globalThis.dispatchEvent(new globalThis.Event('focus')); await flushPromises()
-  expect(h.store.loadMine).toHaveBeenCalled()
-  await click('На главную')
-  expect(router.currentRoute.value.name).toBe('home')
-  h.session.customer.value = null; await flushPromises()
-  expect(wrapper.text()).not.toContain('Покупатель')
-  expect(h.store.resetCustomer).toHaveBeenCalledTimes(2)
-})
-it('links the current document from the renewal sentence without selecting consent', async () => {
-  h.session.customer.value = { id:7 }
-  h.store.kindName.mockImplementation(kind => kind === LEGAL_DOCUMENT_KIND.PERSONAL_DATA_CONSENT
-    ? 'Согласие из каталога'
-    : kinds.find(item => item.value === kind)?.name)
-  h.store.mine.value = {
-    statuses:[{ kind:LEGAL_DOCUMENT_KIND.PERSONAL_DATA_CONSENT, status:'renewal-required' }],
-    history:[], withdrawalRequest:null
-  }
-  await mountCenter('/consents', true); await flushPromises()
-
-  const checkbox = wrapper.get('.consent-renewal input[name="personalDataConsent"]')
-  const link = wrapper.get('#personal-consent-document')
-  expect(wrapper.get('.consent-inline-acceptance').text().replace(/\s+/gu, ' ').trim())
-    .toBe('Я даю Согласие из каталога')
-  expect(checkbox.attributes('aria-labelledby')).toBe('personal-consent-label personal-consent-document')
-  expect(link.attributes('href')).toBe(`/legal/${id}`)
-  expect(link.element.closest('label')).toBeNull()
-  expect(link.element.tabIndex).toBe(0)
-  link.element.focus()
-  expect(globalThis.document.activeElement).toBe(link.element)
-  await link.trigger('click')
-  await flushPromises()
-  expect(router.currentRoute.value.fullPath).toBe(`/legal/${id}`)
-  expect(checkbox.element.checked).toBe(false)
-  expect(h.store.grant).not.toHaveBeenCalled()
-})
-it('shows consent history newest first without ordinal markers', async () => {
-  h.session.customer.value = { id:7 }
-  h.store.mine.value = {
-    statuses:[],
-    history:[
-      { id:'oldest', kind:1, decision:'grant', at:'2026-09-09T10:00:00Z', documentId:id, displayVersion:'1' },
-      { id:'newest', kind:2, decision:'grant', at:'2026-09-14T20:14:00Z', documentId:id, displayVersion:'3' },
-      { id:'middle', kind:2, decision:'grant', at:'2026-09-14T16:05:00Z', documentId:id, displayVersion:'2' }
-    ],
-    withdrawalRequest:null
-  }
-  h.store.current.mockResolvedValue({
-    document:{
-      ...document,
-      html:'<h1>Согласие на хранение и обработку персональных данных</h1><p>Текст.</p>'
-    }
-  })
-
-  await mountCenter('/consents'); await flushPromises()
-
-  const list = wrapper.get('.consent-history')
-  expect(list.element.tagName).toBe('UL')
-  expect(list.findAll('li').map(item => item.get('a').text())).toEqual([
-    'Версия 3',
-    'Версия 2',
-    'Версия 1'
-  ])
-  expect(wrapper.get('.consent-section--document .legal-document__body h1').text())
-    .toBe('Согласие на хранение и обработку персональных данных')
-})
-it('uses a generic consent-page heading while legal operations are loading', async () => {
-  h.session.customer.value = { id:7 }
-  h.store.kindName.mockReturnValue(undefined)
-  const pending = deferred()
-  h.store.loadOps.mockReturnValueOnce(pending.promise)
-  await mountCenter('/consents')
-  await nextTick()
-  expect(wrapper.get('h1').text()).toBe('Загрузка юридического документа')
-  pending.resolve({ kinds })
-  await flushPromises()
-})
-it('shows personal-data and withdrawal failures without losing consent choices or identity', async () => {
-  h.session.customer.value = { id:7 }
-  h.store.loadMine.mockRejectedValueOnce(denied())
-  await mountCenter('/consents'); await flushPromises()
-  expect(wrapper.find('.service-unavailable-page').exists()).toBe(false)
-  expect(wrapper.get('.consent-page h1').text()).toBe('Согласие на обработку персональных данных')
-  expect(wrapper.get('.consent-page__alert').text())
-    .toBe('Сервис временно недоступен. Пожалуйста, повторите позже')
-  await click('Повторить')
-  expect(h.store.current).toHaveBeenCalledWith(LEGAL_DOCUMENT_KIND.PERSONAL_DATA_CONSENT)
-  h.store.loadMine.mockRejectedValueOnce(denied()); await state().openPersonal(); await flushPromises()
-  expect(wrapper.text()).toContain('Сервис временно недоступен. Пожалуйста, повторите позже')
-  await click('Повторить')
-  await wrapper.find('.consent-page__panel--personal input[type=checkbox]').setValue(true)
-  h.store.grant.mockRejectedValueOnce(denied()); await click('Дать согласие')
-  expect(state().accepted).toBe(true)
-  await click('Повторить')
-  h.store.requestWithdrawal.mockRejectedValueOnce(denied())
-  await click('Прекратить использовать систему и отозвать согласие на хранение и обработку персональных данных')
-  expect(h.session.customer.value.id).toBe(7)
-  await click('Повторить')
-  h.store.current.mockResolvedValue({ document:null }); await state().openPersonal(); await flushPromises()
-  expect(wrapper.find('.consent-page__panel--personal').findComponent(LegalDocumentReader).exists()).toBe(false)
-  expect(wrapper.text()).toContain('Документ о согласии на обработку персональных данных пока не действует.')
-})
-it.each(['personalDataConsent', 'personalDataConsent.documentId', 'decision'])('associates %s errors with the consent checkbox and clears them on success', async field => {
-  h.session.customer.value = { id:7 }
-  await mountCenter('/consents'); await flushPromises()
-  const checkbox = wrapper.get('input[name="personalDataConsent"]')
-  await checkbox.setValue(true)
-  h.store.grant.mockRejectedValueOnce(createInternalProblem('invalidInput', {
-    errors:{ [field]:['Подтвердите согласие'] }
-  }))
-  await click('Дать согласие')
-  expect(checkbox.element.checked).toBe(true)
-  expect(checkbox.attributes('aria-invalid')).toBe('true')
-  expect(checkbox.attributes('aria-describedby')).toBe('personal-consent-error')
-  expect(wrapper.get('#personal-consent-error').text()).toBe('Подтвердите согласие')
-  expect(wrapper.find('.consent-page__alert').exists()).toBe(false)
-  expect(button('Повторить')).toBeUndefined()
-  await click('Дать согласие')
-  expect(checkbox.attributes('aria-invalid')).toBeUndefined()
-  expect(checkbox.attributes('aria-describedby')).toBeUndefined()
-  expect(wrapper.find('#personal-consent-error').exists()).toBe(false)
-})
-it.each(['mixed', 'service', 'store', 'hidden'])('retains the consent page alert for %s failures', async scenario => {
-  h.session.customer.value = { id:7 }
-  await mountCenter('/consents'); await flushPromises()
-  await wrapper.get('input[name="personalDataConsent"]').setValue(true)
-  h.store.grant.mockRejectedValueOnce(createInternalProblem(scenario === 'service' ? 'serviceUnavailable' : 'invalidInput', {
-    errors:{ personalDataConsent:['Подтвердите согласие'], ...(scenario === 'mixed' ? { other:['Другая ошибка'] } : {}) }
-  }))
-  await click('Дать согласие')
-  if (scenario === 'store') h.store.opsProblem.value = denied()
-  if (scenario === 'hidden') state().personalDocument = null
-  await nextTick()
-  expect(wrapper.find('.consent-page__alert').exists()).toBe(true)
-  expect(button('Повторить')).toBeTruthy()
 })
 
 it('makes immutable and current legal links available without login as routed pages', async () => {
@@ -576,277 +405,6 @@ it('keeps a pending legal load current when the customer session changes', async
   expect(wrapper.text()).toContain('Отдельный текст согласия.')
   expect(h.store.current).toHaveBeenCalledTimes(1)
 })
-it('reloads the personal document when refreshed history crosses its boundary', async () => {
-  const replacement = { ...document, html:'<p>Новое персональное согласие.</p>' }
-  h.session.customer.value = { id:7 }
-  await mountCenter('/consents/personal-data'); await flushPromises()
-  h.store.current.mockClear()
-  h.store.current.mockResolvedValue({ document:replacement })
-  h.store.mine.value = {
-    statuses:[], history:[], withdrawalRequest:null,
-    serverNow:'2026-09-10T08:00:00Z', nextChangeAt:'2026-09-10T08:01:00Z'
-  }
-  await nextTick()
-  h.store.mine.value = null
-  await nextTick()
-  h.store.mine.value = {
-    statuses:[], history:[], withdrawalRequest:null,
-    serverNow:'2026-09-10T08:01:00Z', nextChangeAt:null
-  }
-  await flushPromises()
-  expect(h.store.current).toHaveBeenCalledWith(LEGAL_DOCUMENT_KIND.PERSONAL_DATA_CONSENT)
-  expect(wrapper.find('.consent-page__panel--personal').text()).toContain('Новое персональное согласие')
-})
-it('recovers a missing personal document when history crosses its boundary', async () => {
-  const replacement = { ...document, html:'<p>Персональное согласие стало доступно.</p>' }
-  h.session.customer.value = { id:7 }
-  h.store.current.mockResolvedValueOnce({ document:null }).mockResolvedValue({ document:replacement })
-  await mountCenter('/consents/personal-data'); await flushPromises()
-  expect(wrapper.text()).toContain('Документ о согласии на обработку персональных данных пока не действует.')
-  h.store.mine.value = {
-    statuses:[], history:[], withdrawalRequest:null,
-    serverNow:'2026-09-10T08:00:00Z', nextChangeAt:'2026-09-10T08:01:00Z'
-  }
-  await nextTick()
-  h.store.mine.value = null
-  await nextTick()
-  h.store.mine.value = {
-    statuses:[], history:[], withdrawalRequest:null,
-    serverNow:'2026-09-10T08:01:00Z', nextChangeAt:null
-  }
-  await flushPromises()
-  expect(wrapper.find('.service-unavailable-page').exists()).toBe(false)
-  expect(wrapper.find('.consent-page__panel--personal').text()).toContain('Персональное согласие стало доступно.')
-})
-it('queues a personal boundary refresh until the active operation completes', async () => {
-  const pendingGrant = deferred()
-  const replacement = { ...document, html:'<p>Согласие после границы.</p>' }
-  h.session.customer.value = { id:7 }
-  h.store.grant.mockImplementationOnce(() => pendingGrant.promise)
-  await mountCenter('/consents/personal-data'); await flushPromises()
-  h.store.mine.value = {
-    statuses:[], history:[], withdrawalRequest:null,
-    serverNow:'2026-09-10T08:00:00Z', nextChangeAt:'2026-09-10T08:01:00Z'
-  }
-  await nextTick()
-  await wrapper.find('input[type=checkbox]').setValue(true)
-  h.store.current.mockClear()
-  h.store.current.mockResolvedValue({ document:replacement })
-  button('Дать согласие').trigger('click')
-  await nextTick()
-  h.store.mine.value = null
-  await nextTick()
-  h.store.mine.value = {
-    statuses:[], history:[], withdrawalRequest:null,
-    serverNow:'2026-09-10T08:01:00Z', nextChangeAt:null
-  }
-  await nextTick()
-  expect(h.store.current).not.toHaveBeenCalled()
-  pendingGrant.resolve(); await flushPromises()
-  expect(h.store.current).toHaveBeenCalledWith(LEGAL_DOCUMENT_KIND.PERSONAL_DATA_CONSENT)
-  expect(wrapper.find('.consent-page__panel--personal').text()).toContain('Согласие после границы.')
-})
-it('ignores consent work completed for a previous customer identity', async () => {
-  const staleHistory = deferred()
-  h.session.customer.value = { id:7 }
-  h.store.loadMine
-    .mockImplementationOnce(() => staleHistory.promise)
-    .mockResolvedValueOnce()
-  await mountCenter('/consents'); await nextTick()
-  h.session.customer.value = { id:8 }
-  await flushPromises()
-  staleHistory.reject(denied()); await flushPromises()
-  expect(wrapper.find('.service-unavailable-page').exists()).toBe(false)
-  expect(wrapper.get('h1').text()).toBe('Согласие на обработку персональных данных')
-  expect(h.store.current).toHaveBeenCalledWith(LEGAL_DOCUMENT_KIND.PERSONAL_DATA_CONSENT)
-  expect(h.store.current).toHaveBeenCalledTimes(1)
-})
-
-it('ignores a stale personal-data load after the customer changes', async () => {
-  const staleHistory = deferred()
-  const selected = { ...document, title:'Согласие нового покупателя', html:'<p>Документ нового покупателя.</p>' }
-  h.session.customer.value = { id:7 }
-  h.store.loadMine
-    .mockImplementationOnce(() => staleHistory.promise)
-    .mockResolvedValueOnce()
-  h.store.current.mockResolvedValue({ document:selected })
-  await mountCenter('/consents/personal-data'); await nextTick()
-  h.session.customer.value = { id:8 }
-  await flushPromises()
-  staleHistory.resolve(); await flushPromises()
-  expect(wrapper.find('.service-unavailable-page').exists()).toBe(false)
-  expect(wrapper.find('.consent-page__panel--personal').text()).toContain('Документ нового покупателя.')
-  expect(h.store.current).toHaveBeenCalledTimes(1)
-})
-
-
-
-it('ignores a stale personal document response after the customer changes', async () => {
-  const stalePersonal = deferred()
-  const selected = { ...document, html:'<p>Актуальное персональное согласие.</p>' }
-  h.session.customer.value = { id:7 }
-  h.store.current
-    .mockImplementationOnce(() => stalePersonal.promise)
-    .mockResolvedValueOnce({ document:selected })
-  await mountCenter('/consents/personal-data'); await nextTick()
-  h.session.customer.value = { id:8 }
-  await flushPromises()
-  stalePersonal.resolve({ document:{ ...document, html:'<p>Устаревшее персональное согласие.</p>' } }); await flushPromises()
-  expect(wrapper.find('.consent-page__panel--personal').text()).toContain('Актуальное персональное согласие.')
-  expect(wrapper.text()).not.toContain('Устаревшее персональное согласие.')
-})
-it('does not start loaders whose route or identity scope has already expired', async () => {
-  await mountCenter('/consents/personal-data'); await flushPromises()
-  h.store.current.mockClear()
-  h.store.loadMine.mockClear()
-  const expired = () => false
-  const action = vi.fn()
-  await state().perform(action, undefined, expired)
-  await state().showPersonal(expired)
-  expect(action).not.toHaveBeenCalled()
-  expect(h.store.current).not.toHaveBeenCalled()
-  expect(h.store).not.toHaveProperty('loadCookies')
-  expect(h.store.loadMine).not.toHaveBeenCalled()
-})
-
-it('retries the failed explicit consent section', async () => {
-  h.session.customer.value = { id:7 }
-  h.store.personalProblem.value = null
-  h.store.loadMine.mockReset().mockResolvedValue()
-  await mountCenter('/consents/personal-data'); await flushPromises()
-  h.store.personalProblem.value = denied()
-  h.store.loadMine.mockImplementation(async () => { h.store.personalProblem.value = null })
-  await nextTick()
-  await click('Повторить')
-  expect(wrapper.find('.service-unavailable-page').exists()).toBe(false)
-})
-it('reloads a failed cached catalogue before refreshing an explicit consent section', async () => {
-  h.session.customer.value = { id:7 }
-  await mountCenter('/consents/personal-data'); await flushPromises()
-  h.store.opsProblem.value = denied()
-  h.store.loadOps.mockImplementation(async () => { h.store.opsProblem.value = null })
-  await nextTick()
-  expect(wrapper.find('.service-unavailable-page').exists()).toBe(false)
-  expect(wrapper.find('.consent-page__alert').exists()).toBe(true)
-  await click('Повторить')
-  expect(h.store.loadOps).toHaveBeenCalledTimes(1)
-  expect(wrapper.find('.service-unavailable-page').exists()).toBe(false)
-
-  wrapper.unmount()
-  h.session.customer.value = { id:7 }
-  h.store.opsProblem.value = null
-  h.store.loadOps.mockClear()
-  await mountCenter('/consents/personal-data'); await flushPromises()
-  h.store.opsProblem.value = denied()
-  h.store.loadOps.mockImplementation(async () => { h.store.opsProblem.value = null })
-  await nextTick()
-  await click('Повторить')
-  expect(h.store.loadOps).toHaveBeenCalledTimes(1)
-  expect(wrapper.find('.service-unavailable-page').exists()).toBe(false)
-})
-it('stops consent document loading when catalogue recovery outlives the page', async () => {
-  h.session.customer.value = { id:7 }
-  await mountCenter('/consents'); await flushPromises()
-  const pendingOps = deferred()
-  h.store.current.mockClear()
-  h.store.opsProblem.value = denied()
-  h.store.loadOps.mockImplementationOnce(() => pendingOps.promise)
-  state().openPersonal()
-  await nextTick()
-  wrapper.unmount()
-  pendingOps.resolve({ kinds }); await flushPromises()
-  expect(h.store.current).not.toHaveBeenCalled()
-
-  h.store.opsProblem.value = null
-  await mountCenter('/consents/personal-data'); await flushPromises()
-  const personalOps = deferred()
-  h.store.current.mockClear()
-  h.store.loadMine.mockClear()
-  h.store.opsProblem.value = denied()
-  h.store.loadOps.mockImplementationOnce(() => personalOps.promise)
-  state().openPersonal()
-  await nextTick()
-  wrapper.unmount()
-  personalOps.resolve({ kinds }); await flushPromises()
-  expect(h.store.loadMine).not.toHaveBeenCalled()
-  expect(h.store.current).not.toHaveBeenCalled()
-})
-it('refreshes only the visible explicit consent section when returning to the page', async () => {
-  h.session.customer.value = { id:7 }
-  vi.spyOn(globalThis.document, 'visibilityState', 'get').mockReturnValue('visible')
-  await mountCenter('/consents/personal-data'); await flushPromises()
-  h.store.current.mockClear()
-  globalThis.dispatchEvent(new globalThis.Event('focus')); await flushPromises()
-  expect(h.store.current).toHaveBeenCalledTimes(1)
-  expect(h.store.current).toHaveBeenCalledWith(LEGAL_DOCUMENT_KIND.PERSONAL_DATA_CONSENT)
-
-  wrapper.unmount()
-  await mountCenter('/consents/personal-data'); await flushPromises()
-  h.store.current.mockClear()
-  globalThis.dispatchEvent(new globalThis.Event('focus')); await flushPromises()
-  expect(h.store.current).toHaveBeenCalledTimes(1)
-  expect(h.store.current).toHaveBeenCalledWith(LEGAL_DOCUMENT_KIND.PERSONAL_DATA_CONSENT)
-})
-it('preserves unsent consent choices on foreground refresh until the document changes', async () => {
-  h.session.customer.value = { id:7 }
-  vi.spyOn(globalThis.document, 'visibilityState', 'get').mockReturnValue('visible')
-  await mountCenter('/consents'); await flushPromises()
-  const personalChoice = wrapper.find('.consent-page__panel--personal input[type=checkbox]')
-  await personalChoice.setValue(true)
-
-  globalThis.dispatchEvent(new globalThis.Event('focus')); await flushPromises()
-  expect(personalChoice.element.checked).toBe(true)
-
-  const replacement = { ...document, id:'22222222-2222-2222-2222-222222222222', contentHash:'b'.repeat(64) }
-  h.store.current.mockResolvedValue({ document:replacement })
-  globalThis.dispatchEvent(new globalThis.Event('focus')); await flushPromises()
-  expect(personalChoice.element.checked).toBe(false)
-})
-it('queues a foreground refresh without superseding an active consent operation', async () => {
-  const pendingGrant = deferred()
-  h.session.customer.value = { id:7 }
-  h.store.grant.mockImplementationOnce(() => pendingGrant.promise)
-  vi.spyOn(globalThis.document, 'visibilityState', 'get').mockReturnValue('visible')
-  await mountCenter('/consents/personal-data'); await flushPromises()
-  await wrapper.find('input[type=checkbox]').setValue(true)
-  h.store.current.mockClear()
-  button('Дать согласие').trigger('click')
-  await nextTick()
-  globalThis.dispatchEvent(new globalThis.Event('focus'))
-  await nextTick()
-  expect(h.store.current).not.toHaveBeenCalled()
-  pendingGrant.resolve(); await flushPromises()
-  expect(h.store.current).toHaveBeenCalledTimes(1)
-  expect(state().busy).toBe(false)
-})
-it('cancels a foreground refresh when the customer identity changes', async () => {
-  const staleDocument = deferred()
-  h.session.customer.value = { id:7 }
-  vi.spyOn(globalThis.document, 'visibilityState', 'get').mockReturnValue('visible')
-  await mountCenter('/consents'); await flushPromises()
-  h.store.current.mockClear()
-  h.store.current
-    .mockImplementationOnce(() => staleDocument.promise)
-    .mockResolvedValue({ document })
-
-  globalThis.dispatchEvent(new globalThis.Event('focus'))
-  await vi.waitFor(() => expect(h.store.current).toHaveBeenCalledTimes(1))
-  h.session.customer.value = { id:8 }
-  await flushPromises()
-  expect(h.store.current.mock.calls.filter(([kind]) => kind === LEGAL_DOCUMENT_KIND.PERSONAL_DATA_CONSENT)).toHaveLength(2)
-
-  staleDocument.resolve({ document }); await flushPromises()
-  expect(h.store.current.mock.calls.filter(([kind]) => kind === LEGAL_DOCUMENT_KIND.PERSONAL_DATA_CONSENT)).toHaveLength(2)
-  expect(state().personalDocument).toEqual(document)
-})
-
-
-
-
-
-
-
-
 it('renders a safe alert for rejected canonical HTML', () => {
   wrapper = mount(LegalDocumentReader, { props:{ document:{ ...document, html:'<script>alert(1)</script>' } } })
   expect(wrapper.find('script').exists()).toBe(false)
@@ -890,86 +448,6 @@ it('renders the canonical document heading once and restores focus after a dialo
   expect(wrapper.find('.ui-dialog__header').exists()).toBe(false)
 })
 
-
-
-
-
-it('opens a consent hash that was present before the customer session was restored', async () => {
-  await mountCenter('/consents'); await flushPromises()
-  expect(wrapper.get('h1').text()).toBe('Согласие на обработку персональных данных')
-  expect(wrapper.find('.consent-page__panel--personal').exists()).toBe(false)
-  expect(button('Дать согласие')).toBeUndefined()
-  h.session.customer.value = { id:7 }
-  await flushPromises()
-  expect(wrapper.get('h1').text()).toBe('Согласие на обработку персональных данных')
-  expect(wrapper.find('.consent-page__panel--personal').exists()).toBe(true)
-  expect(button('Дать согласие')).toBeTruthy()
-  expect(h.store.current).toHaveBeenCalledWith(LEGAL_DOCUMENT_KIND.PERSONAL_DATA_CONSENT)
-  await click('На главную')
-  expect(router.currentRoute.value.name).toBe('home')
-})
-
-it('reuses idempotent consent keys but only refreshes status after a withdrawal failure', async () => {
-  h.session.customer.value = { id:7 }
-  await mountCenter('/consents/personal-data'); await flushPromises()
-  await wrapper.findAll('input[type=checkbox]')[0].setValue(true)
-  h.store.grant.mockRejectedValueOnce(denied())
-  await click('Дать согласие'); await click('Повторить')
-  expect(h.store.grant.mock.calls[1][1]).toBe(h.store.grant.mock.calls[0][1])
-  h.store.loadMine.mockClear()
-  h.store.requestWithdrawal.mockRejectedValue(denied())
-  await click('Прекратить использовать систему и отозвать согласие на хранение и обработку персональных данных')
-  await click('Повторить')
-  expect(h.store.requestWithdrawal).toHaveBeenCalledTimes(1)
-  expect(h.store.loadMine).toHaveBeenCalledTimes(1)
-})
-it('starts a new personal consent decision after logout and same-customer login', async () => {
-  h.session.customer.value = { id:7 }
-  await mountCenter('/consents/personal-data'); await flushPromises()
-  await wrapper.find('input[type=checkbox]').setValue(true)
-  h.store.grant.mockRejectedValueOnce(denied())
-  await click('Дать согласие')
-  const failedKey = h.store.grant.mock.calls[0][1]
-
-  h.session.customer.value = null
-  await flushPromises()
-  h.session.customer.value = { id:7 }
-  await flushPromises()
-  await wrapper.find('.consent-page__panel--personal input[type=checkbox]').setValue(true)
-  await click('Дать согласие')
-  expect(h.store.grant.mock.calls[1][1]).not.toBe(failedKey)
-})
-
-it('disables repeat submission while the latest request is pending and enables it after processing', async () => {
-  h.session.customer.value = { id:7 }
-  h.store.mine.value = { statuses:[], history:[], withdrawalRequest:{ customerId:7, requestedAt:'2026-09-01T10:00:00Z', processed:false } }
-  await mountCenter('/consents/personal-data'); await flushPromises()
-  const action = button('Прекратить использовать систему и отозвать согласие на хранение и обработку персональных данных')
-  expect(action.attributes('disabled')).toBeDefined()
-  expect(wrapper.text()).toContain('Ожидает ручной обработки')
-  h.store.mine.value.withdrawalRequest.processed = true; await nextTick()
-  expect(action.attributes('disabled')).toBeUndefined()
-})
-
-it('reloads changed versions and resets affirmation without accepting the replacement automatically', async () => {
-  const changed = new ProblemError(coreProblem(409, 'consent-version-changed'))
-  h.session.customer.value = { id:7 }
-  await mountCenter('/consents/personal-data'); await flushPromises()
-  await wrapper.findAll('input[type=checkbox]')[0].setValue(true)
-  h.store.grant.mockRejectedValueOnce(changed)
-  await click('Дать согласие')
-  expect(wrapper.findAll('input[type=checkbox]')[0].element.checked).toBe(false)
-  expect(h.store.grant).toHaveBeenCalledTimes(1)
-  await wrapper.findAll('input[type=checkbox]')[0].setValue(true)
-  h.store.grant.mockRejectedValueOnce(changed); h.store.current.mockRejectedValueOnce(denied())
-  await click('Дать согласие')
-  expect(wrapper.findComponent(LegalDocumentReader).exists()).toBe(false)
-  expect(wrapper.text()).toContain('Сервис временно недоступен. Пожалуйста, повторите позже')
-  await click('Повторить')
-  expect(wrapper.findComponent(LegalDocumentReader).exists()).toBe(true)
-  expect(h.store.grant).toHaveBeenCalledTimes(2)
-})
-
 it('waits for a far-future legal replacement across the browser timer limit', async () => {
   vi.useFakeTimers({ toFake:['setTimeout', 'clearTimeout'] })
   const serverNow = '2026-09-10T08:00:00.000Z'
@@ -985,4 +463,387 @@ it('waits for a far-future legal replacement across the browser timer limit', as
   await vi.advanceTimersByTimeAsync(100); await flushPromises()
   expect(wrapper.get('.consent-page__document-title').text()).toBe('Будущая редакция')
   expect(h.store.current).toHaveBeenCalledTimes(2)
+})
+
+function customerConsents(statuses = ['renewal-required', 'current']) {
+  return {
+    customerId:7, serverNow:'2026-10-04T12:00:00Z', nextChangeAt:null,
+    statuses:kinds.map((kind, index) => ({
+      kind:kind.value, status:statuses[index],
+      requiredVersion:statuses[index] === 'unavailable' ? null : id,
+      acceptedVersion:null, decidedAt:null
+    })),
+    history:[], withdrawalRequest:null
+  }
+}
+function authenticate(statuses) {
+  h.session.customer.value = { id:7 }
+  h.store.mine.value = customerConsents(statuses)
+  h.store.current.mockImplementation(async kind => ({
+    document:{ ...document, kind, title:kinds.find(row => row.value === kind).name },
+    serverNow:'2026-10-04T12:00:00Z', nextChangeAt:null
+  }))
+}
+const withdrawalLabel = 'Прекратить использовать систему и отозвать согласие на хранение и обработку персональных данных'
+
+it.each(['/consents', '/consents/personal-data'])('lists both kinds and current-version links on %s', async path => {
+  authenticate()
+  await mountCenter(path); await flushPromises()
+  expect(wrapper.get('h1').text()).toBe('Согласия')
+  expect(wrapper.find('.consent-page__heading button').exists()).toBe(false)
+  const rows = wrapper.findAll('.consent-documents__row')
+  expect(rows.map(row => row.get('h3').text())).toEqual(kinds.map(kind => kind.name))
+  expect(rows[0].text()).toContain('Требуется новое согласие')
+  expect(rows[1].text()).toContain('Актуально')
+  expect(rows.map(row => row.get('a').attributes('href'))).toEqual(kinds.map(kind => '/legal/' + kind.routeAlias))
+  expect(button('Дать согласие')).toBeTruthy()
+  expect(button('Принять соглашение')).toBeUndefined()
+  expect(wrapper.find('.consent-history-section').element.tagName).toBe('SECTION')
+  expect(wrapper.text()).toContain('Записей пока нет.')
+  expect(wrapper.findComponent(LegalDocumentReader).exists()).toBe(false)
+  expect(h.store.current).not.toHaveBeenCalled()
+  const footer = mount(SiteFooter, { props:{ authenticated:true }, global:{ plugins:[router] } })
+  try { expect(footer.findAll('a').at(-1).attributes('href')).toBe('/consents') }
+  finally { footer.unmount() }
+})
+
+it('shows all document kinds in an expanded newest-first history with exact artifact links', async () => {
+  authenticate(['current', 'current'])
+  const historicId = '22222222-2222-2222-2222-222222222222'
+  h.store.mine.value.history = [
+    { id:'older', kind:1, decision:'grant', at:'2026-09-09T10:00:00Z', documentId:id, displayVersion:'1' },
+    { id:'newer', kind:2, decision:'grant', at:'2026-09-14T20:14:00Z', documentId:historicId, displayVersion:'3' },
+    { id:'middle', kind:1, decision:'refuse', at:'2026-09-14T16:05:00Z', documentId:id, displayVersion:'2' }
+  ]
+  await mountCenter('/consents'); await flushPromises()
+  const list = wrapper.get('.consent-history')
+  expect(list.element.tagName).toBe('UL')
+  expect(list.findAll('strong').map(row => row.text())).toEqual([kinds[1].name, kinds[0].name, kinds[0].name])
+  expect(list.findAll('a').map(link => [link.text(), link.attributes('href')])).toEqual([
+    ['Версия 3', '/legal/' + historicId], ['Версия 2', '/legal/' + id], ['Версия 1', '/legal/' + id]
+  ])
+  expect(list.findAll('li')[1].text()).toContain('Отказ')
+  expect(list.findAll('li')[0].text()).toContain('14.09.2026, 23:14 МСК')
+  expect(wrapper.find('details').exists()).toBe(false)
+  await list.get('a').trigger('click'); await flushPromises()
+  expect(router.currentRoute.value.params.documentRef).toBe(historicId)
+})
+
+it('lists 200 returned decisions without hiding an older current consent status', async () => {
+  authenticate(['current', 'current'])
+  h.store.mine.value.history = Array.from({ length:200 }, (_, index) => ({
+    id:String(index), kind:2, decision:'grant', documentId:id,
+    displayVersion:String(index), at:'2026-10-04T12:00:00Z'
+  }))
+  await mountCenter('/consents'); await flushPromises()
+  expect(wrapper.findAll('.consent-history li')).toHaveLength(200)
+  expect(wrapper.findAll('.consent-documents__row')[0].text()).toContain('Актуально')
+  expect(button('Дать согласие')).toBeUndefined()
+})
+
+it('shows unavailable documents without links or renewal actions', async () => {
+  authenticate(['unavailable', 'missing'])
+  h.store.mine.value.statuses.pop()
+  await mountCenter('/consents'); await flushPromises()
+  expect(wrapper.findAll('.consent-documents__row').every(row => row.text().includes('Документ недоступен'))).toBe(true)
+  expect(wrapper.find('.consent-documents__row a').exists()).toBe(false)
+  expect(button('Дать согласие')).toBeUndefined()
+  expect(button('Принять соглашение')).toBeUndefined()
+})
+
+it('keeps a stable heading and a loading state until the authenticated history arrives', async () => {
+  h.session.customer.value = { id:7 }
+  const pending = deferred()
+  h.store.loadMine.mockReturnValueOnce(pending.promise)
+  await mountCenter('/consents'); await nextTick()
+  expect(wrapper.get('h1').text()).toBe('Согласия')
+  expect(wrapper.get('[aria-label="Загрузка согласий"]').text()).toContain('Загружаем согласия')
+  expect(wrapper.text()).not.toContain('Записей пока нет.')
+  h.store.mine.value = customerConsents()
+  pending.resolve(); await flushPromises()
+  expect(wrapper.find('.consent-documents').exists()).toBe(true)
+})
+
+it('loads history after session restoration and keeps anonymous direct access', async () => {
+  await mountCenter('/consents'); await flushPromises()
+  expect(wrapper.text()).toContain('Войдите в аккаунт')
+  expect(h.store.loadMine).not.toHaveBeenCalled()
+  authenticate()
+  await flushPromises()
+  expect(h.store.loadMine).toHaveBeenCalledOnce()
+  expect(wrapper.find('.consent-documents').exists()).toBe(true)
+  expect(button('На главную')).toBeUndefined()
+})
+
+it.each([1, 2])('renews only selected kind %s in the shared dialog', async kind => {
+  authenticate(['missing', 'renewal-required'])
+  await mountCenter('/consents'); await flushPromises()
+  const action = kind === 1 ? 'Дать согласие' : 'Принять соглашение'
+  await click(action)
+  expect(h.store.missingKinds).toHaveBeenCalledWith([kind])
+  expect(h.store.current).toHaveBeenCalledWith(kind)
+  const choices = wrapper.findAll('.consent-registration input[type="checkbox"]')
+  expect(choices).toHaveLength(1)
+  expect(choices[0].element.checked).toBe(false)
+  expect(button('Подтвердить и продолжить').attributes('disabled')).toBeDefined()
+  await click(kinds[kind - 1].name)
+  expect(wrapper.findComponent(LegalDocumentReader).exists()).toBe(true)
+  await click('Вернуться к подтверждению')
+  await wrapper.get('.consent-registration input[type="checkbox"]').setValue(true)
+  await click('Подтвердить и продолжить')
+  expect(h.store.grant).toHaveBeenCalledWith(expect.objectContaining({ kind, id }), expect.any(String))
+  expect(wrapper.find('.consent-registration').exists()).toBe(false)
+  expect(h.store.mine.value.statuses[kind - 1].status).toBe('current')
+  expect(wrapper.emitted('personal-consent-granted')?.length ?? 0).toBe(kind === 1 ? 1 : 0)
+})
+
+it('cancels renewal without granting consent and returns focus to the action', async () => {
+  authenticate()
+  await mountCenter('/consents', true); await flushPromises()
+  button('Дать согласие').element.focus()
+  await click('Дать согласие')
+  await click('Отмена')
+  expect(h.store.grant).not.toHaveBeenCalled()
+  expect(wrapper.emitted('personal-consent-granted')).toBeUndefined()
+  expect(globalThis.document.activeElement).toBe(button('Дать согласие').element)
+  expect(button('Дать согласие').attributes('disabled')).toBeUndefined()
+})
+
+it('keeps failed renewal choices and the retry key with one dialog error owner', async () => {
+  authenticate()
+  h.store.grant.mockRejectedValueOnce(denied())
+  await mountCenter('/consents'); await flushPromises()
+  await click('Дать согласие')
+  await wrapper.get('.consent-registration input[type="checkbox"]').setValue(true)
+  await click('Подтвердить и продолжить')
+  const firstKey = h.store.grant.mock.calls[0][1]
+  expect(wrapper.findAll('.ui-alert')).toHaveLength(1)
+  expect(wrapper.find('.consent-page__alert').exists()).toBe(false)
+  expect(wrapper.get('.consent-registration input').element.checked).toBe(true)
+  await click('Подтвердить и продолжить')
+  expect(h.store.grant.mock.calls[1][1]).toBe(firstKey)
+  expect(wrapper.emitted('personal-consent-granted')).toHaveLength(1)
+})
+
+it('refreshes changed renewal versions without accepting the replacement', async () => {
+  authenticate()
+  const replacement = { ...document, id:'22222222-2222-2222-2222-222222222222', contentHash:'b'.repeat(64) }
+  h.store.grant.mockRejectedValueOnce(new ProblemError(coreProblem(409, 'consent-version-changed')))
+  await mountCenter('/consents'); await flushPromises()
+  await click('Дать согласие')
+  await wrapper.get('.consent-registration input').setValue(true)
+  const firstKey = state().renewal.state.documents[0].key
+  h.store.current.mockResolvedValue({ document:replacement, serverNow:'2026-10-04T12:00:00Z', nextChangeAt:null })
+  await click('Подтвердить и продолжить')
+  expect(wrapper.get('.consent-registration input').element.checked).toBe(false)
+  expect(state().renewal.state.documents[0].key).not.toBe(firstKey)
+  expect(h.store.grant).toHaveBeenCalledOnce()
+  expect(wrapper.emitted('personal-consent-granted')).toBeUndefined()
+})
+
+it('recovers renewal preparation failures in place', async () => {
+  authenticate()
+  h.store.current.mockRejectedValueOnce(denied())
+  await mountCenter('/consents'); await flushPromises()
+  await click('Дать согласие')
+  expect(wrapper.get('.consent-page__alert').text()).toBe('Сервис временно недоступен. Пожалуйста, повторите позже')
+  expect(wrapper.find('.consent-registration').exists()).toBe(false)
+  await click('Повторить')
+  expect(wrapper.find('.consent-page__alert').exists()).toBe(false)
+  await click('Дать согласие')
+  expect(wrapper.find('.consent-registration').exists()).toBe(true)
+})
+
+it('ignores a late renewal grant after identity changes', async () => {
+  authenticate()
+  const pending = deferred()
+  h.store.grant.mockReturnValueOnce(pending.promise)
+  await mountCenter('/consents'); await flushPromises()
+  await click('Дать согласие')
+  await wrapper.get('.consent-registration input').setValue(true)
+  button('Подтвердить и продолжить').trigger('click')
+  await nextTick()
+  h.session.customer.value = null
+  await flushPromises()
+  pending.resolve(); await flushPromises()
+  expect(wrapper.find('.consent-registration').exists()).toBe(false)
+  expect(wrapper.emitted('personal-consent-granted')).toBeUndefined()
+  expect(wrapper.find('.consent-history-section').exists()).toBe(false)
+})
+
+it('ignores renewal preparation completed after unmount', async () => {
+  authenticate()
+  const pending = deferred()
+  h.store.current.mockReturnValueOnce(pending.promise)
+  await mountCenter('/consents'); await flushPromises()
+  button('Дать согласие').trigger('click')
+  await nextTick(); await nextTick()
+  wrapper.unmount()
+  pending.resolve({ document }); await flushPromises()
+  expect(h.store.grant).not.toHaveBeenCalled()
+  expect(wrapper.emitted('personal-consent-granted')).toBeUndefined()
+})
+
+it('owns history failures until recovery and releases notice suppression on unmount', async () => {
+  authenticate()
+  const release = vi.fn()
+  h.store.acquireNoticeSuppression.mockReturnValue(release)
+  h.store.loadMine.mockRejectedValueOnce(denied())
+  await mountCenter('/consents'); await flushPromises()
+  expect(wrapper.find('.service-unavailable-page').exists()).toBe(false)
+  expect(wrapper.get('.consent-page__alert').text()).toBe('Сервис временно недоступен. Пожалуйста, повторите позже')
+  expect(release).not.toHaveBeenCalled()
+  await click('Повторить')
+  expect(release).toHaveBeenCalledOnce()
+  expect(wrapper.find('.consent-page__alert').exists()).toBe(false)
+  h.store.loadMine.mockRejectedValueOnce(denied())
+  vi.spyOn(globalThis.document, 'visibilityState', 'get').mockReturnValue('visible')
+  globalThis.dispatchEvent(new globalThis.Event('focus')); await flushPromises()
+  wrapper.unmount()
+  expect(release).toHaveBeenCalledTimes(2)
+})
+
+it('does not start customer history after catalogue recovery outlives the page', async () => {
+  authenticate()
+  const pending = deferred()
+  h.store.opsProblem.value = denied()
+  h.store.loadOps.mockReturnValueOnce(pending.promise)
+  await mountCenter('/consents'); await nextTick()
+  wrapper.unmount()
+  pending.resolve({ kinds }); await flushPromises()
+  expect(h.store.loadMine).not.toHaveBeenCalled()
+})
+
+it('discards stale history failures after switching customer identity', async () => {
+  authenticate()
+  const pending = deferred()
+  h.store.loadMine.mockReturnValueOnce(pending.promise)
+  await mountCenter('/consents'); await nextTick()
+  h.session.customer.value = { id:8 }; await flushPromises()
+  pending.reject(denied()); await flushPromises()
+  expect(wrapper.find('.consent-page__alert').exists()).toBe(false)
+  expect(h.store.loadMine).toHaveBeenCalledTimes(2)
+})
+
+it('queues foreground history refresh until renewal is closed', async () => {
+  authenticate()
+  await mountCenter('/consents'); await flushPromises()
+  await click('Дать согласие')
+  h.store.loadMine.mockClear()
+  vi.spyOn(globalThis.document, 'visibilityState', 'get').mockReturnValue('visible')
+  globalThis.dispatchEvent(new globalThis.Event('focus')); await flushPromises()
+  expect(h.store.loadMine).not.toHaveBeenCalled()
+  await click('Отмена')
+  expect(h.store.loadMine).toHaveBeenCalledOnce()
+})
+
+it('retains a processing record and disables duplicate withdrawal requests', async () => {
+  authenticate()
+  h.store.mine.value.withdrawalRequest = { customerId:7, requestedAt:'2026-10-04T10:00:00Z', processed:false }
+  await mountCenter('/consents'); await flushPromises()
+  expect(button(withdrawalLabel).attributes('disabled')).toBeDefined()
+  await state().requestWithdrawal()
+  expect(h.store.requestWithdrawal).not.toHaveBeenCalled()
+  expect(wrapper.get('.withdrawal-record').text()).toContain('Ожидает ручной обработки')
+  h.store.mine.value.withdrawalRequest.processed = true
+  await nextTick()
+  expect(button(withdrawalLabel).attributes('disabled')).toBeUndefined()
+  expect(wrapper.get('.withdrawal-record').text()).toContain('Обработан')
+  await click(withdrawalLabel)
+  expect(h.store.requestWithdrawal).toHaveBeenCalledOnce()
+})
+
+it('refreshes status instead of resubmitting an ambiguous withdrawal failure', async () => {
+  authenticate()
+  h.store.requestWithdrawal.mockRejectedValueOnce(denied())
+  await mountCenter('/consents'); await flushPromises()
+  await click(withdrawalLabel)
+  expect(wrapper.find('.consent-page__alert').exists()).toBe(true)
+  await click('Повторить')
+  expect(h.store.requestWithdrawal).toHaveBeenCalledOnce()
+  expect(h.store.loadMine).toHaveBeenCalledTimes(2)
+  expect(wrapper.find('.consent-page__alert').exists()).toBe(false)
+})
+
+it('prevents renewal and withdrawal while another foreground action is pending', async () => {
+  authenticate()
+  const pending = deferred()
+  h.store.requestWithdrawal.mockReturnValueOnce(pending.promise)
+  await mountCenter('/consents'); await flushPromises()
+  button(withdrawalLabel).trigger('click')
+  await nextTick()
+  await state().renew(1)
+  await state().requestWithdrawal()
+  expect(h.store.missingKinds).not.toHaveBeenCalled()
+  expect(h.store.requestWithdrawal).toHaveBeenCalledOnce()
+  pending.resolve(); await flushPromises()
+  h.session.customer.value = null; await flushPromises()
+  await state().renew(1)
+  await state().requestWithdrawal()
+  expect(h.store.missingKinds).not.toHaveBeenCalled()
+})
+
+it('keeps Print disabled until the document arrives and places its only action in the header', async () => {
+  const pending = deferred()
+  h.store.current.mockReturnValueOnce(pending.promise)
+  await mountCenter('/legal/user-agreement'); await nextTick()
+  expect(button('Печать').attributes('disabled')).toBeDefined()
+  pending.resolve({ document }); await flushPromises()
+  expect(button('Печать').attributes('disabled')).toBeUndefined()
+  expect(wrapper.get('.legal-document-page__heading button').text()).toBe('Печать')
+  expect(wrapper.findAll('button').map(item => item.text())).toEqual(['Печать'])
+  expect(wrapper.find('.legal-document-page__panel button').exists()).toBe(false)
+  expect(wrapper.get('#document-content').findComponent(LegalDocumentReader).exists()).toBe(true)
+})
+
+it('uses a UUID read for historical documents and preserves the saved artifact', async () => {
+  const artifact = { ...document, displayVersion:'старое', html:'<h1>Архив</h1><p>Сохранённый текст.</p>' }
+  h.store.read.mockResolvedValue(artifact)
+  await mountCenter('/legal/' + id); await flushPromises()
+  expect(h.store.read).toHaveBeenCalledWith(id)
+  expect(h.store.current).not.toHaveBeenCalled()
+  expect(wrapper.get('.legal-document__body').text()).toBe('АрхивСохранённый текст.')
+  vi.stubGlobal('print', vi.fn(() => {
+    const printed = globalThis.document.getElementById('sarafan-print-document')
+    expect(printed.textContent).toContain('Сохранённый текст.')
+    expect(printed.textContent).not.toContain('Печать')
+    expect(printed.textContent).toContain('старое')
+  }))
+  await click('Печать')
+  expect(globalThis.document.getElementById('sarafan-print-document')).toBeNull()
+})
+
+
+it('recovers a background history failure that has no foreground retry attempt', async () => {
+  authenticate()
+  await mountCenter('/consents'); await flushPromises()
+  h.store.personalProblem.value = denied()
+  h.store.loadMine.mockImplementationOnce(async () => { h.store.personalProblem.value = null })
+  await nextTick()
+  expect(wrapper.get('.consent-page__alert').text()).toBe('Сервис временно недоступен. Пожалуйста, повторите позже')
+  await click('Повторить')
+  expect(wrapper.find('.consent-page__alert').exists()).toBe(false)
+  expect(h.store.loadMine).toHaveBeenCalledTimes(2)
+})
+
+it('refreshes a notice catalogue on tab return and retries a later catalogue failure', async () => {
+  await mountCenter(); await flushPromises()
+  vi.spyOn(globalThis.document, 'visibilityState', 'get').mockReturnValue('visible')
+  globalThis.dispatchEvent(new globalThis.Event('focus')); await flushPromises()
+  expect(h.store.loadOps).toHaveBeenCalledTimes(2)
+  h.store.opsProblem.value = denied()
+  h.store.loadOps.mockImplementationOnce(async () => { h.store.opsProblem.value = null })
+  await nextTick()
+  await click('Повторить')
+  expect(wrapper.find('.consent-recovery-notice').exists()).toBe(false)
+  expect(h.store.loadOps).toHaveBeenCalledTimes(3)
+})
+
+it('rejects an unknown legal alias with recoverable page feedback', async () => {
+  h.store.read.mockRejectedValue(createInternalProblem('invalidInput'))
+  await mountCenter('/legal/unknown-document'); await flushPromises()
+  expect(h.store.current).not.toHaveBeenCalled()
+  expect(h.store.read).toHaveBeenCalledWith('unknown-document')
+  expect(wrapper.find('.consent-page__alert').exists()).toBe(true)
+  expect(button('Повторить')).toBeTruthy()
 })

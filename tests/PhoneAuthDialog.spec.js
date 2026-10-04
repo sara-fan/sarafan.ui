@@ -732,15 +732,12 @@ describe('PhoneAuthDialog', () => {
   })
 
   it.each([
-    { nextStep:1, required:[2], documentKind:2, browserBack:true },
-    { nextStep:1, required:[2], documentKind:2, browserBack:false },
-    { nextStep:2, required:[2, 1], documentKind:1, browserBack:true },
-    { nextStep:2, required:[2, 1], documentKind:1, browserBack:false },
-    { nextStep:2, required:[2, 1], documentKind:2, browserBack:true },
-    { nextStep:2, required:[2, 1], documentKind:2, browserBack:false },
-    { nextStep:2, required:[2, 1], documentKind:1, browserBack:false, failedDocument:true },
-    { nextStep:2, required:[2, 1], documentKind:1, browserBack:false, sameDocumentOrigin:true },
-    { nextStep:1, required:[2], documentKind:2, browserBack:true, parentRemainsOpen:true }
+    { nextStep:1, required:[2], documentKind:2 },
+    { nextStep:2, required:[2, 1], documentKind:1 },
+    { nextStep:2, required:[2, 1], documentKind:2 },
+    { nextStep:2, required:[2, 1], documentKind:1, failedDocument:true },
+    { nextStep:2, required:[2, 1], documentKind:1, sameDocumentOrigin:true },
+    { nextStep:1, required:[2], documentKind:2, parentRemainsOpen:true }
   ])('restores the same requirements and choices after reading a document %#', async scenario => {
     const router = testRouter()
     const origin = scenario.sameDocumentOrigin ? '/legal/' + documentIds[scenario.documentKind] : '/'
@@ -781,10 +778,9 @@ describe('PhoneAuthDialog', () => {
         global:{ plugins:[router, createSarafanVuetify()], stubs:{ VDialog:{ props:['modelValue'], template:'<section v-if="modelValue"><slot /></section>' } } }
       })
       await flushPromises()
-      const back = reader.findAll('button').find(item => item.text().startsWith('Вернуться'))
-      expect(back.text()).toBe(scenario.nextStep === 2 ? 'Вернуться к регистрации' : 'Вернуться ко входу')
-      if (scenario.browserBack) router.back()
-      else await back.trigger('click')
+      expect(reader.findAll('button').some(item => item.text().startsWith('Вернуться'))).toBe(false)
+      expect(router.currentRoute.value.hash).toBe(scenario.sameDocumentOrigin ? '#document-content' : '')
+      router.back()
       await vi.waitFor(() => expect(router.currentRoute.value.fullPath).toBe(origin))
       await flushPromises()
       expect(wrapper.emitted('update:modelValue').at(-1)).toEqual([!scenario.parentRemainsOpen])

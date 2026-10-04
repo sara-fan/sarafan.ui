@@ -245,4 +245,22 @@ describe('OrdersView', () => {
 
     expect(h.store.dispose).toHaveBeenCalledOnce()
   })
+  it.each([
+    [500, 'Рассчёт не проводился', false],
+    [600, 'Рассчёт не проводился', false],
+    [0, 'Стоимость уточняется', true],
+    [400, 'Стоимость уточняется', true]
+  ])('renders unknown prices and delivery placeholders for status %s', async (status, price, deliveryPlaceholder) => {
+    h.store.statusFor = vi.fn(value => orderStatusFor(ops, value))
+    h.store.orders.value = [{
+      orderNumber:'12345678-5', status, productName:'Товар', storeName:'Магазин', imageUrl:null,
+      sellerPrice:null, quantity:1, createdAt:'2026-09-14T10:00:00Z', pricing:{ ...forecastPricing }
+    }]
+    const { wrapper } = await mountView()
+    await flushPromises()
+    expect(wrapper.get('.order-card .customer-cost__headline strong').text()).toBe(price)
+    expect(wrapper.get('.order-card__details').text().includes('Срок доставки уточняется')).toBe(deliveryPlaceholder)
+    expect(wrapper.get('.order-card__details').text()).toContain('Создан')
+  })
+
 })
