@@ -669,6 +669,41 @@ describe('ProductView product review', () => {
     expect(useProductDraft().draft.value.productName).toBe('Товар')
     expect(wrapper.get('button[type="submit"]').attributes('disabled')).toBeUndefined()
   })
+  it.each(['renewal-required', 'unavailable'])('preserves the active-session order draft when the agreement is %s', async agreementStatus => {
+    h.session.customer.value = { id:7 }
+    const statuses = new Map([[1, 'current'], [2, agreementStatus]])
+    h.consents.missingKinds.mockImplementation(async kinds => kinds.filter(kind => statuses.get(kind) !== 'current'))
+    h.consents.grant.mockImplementation(async () => { statuses.set(2, 'current') })
+    if (agreementStatus === 'unavailable') h.consents.current.mockResolvedValue({ document:null })
+    const { router, wrapper } = await mountView()
+    await wrapper.get('input[name="productName"]').setValue('Товар')
+    await wrapper.get('input[name="sellerPrice"]').setValue('10')
+    await wrapper.get('textarea[name="comment"]').setValue('Мой комментарий')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(h.session.createOrder).not.toHaveBeenCalled()
+    expect(h.consents.current).toHaveBeenCalledWith(2)
+    expect(wrapper.get('input[name="productName"]').element.value).toBe('Товар')
+    expect(wrapper.get('textarea[name="comment"]').element.value).toBe('Мой комментарий')
+    expect(wrapper.getComponent({ name:'PhoneAuthDialog' }).props('modelValue')).toBe(false)
+    if (agreementStatus === 'unavailable') {
+      expect(wrapper.text()).toContain('Действующий документ недоступен')
+      expect(h.consents.grant).not.toHaveBeenCalled()
+      expect(router.currentRoute.value.name).toBe('product')
+      return
+    }
+    const flow = wrapper.findComponent({ name:'ConsentRenewalDialog' }).props('flow')
+    expect(flow.state.open).toBe(true)
+    expect(flow.state.documents.map(row => row.document.kind)).toEqual([2])
+    expect(flow.state.documents[0].accepted).toBe(false)
+    flow.state.documents[0].accepted = true
+    await flow.confirm()
+    await vi.waitFor(() => expect(router.currentRoute.value.name).toBe('orders'))
+    expect(h.session.createOrder).toHaveBeenCalledOnce()
+    expect(h.session.createOrder.mock.calls[0][0]).toMatchObject({ product:{ productName:'Товар', sellerPrice:{ amount:10, currency:840 } }, comment:'Мой комментарий' })
+    expect(h.session.createOrder.mock.calls[0][1]).toBe(IDEMPOTENCY_KEY)
+    expect(h.consents.grant).toHaveBeenCalledOnce()
+  })
   it('renews missing consent in place and resumes the preserved order once', async () => {
     h.session.customer.value = { id:7 }
     h.consents.missingKinds.mockResolvedValueOnce([1])
