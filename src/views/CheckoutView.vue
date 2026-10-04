@@ -4,13 +4,15 @@
 // This file is a part of the Sarafan application
 
 import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
 import CustomerCostSummary from '../components/CustomerCostSummary.vue'
 import OrderItemCard from '../components/OrderItemCard.vue'
 import PassportDataFields from '../components/PassportDataFields.vue'
 import ConsentRenewalDialog from '../components/ConsentRenewalDialog.vue'
+import LegalDocumentReader from '../components/LegalDocumentReader.vue'
 import UiAlert from '../components/ui/UiAlert.vue'
 import UiButton from '../components/ui/UiButton.vue'
+import UiDialog from '../components/ui/UiDialog.vue'
 import UiField from '../components/ui/UiField.vue'
 import CheckoutDeliverySelector from '../components/CheckoutDeliverySelector.vue'
 import DeliveryAddressFields from '../components/DeliveryAddressFields.vue'
@@ -22,12 +24,15 @@ import { useSession } from '../stores/session.js'
 import { useConsents } from '../stores/consents.js'
 import { isConsentRenewalProblem, useConsentRenewal } from '../useConsentRenewal.js'
 import { useValidationFocus, validationFields } from '../validationFocus.js'
+import { LEGAL_DOCUMENT_KIND, documentNodes } from '../consentFormatting.js'
+import { nextChangeDelay, scheduleBoundary } from '../consentTiming.js'
 
 const session = useSession(), consents = useConsents(), renewal = useConsentRenewal()
 const route = useRoute(), router = useRouter()
 const ops = ref(null), order = ref(null), problem = ref(null), writeProblem = ref(null)
 const conflict = ref(false), recovered = ref(false)
 const loading = ref(false), busy = ref(false), expired = ref(false), focusRoot = ref(null)
+const agreementOpen = ref(false), agreementLoading = ref(false), agreementDocument = ref(null), agreementProblem = ref(null)
 const form = reactive({}), address = ref({}), addressBaseline = ref({}), addressChanged = ref(false)
 const recipientFields = { lastName:'Фамилия', firstName:'Имя', patronymic:'Отчество', phone:'Телефон', email:'Email' }
 const profileFields = ['lastName', 'firstName', 'patronymic', 'email', 'inn', 'passportSeries', 'passportNumber', 'passportIssueDate', 'passportIssuedBy']
@@ -35,6 +40,7 @@ const fieldName = key => profileFields.includes(key) ? 'profile.' + key : delive
 const aliases = Object.fromEntries([...profileFields, ...deliveryAddressFields, 'phone'].map(key => [fieldName(key), key]))
 const examples = ['Фото товара на складе в США', 'Проверка товара', 'Страхование отправления']
 let generation = 0, expiryTimer, formContext = null, disposed = false
+let agreementGeneration = 0, releaseAgreementNotice = null, agreementBoundaryTimer = null
 let releaseConsentNotice = null
 function ownConsentNotice() { releaseConsentNotice ??= consents.acquireNoticeSuppression() }
 function releaseConsentNoticeOwnership() { releaseConsentNotice?.(); releaseConsentNotice = null }
@@ -43,6 +49,10 @@ const active = computed(() => order.value?.status === 100 && order.value?.pricin
 const savedCourier = computed(() => !addressChanged.value && order.value?.checkout?.delivery.routeAlias === 'courier' ? order.value.checkout.delivery : null)
 const keepCourier = computed(() => form.delivery === 'courier' && Boolean(savedCourier.value))
 const complete = computed(() => form.firstName?.trim() && form.lastName?.trim() && form.phone?.trim() && form.delivery && (keepCourier.value || form.delivery !== 'courier' || hasDeliveryAddress(address.value)))
+const consentsCurrent = computed(() => consents.mine.value?.customerId === session.customer.value?.id
+  && [LEGAL_DOCUMENT_KIND.PERSONAL_DATA_CONSENT, LEGAL_DOCUMENT_KIND.USER_AGREEMENT]
+    .every(kind => consents.mine.value?.statuses.find(row => row.kind === kind)?.status === 'current'))
+const agreementName = computed(() => consents.kindName(LEGAL_DOCUMENT_KIND.USER_AGREEMENT) || 'Юридический документ')
 const writePageProblem = computed(() => hasOnlyPresentedFieldErrors(writeProblem.value, [...Object.keys(aliases), 'delivery']) ? null : writeProblem.value)
 const focusAfter = useValidationFocus(focusRoot, { active:() => active.value, context:() => [session.customer.value?.id, route.params.orderNumber], ready:() => !busy.value })
 function fieldErrors(key) { return problemFieldErrors(writeProblem.value, fieldName(key)) }
@@ -53,6 +63,7 @@ function capture() {
 async function load(reconcileDelivery = false) {
   if (busy.value || loading.value || conflict.value && reconcileDelivery !== true) return
   ++generation
+  closeAgreement()
   renewal.cancel()
   const id = session.customer.value?.id, number = String(route.params.orderNumber ?? '')
   const isCurrent = capture()
@@ -95,7 +106,7 @@ async function load(reconcileDelivery = false) {
   finally { if (isCurrent()) { loading.value = false; releaseConsentNoticeIfClear() } }
 }
 async function saveAction() {
-  if (busy.value || conflict.value || !active.value || !complete.value) return
+  if (busy.value || loading.value || conflict.value || !active.value || !complete.value || !consentsCurrent.value) return
   const isCurrent = capture(), number = order.value.orderNumber
   ownConsentNotice()
   busy.value = true; writeProblem.value = null
@@ -128,6 +139,52 @@ async function saveAction() {
     conflict.value = [CORE_PROBLEM_TYPES.orderUpdateConflict, CORE_PROBLEM_TYPES.orderCheckoutUnavailable].includes(writeProblem.value.type)
   } finally { if (isCurrent()) { busy.value = false; releaseConsentNoticeIfClear() } }
 }
+async function renewConsents() {
+  if (busy.value || loading.value || conflict.value || !active.value) return
+  const isCurrent = capture()
+  ownConsentNotice()
+  busy.value = true; writeProblem.value = null
+  try { await renewal.ensure([1, 2], isCurrent) }
+  catch (value) { if (isCurrent()) writeProblem.value = normalizeProblem(value) }
+  finally { if (isCurrent()) { busy.value = false; releaseConsentNoticeIfClear() } }
+}
+function closeAgreement() {
+  globalThis.clearTimeout(agreementBoundaryTimer); agreementBoundaryTimer = null
+  agreementGeneration++
+  agreementOpen.value = false; agreementLoading.value = false
+  agreementDocument.value = null; agreementProblem.value = null
+  releaseAgreementNotice?.(); releaseAgreementNotice = null
+}
+async function readAgreement(atBoundary = false) {
+  if (busy.value && !atBoundary || loading.value || agreementLoading.value || conflict.value || !active.value) return
+  globalThis.clearTimeout(agreementBoundaryTimer); agreementBoundaryTimer = null
+  const isCurrent = capture(), operation = ++agreementGeneration
+  const ownsReading = () => isCurrent() && operation === agreementGeneration
+  releaseAgreementNotice ??= consents.acquireNoticeSuppression()
+  agreementOpen.value = true; agreementLoading.value = true
+  agreementDocument.value = null; agreementProblem.value = null
+  try {
+    await consents.loadMine()
+    if (!ownsReading()) return
+    const envelope = await consents.current(LEGAL_DOCUMENT_KIND.USER_AGREEMENT)
+    if (!ownsReading()) return
+    const { document } = envelope
+    if (!document) throw createInternalProblem('invalidInput', { detail:'Действующий документ недоступен. Повторите позже.' })
+    documentNodes(document.html)
+    agreementDocument.value = document
+    const delay = nextChangeDelay(envelope)
+    if (delay !== null) scheduleBoundary(delay, timer => { agreementBoundaryTimer = timer }, () => {
+      agreementBoundaryTimer = null
+      if (ownsReading()) void readAgreement(true)
+    })
+  } catch (value) { if (ownsReading()) agreementProblem.value = normalizeProblem(value) }
+  finally {
+    if (ownsReading()) {
+      agreementLoading.value = false
+      if (!agreementProblem.value) { releaseAgreementNotice?.(); releaseAgreementNotice = null }
+    }
+  }
+}
 async function recoverConflict() {
   const expectedGeneration = generation + 1
   await load(true)
@@ -147,12 +204,12 @@ function editAddress(name, value) { address.value[name] = value; addressChanged.
 function submit() { return focusAfter(saveAction, () => validationFields(writeProblem.value, { aliases })) }
 function revisit() { if (globalThis.document.visibilityState === 'visible' && !conflict.value) void load() }
 globalThis.document.addEventListener('visibilitychange', revisit)
-watch(active, value => { if (!value) renewal.cancel() }, { flush:'sync' })
+watch(active, value => { if (!value) { renewal.cancel(); closeAgreement() } }, { flush:'sync' })
 watch([() => session.customer.value?.id, () => route.params.orderNumber], () => {
   releaseConsentNoticeOwnership(); conflict.value = false
   busy.value = false; loading.value = false; renewal.cancel(); void load()
 }, { immediate:true, flush:'sync' })
-onBeforeUnmount(() => { releaseConsentNoticeOwnership(); disposed = true; generation++; globalThis.clearTimeout(expiryTimer); globalThis.document.removeEventListener('visibilitychange', revisit) })
+onBeforeUnmount(() => { closeAgreement(); releaseConsentNoticeOwnership(); disposed = true; generation++; globalThis.clearTimeout(expiryTimer); globalThis.document.removeEventListener('visibilitychange', revisit) })
 </script>
 
 <template>
@@ -174,7 +231,7 @@ onBeforeUnmount(() => { releaseConsentNoticeOwnership(); disposed = true; genera
           type="submit"
           form="checkout-edit-form"
           :loading="busy"
-          :disabled="loading || busy || conflict || !complete"
+          :disabled="loading || busy || conflict || !complete || !consentsCurrent"
         >
           Оплатить заказ
         </UiButton>
@@ -301,8 +358,62 @@ onBeforeUnmount(() => { releaseConsentNoticeOwnership(); disposed = true; genera
             {{ example }} — В разработке
           </p>
         </section>
+        <section class="ui-form-section">
+          <p>
+            Заказ оформляется на условиях документа
+            <RouterLink
+              v-slot="{ href }"
+              :to="{ name:'legal-document', params:{ documentRef:consents.routeAlias(LEGAL_DOCUMENT_KIND.USER_AGREEMENT) } }"
+              custom
+            >
+              <a
+                :href="href"
+                class="consent-document-link"
+                @click.prevent="readAgreement()"
+              >«{{ agreementName }}»</a>
+            </RouterLink>.
+          </p>
+          <UiButton
+            v-if="!consentsCurrent"
+            :disabled="busy || conflict"
+            @click="renewConsents"
+          >
+            Подтвердить документы
+          </UiButton>
+        </section>
       </div>
     </form>
     <ConsentRenewalDialog :flow="renewal" />
+    <UiDialog
+      :model-value="agreementOpen"
+      :title="agreementName"
+      :max-width="760"
+      @update:model-value="open => { if (!open) closeAgreement() }"
+    >
+      <UiAlert
+        v-if="agreementProblem"
+        :title="presentProblemTitle(agreementProblem)"
+      >
+        <p>{{ presentProblem(agreementProblem) }}</p>
+        <UiButton @click="readAgreement()">
+          Повторить
+        </UiButton>
+      </UiAlert>
+      <p
+        v-else-if="agreementLoading"
+        role="status"
+      >
+        Загружаем документ…
+      </p>
+      <LegalDocumentReader
+        v-else-if="agreementDocument"
+        :document="agreementDocument"
+      />
+      <template #actions>
+        <UiButton @click="closeAgreement">
+          Вернуться к оформлению
+        </UiButton>
+      </template>
+    </UiDialog>
   </main>
 </template>

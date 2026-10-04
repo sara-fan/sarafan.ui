@@ -20,6 +20,7 @@ import {
 } from '../errors/problem.js'
 import { useAuthenticationReturn } from '../stores/authenticationReturn.js'
 import { useConsents } from '../stores/consents.js'
+import { nextChangeDelay, scheduleBoundary } from '../consentTiming.js'
 import { useSession } from '../stores/session.js'
 import LegalDocumentReader from './LegalDocumentReader.vue'
 import ServiceUnavailablePage from './ServiceUnavailablePage.vue'
@@ -118,22 +119,6 @@ function requireDocument(value, detail) {
   if (!Number.isFinite(Date.parse(value.effectiveAt))) throw createInternalProblem('protocolError')
   documentNodes(value.html)
   return value
-}
-function nextChangeDelay(envelope) {
-  if (envelope?.nextChangeAt == null) return null
-  const delay = Date.parse(envelope.nextChangeAt) - Date.parse(envelope.serverNow)
-  if (!Number.isFinite(delay) || delay <= 0) throw createInternalProblem('protocolError')
-  return delay
-}
-function scheduleBoundary(delay, assign, action) {
-  function schedule(remaining) {
-    const chunk = Math.min(remaining, 2147483647)
-    assign(globalThis.setTimeout(() => {
-      if (remaining > chunk) schedule(remaining - chunk)
-      else action()
-    }, chunk))
-  }
-  schedule(delay)
 }
 function resetPersonalChoice() { personalKey = globalThis.crypto.randomUUID(); personalSignature = '' }
 function documentSignature(value) { return value ? `${value.id}:${value.contentHash}` : '' }

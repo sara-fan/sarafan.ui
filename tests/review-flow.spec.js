@@ -21,6 +21,13 @@ import { validateCustomerOrder, validateCustomerOrders, validateDeliveryEstimate
 import { completeOrder, ops } from './fixtures/orders.js'
 
 let wrapper, router, currentOrder, mountTarget
+const legalDocument = kind => ({ id:'00000000-0000-4000-8000-' + String(kind).padStart(12, '0'), kind,
+  title:kind === 2 ? 'Пользовательское соглашение' : 'Согласие на обработку персональных данных',
+  html:'<p>Текст действующей редакции</p>', displayVersion:'1', contentHash:'a'.repeat(64), effectiveAt:'2026-09-01T00:00:00Z' })
+function consentSnapshot() {
+  return { customerId:h.session.customer.value?.id, serverNow:'2026-09-15T10:00:00Z', nextChangeAt:null,
+    statuses:[1, 2].map(kind => ({ kind, status:h.missing.includes(kind) ? 'renewal-required' : 'current' })) }
+}
 function ready(overrides = {}) {
   return completeOrder({ status:100, estimatedDelivery:{ minimumDays:14, maximumDays:21 },
     reviewCompletedAt:'2026-09-15T10:00:00Z', reviewReason:null,
@@ -35,20 +42,29 @@ async function render(path = '/orders/12345678-3', attached = false) {
     { path:'/legal/:documentRef', name:'legal-document', component:{ template:'<h1>Соглашение</h1>' } }
   ] })
   await router.push(path)
-  wrapper = mount({ template:'<RouterView />' }, { attachTo:mountTarget, global:{ plugins:[router, createSarafanVuetify()] } })
+  wrapper = mount({ template:'<RouterView />' }, { attachTo:mountTarget, global:{ plugins:[router, createSarafanVuetify()], stubs:{ UiDialog:{
+    name:'UiDialog', props:['modelValue', 'title'], emits:['update:modelValue'],
+    template:'<section v-if="modelValue" role="dialog"><h2>{{ title }}</h2><slot /><slot name="actions" /></section>'
+  } } } })
   await flushPromises()
 }
 beforeEach(() => {
   currentOrder = ready()
   h.missing = []; h.realRenewal = false
-  h.consents = { missingKinds:vi.fn(async () => h.missing), current:vi.fn(async () => ({ document:{ id:'agreement-current' }, serverNow:'2026-09-15T10:00:00Z', nextChangeAt:null })), mine:ref(null), kindName:() => 'Соглашение' }
+  h.consents = {
+    loadMine:vi.fn(async () => { h.consents.mine.value = consentSnapshot() }),
+    missingKinds:vi.fn(async () => { await h.consents.loadMine(); return h.missing }),
+    current:vi.fn(async kind => ({ document:legalDocument(kind), serverNow:'2026-09-15T10:00:00Z', nextChangeAt:null })),
+    mine:ref(null), kindName:kind => legalDocument(kind).title, routeAlias:() => 'user-agreement',
+    grant:vi.fn(async document => { h.missing = h.missing.filter(kind => kind !== document.kind); await h.consents.loadMine() })
+  }
   const noticeTokens = new Set()
   h.consents.noticeSuppressed = ref(false)
   h.consents.acquireNoticeSuppression = vi.fn(() => {
     const token = Symbol(); noticeTokens.add(token); h.consents.noticeSuppressed.value = true
     return vi.fn(() => { noticeTokens.delete(token); h.consents.noticeSuppressed.value = noticeTokens.size > 0 })
   })
-  h.renewal = { state:{ open:false, documents:[], reading:null, problem:null, problemKind:null }, cancel:vi.fn(), ensure:vi.fn(async () => { h.missing = []; return true }) }
+  h.renewal = { state:{ open:false, documents:[], reading:null, problem:null, problemKind:null }, cancel:vi.fn(), ensure:vi.fn(async () => { h.missing = []; await h.consents.loadMine(); return true }) }
   h.session.customer = ref({ id:7, phone:'+79990001234', profile:{ firstName:'Иван', lastName:'Иванов', postalCode:'123456', city:'Москва', address:'Адрес' } })
   h.session.refreshCustomer = vi.fn(async () => h.session.customer.value)
   h.session.orderRequest = vi.fn(async (path, _options, isCurrent, validate) => {
@@ -182,9 +198,10 @@ describe('checkout completion', () => {
     expect(paymentButton().element.closest('header')).not.toBeNull()
     expect(paymentButton().element.form).toBe(wrapper.get('form').element)
     expect(wrapper.get('form').find('button[type="submit"]').exists()).toBe(false)
-    expect(wrapper.find('a[href="/legal/agreement-current"]').exists()).toBe(false)
-    expect(wrapper.text()).not.toContain('Принять условия')
-    expect(wrapper.text()).not.toContain('Заказ оформляется на условиях')
+    expect(wrapper.get('a[href="/legal/user-agreement"]').text()).toBe('«Пользовательское соглашение»')
+    expect(wrapper.find('input[type="checkbox"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('Заказ оформляется на условиях')
+    expect(wrapper.text()).not.toContain('Подтвердить документы')
     await wrapper.get('input[value="pickup"]').setValue(true)
     await wrapper.get('input[name="email"]').setValue('test@example.com')
     const passport = { inn:'770123456789', passportSeries:'45 00', passportNumber:'123456', passportIssueDate:'2020-01-02', passportIssuedBy:'ОВД\nМосква' }
@@ -217,7 +234,8 @@ describe('checkout completion', () => {
     expect(h.session.refreshCustomer).toHaveBeenCalledOnce()
   })
   it('opens the shared renewal flow on entry and lets cancellation preserve the checkout draft', async () => {
-    h.renewal.ensure.mockResolvedValue(false)
+    h.missing = [2]
+    h.renewal.ensure.mockImplementation(async () => { await h.consents.loadMine(); return false })
     await render('/orders/12345678-3/checkout')
     expect(h.renewal.ensure).toHaveBeenCalledWith([1, 2], expect.any(Function))
     await wrapper.get('input[value="courier"]').setValue(true)
@@ -226,8 +244,8 @@ describe('checkout completion', () => {
     await wrapper.get('form').trigger('submit'); await flushPromises()
     expect(h.session.orderRequest).toHaveBeenCalledTimes(calls)
     expect(wrapper.get('input[name="firstName"]').element.value).toBe('Пётр')
-    expect(paymentButton().attributes('disabled')).toBeUndefined()
-    expect(wrapper.text()).not.toContain('Принять условия')
+    expect(paymentButton().attributes('disabled')).toBeDefined()
+    expect(wrapper.text()).toContain('Подтвердить документы')
   })
   it('retries failed entry loads with profile defaults and account phone', async () => {
     h.session.orderRequest.mockRejectedValueOnce(createInternalProblem('protocolError'))
@@ -672,3 +690,126 @@ it('reloads confirmed order details at expiry when no cancellation is pending', 
   expect(wrapper.text()).toContain('Расчёт истёк');
   expect(wrapper.text()).not.toContain('Оформить заказ');
 });
+
+
+describe('checkout agreement presentation and renewal', () => {
+  function renewButton() { return wrapper.findAll('button').find(button => button.text() === 'Подтвердить документы') }
+  async function openAgreement() { await wrapper.get('a[href="/legal/user-agreement"]').trigger('click'); await flushPromises() }
+  it('reads the current agreement in place and returns without losing the checkout draft', async () => {
+    await render('/orders/12345678-3/checkout')
+    await wrapper.get('input[value="courier"]').setValue(true)
+    await wrapper.get('input[name="firstName"]').setValue('Мой получатель')
+    await wrapper.get('[name="address"]').setValue('Мой адрес')
+    await openAgreement()
+    expect(router.currentRoute.value.name).toBe('checkout')
+    expect(wrapper.get('[role="dialog"]').text()).toContain('Текст действующей редакции')
+    expect(h.consents.current).toHaveBeenCalledWith(2)
+    expect(h.consents.grant).not.toHaveBeenCalled()
+    await wrapper.findAll('button').find(button => button.text() === 'Вернуться к оформлению').trigger('click')
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
+    expect(wrapper.get('input[name="firstName"]').element.value).toBe('Мой получатель')
+    expect(wrapper.get('[name="address"]').element.value).toBe('Мой адрес')
+    expect(paymentButton().attributes('disabled')).toBeUndefined()
+  })
+  it('keeps payment disabled after cancellation and explicitly reopens only the missing confirmation', async () => {
+    h.realRenewal = true; h.missing = [2]
+    await render('/orders/12345678-3/checkout')
+    expect(paymentButton().attributes('disabled')).toBeDefined()
+    await wrapper.findAll('button').find(button => button.text() === 'Отмена').trigger('click'); await flushPromises()
+    await wrapper.get('input[value="courier"]').setValue(true)
+    await wrapper.get('[name="address"]').setValue('Черновик адреса')
+    await wrapper.get('input[name="firstName"]').setValue('Черновик получателя')
+    expect(paymentButton().attributes('disabled')).toBeDefined()
+    await wrapper.get('form').trigger('submit'); await flushPromises()
+    expect(h.session.orderRequest.mock.calls.some(([, options]) => options.method === 'POST')).toBe(false)
+    await renewButton().trigger('click'); await flushPromises()
+    expect(wrapper.get('[role="dialog"]').findAll('input[type="checkbox"]')).toHaveLength(1)
+    expect(wrapper.get('[role="dialog"]').get('input').element.checked).toBe(false)
+    await wrapper.get('[role="dialog"]').get('input').setValue(true)
+    await wrapper.findAll('button').find(button => button.text() === 'Подтвердить и продолжить').trigger('click'); await flushPromises()
+    expect(h.consents.grant).toHaveBeenCalledOnce()
+    expect(h.consents.grant.mock.calls[0][0].kind).toBe(2)
+    expect(paymentButton().attributes('disabled')).toBeUndefined()
+    expect(renewButton()).toBeUndefined()
+    expect(wrapper.get('[name="address"]').element.value).toBe('Черновик адреса')
+    expect(wrapper.get('input[name="firstName"]').element.value).toBe('Черновик получателя')
+    expect(router.currentRoute.value.name).toBe('checkout')
+  })
+  it.each([1, 2])('disables payment when consent kind %s ceases to be current', async kind => {
+    await render('/orders/12345678-3/checkout')
+    await wrapper.get('input[value="pickup"]').setValue(true)
+    expect(paymentButton().attributes('disabled')).toBeUndefined()
+    h.missing = [kind]; await h.consents.loadMine(); await flushPromises()
+    expect(paymentButton().attributes('disabled')).toBeDefined()
+    h.renewal.ensure.mockRejectedValueOnce(createInternalProblem('networkUnavailable'))
+    await renewButton().trigger('click'); await flushPromises()
+    expect(wrapper.findAll('[role="alert"]')).toHaveLength(1)
+    expect(paymentButton().attributes('disabled')).toBeDefined()
+    expect(h.consents.noticeSuppressed.value).toBe(true)
+    await renewButton().trigger('click'); await flushPromises()
+    expect(paymentButton().attributes('disabled')).toBeUndefined()
+    expect(h.consents.noticeSuppressed.value).toBe(false)
+  })
+  it.each(['missing', 'invalid', 'network'])('keeps unavailable agreement reading recoverable: %s', async failure => {
+    await render('/orders/12345678-3/checkout')
+    await wrapper.get('input[name="firstName"]').setValue('Черновик')
+    if (failure === 'network') h.consents.loadMine.mockRejectedValueOnce(createInternalProblem('networkUnavailable'))
+    else h.consents.current.mockResolvedValueOnce({ document:failure === 'missing' ? null : { ...legalDocument(2), html:'<script>unsafe</script>' } })
+    await openAgreement()
+    expect(wrapper.get('[role="dialog"]').findAll('[role="alert"]')).toHaveLength(1)
+    expect(wrapper.find('script').exists()).toBe(false)
+    expect(h.consents.noticeSuppressed.value).toBe(true)
+    await wrapper.get('[role="dialog"]').findAll('button').find(button => button.text() === 'Повторить').trigger('click'); await flushPromises()
+    expect(wrapper.get('[role="dialog"]').text()).toContain('Текст действующей редакции')
+    expect(h.consents.noticeSuppressed.value).toBe(false)
+    expect(wrapper.get('input[name="firstName"]').element.value).toBe('Черновик')
+  })
+  it.each(['close', 'identity', 'unmount', 'expiry'])('discards a pending agreement response on %s', async boundary => {
+    vi.useFakeTimers({ toFake:['setTimeout', 'clearTimeout'] })
+    currentOrder.pricing.validUntil = '2026-09-15T10:00:01Z'
+    await render('/orders/12345678-3/checkout')
+    let finish
+    h.consents.current.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    await openAgreement()
+    expect(wrapper.get('[role="dialog"]').text()).toContain('Загружаем документ')
+    if (boundary === 'close') {
+      const dialog = wrapper.findAllComponents({ name:'UiDialog' }).find(dialog => dialog.props('modelValue'))
+      dialog.vm.$emit('update:modelValue', false)
+    } else if (boundary === 'identity') h.session.customer.value = { id:8, phone:'+79990001111', profile:{} }
+    else if (boundary === 'unmount') { wrapper.unmount(); wrapper = null }
+    else await vi.advanceTimersByTimeAsync(1000)
+    await flushPromises()
+    finish({ document:legalDocument(2) }); await flushPromises()
+    if (wrapper) expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
+    expect(h.consents.noticeSuppressed.value).toBe(false)
+  })
+})
+
+
+it('refreshes the open checkout reader when a scheduled agreement becomes effective', async () => {
+  vi.useFakeTimers({ toFake:['setTimeout', 'clearTimeout'] })
+  await render('/orders/12345678-3/checkout')
+  await wrapper.get('input[value="pickup"]').setValue(true)
+  await wrapper.get('input[name="firstName"]').setValue('Черновик получателя')
+  h.consents.current.mockResolvedValueOnce({ document:legalDocument(2), serverNow:'2026-09-15T10:00:00Z', nextChangeAt:'2026-09-15T10:00:01Z' })
+  await wrapper.get('a[href="/legal/user-agreement"]').trigger('click'); await flushPromises()
+  expect(wrapper.get('[role="dialog"]').text()).toContain('Текст действующей редакции')
+  h.missing = [2]
+  h.consents.current.mockResolvedValueOnce({ document:{ ...legalDocument(2), id:'00000000-0000-4000-8000-000000000003', displayVersion:'2', html:'<p>Новая действующая редакция</p>' }, serverNow:'2026-09-15T10:00:01Z', nextChangeAt:null })
+  await vi.advanceTimersByTimeAsync(1000); await flushPromises()
+  expect(wrapper.get('[role="dialog"]').text()).toContain('Новая действующая редакция')
+  expect(wrapper.get('[role="dialog"]').text()).not.toContain('Текст действующей редакции')
+  expect(paymentButton().attributes('disabled')).toBeDefined()
+  expect(wrapper.get('input[name="firstName"]').element.value).toBe('Черновик получателя')
+  expect(h.consents.grant).not.toHaveBeenCalled()
+})
+it('cancels the scheduled checkout reader refresh when the document dialog closes', async () => {
+  vi.useFakeTimers({ toFake:['setTimeout', 'clearTimeout'] })
+  await render('/orders/12345678-3/checkout')
+  h.consents.current.mockResolvedValueOnce({ document:legalDocument(2), serverNow:'2026-09-15T10:00:00Z', nextChangeAt:'2026-09-15T10:00:01Z' })
+  await wrapper.get('a[href="/legal/user-agreement"]').trigger('click'); await flushPromises()
+  await wrapper.findAll('button').find(button => button.text() === 'Вернуться к оформлению').trigger('click')
+  await vi.advanceTimersByTimeAsync(1000); await flushPromises()
+  expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
+  expect(h.consents.current).toHaveBeenCalledOnce()
+})

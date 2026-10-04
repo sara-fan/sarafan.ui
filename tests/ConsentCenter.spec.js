@@ -969,3 +969,20 @@ it('reloads changed versions and resets affirmation without accepting the replac
   expect(wrapper.findComponent(LegalDocumentReader).exists()).toBe(true)
   expect(h.store.grant).toHaveBeenCalledTimes(2)
 })
+
+it('waits for a far-future legal replacement across the browser timer limit', async () => {
+  vi.useFakeTimers({ toFake:['setTimeout', 'clearTimeout'] })
+  const serverNow = '2026-09-10T08:00:00.000Z'
+  const maximumTimerDelay = 2147483647
+  const nextChangeAt = new Date(Date.parse(serverNow) + maximumTimerDelay + 100).toISOString()
+  h.store.current
+    .mockResolvedValueOnce({ document:{ ...document, title:'Текущая версия' }, serverNow, nextChangeAt })
+    .mockResolvedValue({ document:{ ...document, title:'Будущая редакция', effectiveAt:nextChangeAt }, serverNow:nextChangeAt, nextChangeAt:null })
+  await mountCenter('/legal/user-agreement'); await flushPromises()
+  await vi.advanceTimersByTimeAsync(maximumTimerDelay); await flushPromises()
+  expect(wrapper.get('.consent-page__document-title').text()).toBe('Текущая версия')
+  expect(h.store.current).toHaveBeenCalledOnce()
+  await vi.advanceTimersByTimeAsync(100); await flushPromises()
+  expect(wrapper.get('.consent-page__document-title').text()).toBe('Будущая редакция')
+  expect(h.store.current).toHaveBeenCalledTimes(2)
+})
