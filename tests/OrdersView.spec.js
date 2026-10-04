@@ -8,13 +8,14 @@ import { createMemoryHistory } from 'vue-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const h = vi.hoisted(() => ({ store:{}, session:{} }))
-vi.mock('../src/stores/orders.js', () => ({ createOrderStore: () => h.store }))
+vi.mock('../src/stores/orders.js', async importOriginal => ({ ...(await importOriginal()), createOrderStore:() => h.store }))
 vi.mock('../src/stores/session.js', () => ({ useSession: () => h.session }))
 
 import { createInternalProblem } from '../src/errors/problem.js'
 import { createAppRouter } from '../src/router.js'
 import { resetOrderNoticesForTests, showOrderCreated } from '../src/stores/orderNotices.js'
 import OrdersView from '../src/views/OrdersView.vue'
+import { orderStatusFor } from '../src/stores/orders.js'
 import { forecastPricing, ops } from './fixtures/orders.js'
 
 const statusItems = new Map([
@@ -49,6 +50,16 @@ describe('OrdersView', () => {
       ? { value:840, name:'Доллар США', routeAlias:'usd' }
       : { value, name:'Евро', routeAlias:'eur' })
     h.store.progressFor = vi.fn(value => statusItems.get(value)?.progressPercent)
+  })
+
+  it('renders an unknown status in the primary list badge', async () => {
+    h.store.orders.value = [{ orderNumber:'12345678-9', status:999, productName:'Товар', storeName:null, imageUrl:null,
+      sellerPrice:null, quantity:1, createdAt:'2026-09-14T10:00:00Z', pricing:{ ...forecastPricing } }]
+    h.store.statusFor = vi.fn(value => orderStatusFor(ops, value))
+    h.store.progressFor = vi.fn(value => orderStatusFor(ops, value).progressPercent)
+    const { wrapper } = await mountView()
+    await flushPromises()
+    expect(wrapper.get('.order-card__status').text()).toBe('Статус 999')
   })
 
   it('shows the loading and empty states and navigates to product entry', async () => {

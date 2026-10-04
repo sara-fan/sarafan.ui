@@ -19,10 +19,11 @@ import { CORE_PROBLEM_TYPES, createInternalProblem, normalizeProblem, presentPro
 import { isOrderNumber } from '../orderNumber.js'
 import { validateCustomerOrder, validateOrderOps } from '../stores/orders.js'
 import { useSession } from '../stores/session.js'
+import { useConsents } from '../stores/consents.js'
 import { isConsentRenewalProblem, useConsentRenewal } from '../useConsentRenewal.js'
 import { useValidationFocus, validationFields } from '../validationFocus.js'
 
-const session = useSession(), renewal = useConsentRenewal()
+const session = useSession(), consents = useConsents(), renewal = useConsentRenewal()
 const route = useRoute(), router = useRouter()
 const ops = ref(null), order = ref(null), problem = ref(null), writeProblem = ref(null)
 const conflict = ref(false), recovered = ref(false)
@@ -34,6 +35,10 @@ const fieldName = key => profileFields.includes(key) ? 'profile.' + key : delive
 const aliases = Object.fromEntries([...profileFields, ...deliveryAddressFields, 'phone'].map(key => [fieldName(key), key]))
 const examples = ['Фото товара на складе в США', 'Проверка товара', 'Страхование отправления']
 let generation = 0, expiryTimer, formContext = null, disposed = false
+let releaseConsentNotice = null
+function ownConsentNotice() { releaseConsentNotice ??= consents.acquireNoticeSuppression() }
+function releaseConsentNoticeOwnership() { releaseConsentNotice?.(); releaseConsentNotice = null }
+function releaseConsentNoticeIfClear() { if (!problem.value && !writeProblem.value) releaseConsentNoticeOwnership() }
 const active = computed(() => order.value?.status === 100 && order.value?.pricing.state === 100 && !expired.value)
 const savedCourier = computed(() => !addressChanged.value && order.value?.checkout?.delivery.routeAlias === 'courier' ? order.value.checkout.delivery : null)
 const keepCourier = computed(() => form.delivery === 'courier' && Boolean(savedCourier.value))
@@ -46,18 +51,19 @@ function capture() {
   return () => !disposed && current === generation && id === session.customer.value?.id && number === String(route.params.orderNumber ?? '')
 }
 async function load(reconcileDelivery = false) {
-  if (busy.value || loading.value) return
+  if (busy.value || loading.value || conflict.value && reconcileDelivery !== true) return
   ++generation
   renewal.cancel()
   const id = session.customer.value?.id, number = String(route.params.orderNumber ?? '')
   const isCurrent = capture()
   globalThis.clearTimeout(expiryTimer)
-  conflict.value = false; recovered.value = false
+  recovered.value = false
   order.value = null; problem.value = null; writeProblem.value = null; expired.value = false; loading.value = false
   const context = JSON.stringify([id, number]), fill = context !== formContext
   if (fill) { for (const key of Object.keys(form)) delete form[key]; formContext = null }
-  if (!isOrderNumber(number)) { problem.value = createInternalProblem('invalidInput'); return }
-  if (!id) return
+  if (!isOrderNumber(number)) { releaseConsentNoticeOwnership(); problem.value = createInternalProblem('invalidInput'); return }
+  if (!id) { releaseConsentNoticeOwnership(); return }
+  ownConsentNotice()
   loading.value = true
   try {
     let catalog, value
@@ -80,16 +86,18 @@ async function load(reconcileDelivery = false) {
       formContext = context
     }
     if (!fill && reconcileDelivery === true && value.checkout) form.delivery = value.checkout.delivery.routeAlias
+    conflict.value = false
     const remaining = Date.parse(value.pricing.validUntil) - Date.parse(value.pricing.asOf)
     if (value.pricing.state === 100 && remaining > 0) expiryTimer = globalThis.setTimeout(() => { expired.value = true }, Math.min(remaining, 2147483647))
     else expired.value = true
     if (active.value) await renewal.ensure([1, 2], isCurrent)
   } catch (value) { if (isCurrent()) problem.value = normalizeProblem(value, { detail:'Не удалось загрузить оформление заказа' }) }
-  finally { if (isCurrent()) loading.value = false }
+  finally { if (isCurrent()) { loading.value = false; releaseConsentNoticeIfClear() } }
 }
 async function saveAction() {
   if (busy.value || conflict.value || !active.value || !complete.value) return
   const isCurrent = capture(), number = order.value.orderNumber
+  ownConsentNotice()
   busy.value = true; writeProblem.value = null
   try {
     if (!await renewal.ensure([1, 2], isCurrent) || !isCurrent() || !active.value) return
@@ -117,8 +125,8 @@ async function saveAction() {
   } catch (value) {
     if (!isCurrent()) return
     writeProblem.value = normalizeProblem(value, { detail:'Не удалось сохранить оформление заказа' })
-    conflict.value = [CORE_PROBLEM_TYPES.orderUpdateConflict, CORE_PROBLEM_TYPES.orderNotEditable].includes(writeProblem.value.type)
-  } finally { if (isCurrent()) busy.value = false }
+    conflict.value = [CORE_PROBLEM_TYPES.orderUpdateConflict, CORE_PROBLEM_TYPES.orderCheckoutUnavailable].includes(writeProblem.value.type)
+  } finally { if (isCurrent()) { busy.value = false; releaseConsentNoticeIfClear() } }
 }
 async function recoverConflict() {
   const expectedGeneration = generation + 1
@@ -131,19 +139,20 @@ async function refreshAddress() {
   busy.value = true
   try {
     const customer = await session.refreshCustomer()
-    if (isCurrent() && customer) { addressBaseline.value = deliveryAddress(customer.profile); address.value = { ...addressBaseline.value }; addressChanged.value = true; writeProblem.value = null }
+    if (isCurrent() && customer) { addressBaseline.value = deliveryAddress(customer.profile); address.value = { ...addressBaseline.value }; addressChanged.value = true; if (!conflict.value) writeProblem.value = null }
   } catch (error) { if (isCurrent()) writeProblem.value = normalizeProblem(error) }
-  finally { if (isCurrent()) busy.value = false }
+  finally { if (isCurrent()) { busy.value = false; releaseConsentNoticeIfClear() } }
 }
 function editAddress(name, value) { address.value[name] = value; addressChanged.value = true }
 function submit() { return focusAfter(saveAction, () => validationFields(writeProblem.value, { aliases })) }
-function revisit() { if (globalThis.document.visibilityState === 'visible') void load() }
+function revisit() { if (globalThis.document.visibilityState === 'visible' && !conflict.value) void load() }
 globalThis.document.addEventListener('visibilitychange', revisit)
 watch(active, value => { if (!value) renewal.cancel() }, { flush:'sync' })
 watch([() => session.customer.value?.id, () => route.params.orderNumber], () => {
+  releaseConsentNoticeOwnership(); conflict.value = false
   busy.value = false; loading.value = false; renewal.cancel(); void load()
 }, { immediate:true, flush:'sync' })
-onBeforeUnmount(() => { disposed = true; generation++; globalThis.clearTimeout(expiryTimer); globalThis.document.removeEventListener('visibilitychange', revisit) })
+onBeforeUnmount(() => { releaseConsentNoticeOwnership(); disposed = true; generation++; globalThis.clearTimeout(expiryTimer); globalThis.document.removeEventListener('visibilitychange', revisit) })
 </script>
 
 <template>
@@ -178,7 +187,7 @@ onBeforeUnmount(() => { disposed = true; generation++; globalThis.clearTimeout(e
       v-if="problem"
       :title="presentProblemTitle(problem)"
     >
-      <p>{{ presentProblem(problem) }}</p><UiButton @click="load">
+      <p>{{ presentProblem(problem) }}</p><UiButton @click="conflict ? recoverConflict() : load()">
         Повторить
       </UiButton>
     </UiAlert>

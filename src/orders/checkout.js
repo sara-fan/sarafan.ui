@@ -24,7 +24,7 @@ export function validateCheckout(value, deliveries) {
   const delivery = deliveries?.find(row => row.routeAlias === value?.delivery?.routeAlias)
   if (!profile || !delivery || typeof value.delivery.name !== 'string' || !value.delivery.name.trim() || value.delivery.name.length > 500
     || typeof value.delivery.destination !== 'string' || !value.delivery.destination.trim() || value.delivery.destination.length > 674
-    || !/^\+7[0-9]{10}$/u.test(profile.phone)
+    || typeof profile.phone !== 'string' || !/^\+7[0-9]{10}$/u.test(profile.phone)
     || typeof profile.firstName !== 'string' || !profile.firstName.trim() || typeof profile.lastName !== 'string' || !profile.lastName.trim()
     || Object.entries(limits).some(([field, max]) => profile[field] !== null && (typeof profile[field] !== 'string' || profile[field].length > max))
     || profile.passportIssueDate !== null && !isIsoDate(profile.passportIssueDate)

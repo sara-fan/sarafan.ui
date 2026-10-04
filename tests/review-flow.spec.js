@@ -6,10 +6,13 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { ref } from 'vue'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-const h = vi.hoisted(() => ({ session:{}, consents:{}, renewal:{}, missing:[] }))
+const h = vi.hoisted(() => ({ session:{}, consents:{}, renewal:{}, missing:[], realRenewal:false }))
 vi.mock('../src/stores/session.js', () => ({ useSession:() => h.session }))
 vi.mock('../src/stores/consents.js', () => ({ useConsents:() => h.consents }))
-vi.mock('../src/useConsentRenewal.js', async importOriginal => ({ ...await importOriginal(), useConsentRenewal:() => h.renewal }))
+vi.mock('../src/useConsentRenewal.js', async importOriginal => {
+  const original = await importOriginal()
+  return { ...original, useConsentRenewal:() => h.realRenewal ? original.useConsentRenewal() : h.renewal }
+})
 import { createSarafanVuetify } from '../src/plugins/vuetify.js'
 import CheckoutView from '../src/views/CheckoutView.vue'
 import OrderDetailsView from '../src/views/OrderDetailsView.vue'
@@ -37,8 +40,14 @@ async function render(path = '/orders/12345678-3', attached = false) {
 }
 beforeEach(() => {
   currentOrder = ready()
-  h.missing = []
+  h.missing = []; h.realRenewal = false
   h.consents = { missingKinds:vi.fn(async () => h.missing), current:vi.fn(async () => ({ document:{ id:'agreement-current' }, serverNow:'2026-09-15T10:00:00Z', nextChangeAt:null })), mine:ref(null), kindName:() => 'Соглашение' }
+  const noticeTokens = new Set()
+  h.consents.noticeSuppressed = ref(false)
+  h.consents.acquireNoticeSuppression = vi.fn(() => {
+    const token = Symbol(); noticeTokens.add(token); h.consents.noticeSuppressed.value = true
+    return vi.fn(() => { noticeTokens.delete(token); h.consents.noticeSuppressed.value = noticeTokens.size > 0 })
+  })
   h.renewal = { state:{ open:false, documents:[], reading:null, problem:null, problemKind:null }, cancel:vi.fn(), ensure:vi.fn(async () => { h.missing = []; return true }) }
   h.session.customer = ref({ id:7, phone:'+79990001234', profile:{ firstName:'Иван', lastName:'Иванов', postalCode:'123456', city:'Москва', address:'Адрес' } })
   h.session.refreshCustomer = vi.fn(async () => h.session.customer.value)
@@ -326,14 +335,23 @@ describe('checkout completion', () => {
   })
 })
 
-it('recovers a stale checkout version, retains recipient draft, and reconciles saved delivery', async () => {
+it.each([CORE_PROBLEM_TYPES.orderUpdateConflict, CORE_PROBLEM_TYPES.orderCheckoutUnavailable])('recovers checkout conflicts, retains recipient draft, and reconciles saved delivery: %s', async type => {
   await render('/orders/12345678-3/checkout')
   await wrapper.get('input[value="courier"]').setValue(true)
   await wrapper.get('input[name="firstName"]').setValue('Мой получатель')
-  h.session.orderRequest.mockRejectedValueOnce(new ProblemError({ type:CORE_PROBLEM_TYPES.orderUpdateConflict, title:'Заказ изменился', detail:'Обновите заказ.', status:409, code:'order_update_conflict' }))
+  h.session.orderRequest.mockRejectedValueOnce(new ProblemError({ type, title:'Заказ изменился', detail:'Обновите заказ.', status:409, code:type.split('/').at(-1).replaceAll('-', '_'), errors:{ delivery:['Проверьте адрес.'], order:['Обновите заказ.'] } }))
   await wrapper.get('form').trigger('submit'); await flushPromises()
   expect(paymentButton().attributes('disabled')).toBeDefined()
   currentOrder = { ...currentOrder, updatedAt:'2026-09-15T10:00:01Z', checkout:savedCheckout({ profile:{ firstName:'Чужая правка', lastName:'Иванов' }, delivery:'pickup' }) }
+  const beforeRevisit = h.session.orderRequest.mock.calls.length
+  document.dispatchEvent(new globalThis.Event('visibilitychange')); await flushPromises()
+  await wrapper.findComponent(CheckoutView).vm.$.setupState.load()
+  expect(h.session.orderRequest).toHaveBeenCalledTimes(beforeRevisit)
+  expect(paymentButton().attributes('disabled')).toBeDefined()
+  expect(wrapper.get('input[value="courier"]').element.checked).toBe(true)
+  await wrapper.findAll('button').find(button => button.text() === 'Обновить адрес доставки').trigger('click'); await flushPromises()
+  expect(paymentButton().attributes('disabled')).toBeDefined()
+  expect(wrapper.findAll('button').some(button => button.text() === 'Обновить данные заказа')).toBe(true)
   await wrapper.findAll('button').find(button => button.text() === 'Обновить данные заказа').trigger('click'); await flushPromises()
   expect(wrapper.get('input[name="firstName"]').element.value).toBe('Мой получатель')
   expect(wrapper.text()).toContain('Тестовый ПВЗ')
@@ -567,3 +585,90 @@ it('disables inline address editing during a pending checkout save', async () =>
   finish(false); await flushPromises()
   expect(wrapper.get('[name="address"]').attributes('disabled')).toBeUndefined()
 })
+
+
+describe('checkout recovery and foreground consent ownership', () => {
+  it('keeps the conflict gate after failed recovery until explicit retry reconciles delivery', async () => {
+    await render('/orders/12345678-3/checkout');
+    await wrapper.get('input[value="courier"]').setValue(true);
+    await wrapper.get('input[name="firstName"]').setValue('Мой получатель');
+    h.session.orderRequest.mockRejectedValueOnce(new ProblemError({ type:CORE_PROBLEM_TYPES.orderUpdateConflict,
+      title:'Заказ изменился', detail:'Обновите заказ.', status:409, code:'order_update_conflict' }));
+    await wrapper.get('form').trigger('submit'); await flushPromises();
+    currentOrder = { ...currentOrder, updatedAt:'2026-09-15T10:00:01Z', checkout:savedCheckout({ profile:{}, delivery:'pickup' }) };
+    h.session.orderRequest.mockRejectedValueOnce(createInternalProblem('protocolError'));
+    await wrapper.findAll('button').find(button => button.text() === 'Обновить данные заказа').trigger('click'); await flushPromises();
+    expect(wrapper.findComponent(CheckoutView).vm.$.setupState.conflict).toBe(true);
+    const beforeRevisit = h.session.orderRequest.mock.calls.length;
+    document.dispatchEvent(new globalThis.Event('visibilitychange')); await flushPromises();
+    expect(h.session.orderRequest).toHaveBeenCalledTimes(beforeRevisit);
+    await wrapper.findAll('button').find(button => button.text() === 'Повторить').trigger('click'); await flushPromises();
+    expect(wrapper.get('input[value="pickup"]').element.checked).toBe(true);
+    expect(wrapper.get('input[name="firstName"]').element.value).toBe('Мой получатель');
+    expect(wrapper.findComponent(CheckoutView).vm.$.setupState.conflict).toBe(false);
+    expect(paymentButton().attributes('disabled')).toBeUndefined();
+  });
+  it('retains foreground consent-notice ownership after entry renewal fails, then releases it after retry', async () => {
+    h.realRenewal = true;
+    h.consents.missingKinds.mockRejectedValueOnce(createInternalProblem('protocolError'));
+    await render('/orders/12345678-3/checkout');
+    expect(wrapper.findAll('[role="alert"]')).toHaveLength(1);
+    expect(h.consents.acquireNoticeSuppression).toHaveBeenCalledTimes(2);
+    const [foregroundRelease, renewalRelease] = h.consents.acquireNoticeSuppression.mock.results.map(result => result.value);
+    expect(renewalRelease).toHaveBeenCalledOnce();
+    expect(foregroundRelease).not.toHaveBeenCalled();
+    expect(h.consents.noticeSuppressed.value).toBe(true);
+    await wrapper.findAll('button').find(button => button.text() === 'Повторить').trigger('click'); await flushPromises();
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false);
+    expect(h.consents.noticeSuppressed.value).toBe(false);
+    expect(foregroundRelease).toHaveBeenCalledOnce();
+  });
+  it('retains consent-failure ownership and checkout data after save renewal fails, then resumes once', async () => {
+    h.realRenewal = true;
+    await render('/orders/12345678-3/checkout');
+    expect(h.consents.noticeSuppressed.value).toBe(false);
+    await wrapper.get('input[value="pickup"]').setValue(true);
+    await wrapper.get('input[name="firstName"]').setValue('Мой получатель');
+    h.consents.missingKinds.mockRejectedValueOnce(createInternalProblem('protocolError'));
+    await wrapper.get('form').trigger('submit'); await flushPromises();
+    expect(wrapper.findAll('[role="alert"]')).toHaveLength(1);
+    expect(h.consents.noticeSuppressed.value).toBe(true);
+    expect(wrapper.get('input[name="firstName"]').element.value).toBe('Мой получатель');
+    expect(h.session.orderRequest.mock.calls.some(([, options]) => options.method === 'POST')).toBe(false);
+    h.session.orderRequest.mockImplementationOnce(async (_path, options, isCurrent, validate) => {
+      expect(h.consents.noticeSuppressed.value).toBe(true);
+      const payload = JSON.parse(options.body);
+      expect(payload.profile.firstName).toBe('Мой получатель');
+      const value = { ...currentOrder, checkout:savedCheckout(payload) };
+      if (isCurrent()) validate(value);
+      return value;
+    });
+    await wrapper.get('form').trigger('submit'); await flushPromises();
+    await vi.waitFor(() => expect(router.currentRoute.value.name).toBe('payment'));
+    expect(h.consents.noticeSuppressed.value).toBe(false);
+    expect(h.session.orderRequest.mock.calls.filter(([, options]) => options.method === 'POST')).toHaveLength(1);
+  });
+  it.each(['unmount', 'identity'])('releases a retained consent-failure token on %s', async boundary => {
+    h.realRenewal = true;
+    h.consents.missingKinds.mockRejectedValueOnce(createInternalProblem('protocolError'));
+    await render('/orders/12345678-3/checkout');
+    expect(h.consents.noticeSuppressed.value).toBe(true);
+    if (boundary === 'unmount') { wrapper.unmount(); wrapper = null; }
+    else { h.session.customer.value = null; await flushPromises(); }
+    expect(h.consents.noticeSuppressed.value).toBe(false);
+  });
+});
+
+
+it('reloads confirmed order details at expiry when no cancellation is pending', async () => {
+  vi.useFakeTimers({ toFake:['setTimeout', 'clearTimeout'] });
+  currentOrder.pricing.validUntil = '2026-09-15T10:00:01Z';
+  await render();
+  expect(wrapper.text()).toContain('Оформить заказ');
+  const beforeExpiry = h.session.orderRequest.mock.calls.length;
+  currentOrder = ready({ status:200, pricing:{ ...currentOrder.pricing, state:200, asOf:'2026-09-15T10:00:01Z' } });
+  await vi.advanceTimersByTimeAsync(1000); await flushPromises();
+  expect(h.session.orderRequest).toHaveBeenCalledTimes(beforeExpiry + 2);
+  expect(wrapper.text()).toContain('Расчёт истёк');
+  expect(wrapper.text()).not.toContain('Оформить заказ');
+});

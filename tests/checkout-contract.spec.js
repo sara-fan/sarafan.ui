@@ -22,7 +22,7 @@ describe('checkout response contract', () => {
     expect(() => validateCheckout(value, ops.checkoutDeliveries)).toThrow(expect.objectContaining({ code:'ui_protocol_error' }))
   })
   it.each([
-    ['phone', null], ['phone', 7], ['phone', '123'], ['firstName', ' '], ['firstName', 1], ['lastName', null], ['lastName', ' '],
+    ['phone', null], ['phone', 7], ['phone', '123'], ['phone', ['+79990001234']], ['phone', []], ['phone', { number:'+79990001234' }], ['firstName', ' '], ['firstName', 1], ['lastName', null], ['lastName', ' '],
     ['email', 5], ['passportIssuedBy', 'a'.repeat(501)], ['passportIssueDate', 'invalid']
   ])('rejects invalid saved profile %s %#', (field, value) => {
     const dto = checkout(); dto.profile[field] = value

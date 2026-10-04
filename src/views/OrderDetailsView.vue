@@ -14,7 +14,7 @@ import UiDialog from '../components/ui/UiDialog.vue'
 import UiField from '../components/ui/UiField.vue'
 import { CORE_PROBLEM_TYPES, createInternalProblem, normalizeProblem, presentProblem, presentProblemTitle, problemFieldErrors } from '../errors/problem.js'
 import { isOrderNumber } from '../orderNumber.js'
-import { validateCustomerOrder, validateOrderOps } from '../stores/orders.js'
+import { orderStatusFor, validateCustomerOrder, validateOrderOps } from '../stores/orders.js'
 import { useSession } from '../stores/session.js'
 import { useValidationFocus, validationFields } from '../validationFocus.js'
 
@@ -39,14 +39,14 @@ let inFlight = null
 
 const error = computed(() => presentProblem(problem.value))
 const errorTitle = computed(() => presentProblemTitle(problem.value))
-const status = computed(() => ops.value?.statuses.find(item => expired.value && order.value?.status === 100 ? item.routeAlias === "quote_expired" : item.value === order.value?.status))
+const status = computed(() => orderStatusFor(ops.value, expired.value && order.value?.status === 100 ? 200 : order.value?.status))
 watch(() => order.value?.pricing, pricing => {
   globalThis.clearTimeout(expiryTimer)
   expired.value = pricing?.state === 200
   if (pricing?.state === 100) {
     const delay = Date.parse(pricing.validUntil) - Date.parse(pricing.asOf)
     if (delay <= 0) expired.value = true
-    else expiryTimer = globalThis.setTimeout(() => { expired.value = true; void load() }, Math.min(delay, 2147483647))
+    else expiryTimer = globalThis.setTimeout(() => { expired.value = true; if (!cancelBusy.value) void load() }, Math.min(delay, 2147483647))
   }
 })
 const canCheckout = computed(() => status.value?.routeAlias === 'quote_ready' && order.value?.pricing.state === 100 && !expired.value)
@@ -117,6 +117,7 @@ async function cancelAction() {
   const requestGeneration = ++cancellationGeneration
   const customerId = session.customer.value?.id
   const expectedNumber = orderNumber()
+  const cancellationOps = ops.value
   const isCurrent = () => requestGeneration === cancellationGeneration && customerId === session.customer.value?.id
     && expectedNumber === orderNumber()
   cancelBusy.value = true
@@ -127,8 +128,8 @@ async function cancelAction() {
       method:'POST', headers:{ 'Content-Type':'application/json' },
       body:JSON.stringify({ expectedUpdatedAt:order.value.updatedAt, reason:reason || null })
     }, isCurrent, value => {
-      validatedOrder = validateCustomerOrder(value, ops.value, expectedNumber)
-      if (ops.value.statuses.find(item => item.value === validatedOrder.status)?.routeAlias !== 'cancelled'
+      validatedOrder = validateCustomerOrder(value, cancellationOps, expectedNumber)
+      if (cancellationOps.statuses.find(item => item.value === validatedOrder.status)?.routeAlias !== 'cancelled'
         || validatedOrder.canCancel || !validatedOrder.cancelledAt) throw createInternalProblem('protocolError')
     })
     if (!isCurrent()) return

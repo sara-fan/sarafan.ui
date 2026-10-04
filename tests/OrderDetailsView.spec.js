@@ -258,6 +258,20 @@ describe('OrderDetailsView', () => {
     expect(wrapper.get('.order-review-card .order-item-fields__source a').attributes('href')).toBe('https://shop.example.com/item')
   })
 
+  it('shows expired pricing even while the stored status is still quote ready', async () => {
+    h.session.orderRequest.mockImplementation(async (path, _options, isCurrent, validate) => {
+      const value = path.endsWith('/ops') ? ops : completeOrder({ status:100, pricing:{
+        ...forecastPricing, state:200, totalRub:12000, calculatedAt:'2026-09-15T10:00:00Z',
+        validUntil:'2026-09-16T10:00:00Z', asOf:'2026-09-16T10:00:00Z'
+      } })
+      if (isCurrent()) validate(value)
+      return value
+    })
+    const { wrapper } = await mountAt()
+    expect(wrapper.get('.order-details-heading').text()).toContain('Расчёт истёк')
+    expect(wrapper.text()).not.toContain('Оформить заказ')
+  })
+
   it('shows the saved confirmed amount, deadline, and post-confirmation customs separately', async () => {
     h.session.orderRequest.mockImplementation(async (path, _options, isCurrent, validate) => {
       const value = path.endsWith('/ops') ? ops : completeOrder({ pricing:{
@@ -350,6 +364,40 @@ describe('OrderDetailsView', () => {
     expect(wrapper.text()).toContain('Заказ отменён')
     expect(wrapper.vm.$.setupState.cancelBusy).toBe(false)
   })
+
+  it('keeps a pending cancellation owned when the confirmed quote expires', async () => {
+    vi.useFakeTimers({ toFake:['setTimeout', 'clearTimeout'] });
+    try {
+      let finishCancellation;
+      const quote = completeOrder({ status:100, pricing:{ ...forecastPricing, state:100, totalRub:2500,
+        calculatedAt:'2026-09-15T10:00:00Z', validUntil:'2026-09-15T10:00:01Z' } });
+      h.session.orderRequest.mockImplementation((path, _options, isCurrent, validate) => {
+        if (path.endsWith('/cancel')) return new Promise(resolve => {
+          finishCancellation = () => {
+            const value = completeOrder({ status:500, showReviewFields:false,
+              updatedAt:'2026-09-15T10:05:00Z', cancelledAt:'2026-09-15T10:05:00Z' });
+            if (isCurrent()) validate(value);
+            resolve(value);
+          };
+        });
+        const value = path.endsWith('/ops') ? ops : quote;
+        if (isCurrent()) validate(value);
+        return Promise.resolve(value);
+      });
+      const { wrapper } = await mountAt();
+      await wrapper.get('.order-details-heading .ui-button--danger').trigger('click'); await flushPromises();
+      document.body.querySelector('.ui-dialog__actions .ui-button--danger').click(); await flushPromises();
+      expect(finishCancellation).toBeTypeOf('function');
+      await vi.advanceTimersByTimeAsync(1000); await flushPromises();
+      expect(h.session.orderRequest).toHaveBeenCalledTimes(3);
+      expect(wrapper.vm.$.setupState.cancelBusy).toBe(true);
+      finishCancellation(); await flushPromises();
+      expect(wrapper.text()).toContain('Заказ отменён');
+      expect(wrapper.vm.$.setupState.cancelProblem).toBeNull();
+      expect(wrapper.vm.$.setupState.cancelBusy).toBe(false);
+      expect(h.session.customer.value.id).toBe(7);
+    } finally { vi.useRealTimers(); }
+  });
 
   it.each(['01234567-3', 'Заказ / 3'])('keeps %s opaque and encodes the API path', async number => {
     const { wrapper } = await mountAt(`/orders/${encodeURIComponent(number)}`)
@@ -587,4 +635,17 @@ describe('OrderDetailsView', () => {
 
     expect(h.session.orderRequest).toHaveBeenCalledTimes(2)
   })
+})
+
+it('displays an unknown numeric status and offers no checkout or cancellation', async () => {
+  h.session.customer = ref({ id:7 })
+  h.session.orderRequest = vi.fn(async (path, _options, isCurrent, validate) => {
+    const value = path.endsWith('/ops') ? ops : completeOrder({ status:999, canCancel:false, showReviewFields:false })
+    if (isCurrent()) validate(value)
+    return value
+  })
+  const { wrapper } = await mountAt()
+  expect(wrapper.text()).toContain('Статус 999')
+  expect(wrapper.text()).not.toContain('Оформить заказ')
+  expect(wrapper.text()).not.toContain('Отменить заказ')
 })
