@@ -35,6 +35,8 @@ const label = computed(() => props.historical ? 'Последняя рассчи
   : props.pricing?.state === 0 ? 'Предварительная стоимость'
   : props.ops?.pricingStates?.find(item => item.value === state.value)?.name ?? 'Стоимость заказа')
 const rubSymbol = computed(() => props.ops?.currencies?.find(item => item.routeAlias === 'rub')?.symbol ?? '₽')
+const totalText = computed(() => props.historical && props.pricing?.totalRub == null
+  ? 'Рассчёт не проводился' : formatRub(props.pricing?.totalRub ?? null, rubSymbol.value))
 const deliveryText = computed(() => props.historical
   ? props.pricing?.domesticDeliveryRub == null ? 'Рассчёт не проводился' : formatRub(props.pricing.domesticDeliveryRub, rubSymbol.value)
   : props.deliverySelected && props.pricing?.domesticDeliveryRub != null ? 'Предварительно ' + formatRub(props.pricing.domesticDeliveryRub, rubSymbol.value)
@@ -58,7 +60,7 @@ const customsText = computed(() => {
     >
       <div class="customer-cost__headline">
         <span>{{ label }}</span>
-        <strong>{{ loading ? 'Рассчитываем стоимость…' : formatRub(pricing?.totalRub ?? null, rubSymbol) }}</strong>
+        <strong>{{ loading ? 'Рассчитываем стоимость…' : totalText }}</strong>
       </div>
       <p
         v-if="preview"

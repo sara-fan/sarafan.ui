@@ -136,9 +136,15 @@ function restoreRequirements(value) {
   step.value = 'requirements'
 }
 
+function documentRoute(document) {
+  const target = { name:'legal-document', params:{ documentRef:document.id } }
+  if (router.resolve(target).fullPath === route.fullPath) target.hash = '#document-content'
+  return target
+}
+
 function openLegalDocument(event, document) {
   if (event.button > 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
-  const documentPath = router.resolve({ name:'legal-document', params:{ documentRef:document.id } }).fullPath
+  const documentPath = router.resolve(documentRoute(document)).fullPath
   authenticationReturn.save({
     owner:props.returnContext,
     originPath:route.fullPath,
@@ -516,7 +522,7 @@ const focusAfter = useValidationFocus(focusRoot, {
             <RouterLink
               id="authentication-terms-document"
               class="consent-document-link"
-              :to="{ name: 'legal-document', params: { documentRef: termsDocument.id } }"
+              :to="documentRoute(termsDocument)"
               @click="openLegalDocument($event, termsDocument)"
             >
               {{ consentStore.kindName(agreementKind) }}
@@ -552,7 +558,7 @@ const focusAfter = useValidationFocus(focusRoot, {
             <RouterLink
               id="authentication-personal-document"
               class="consent-document-link"
-              :to="{ name: 'legal-document', params: { documentRef: pdDocument.id } }"
+              :to="documentRoute(pdDocument)"
               @click="openLegalDocument($event, pdDocument)"
             >
               {{ consentStore.kindName(personalDataKind) }}

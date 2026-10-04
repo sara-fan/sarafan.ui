@@ -361,7 +361,8 @@ onBeforeUnmount(() => { closeAgreement(); releaseConsentNoticeOwnership(); dispo
         <section class="ui-form-section">
           <p>
             Заказ оформляется на условиях документа
-            <RouterLink
+<RouterLink
+              v-if="consents.routeAlias(LEGAL_DOCUMENT_KIND.USER_AGREEMENT)"
               v-slot="{ href }"
               :to="{ name:'legal-document', params:{ documentRef:consents.routeAlias(LEGAL_DOCUMENT_KIND.USER_AGREEMENT) } }"
               custom
@@ -371,7 +372,7 @@ onBeforeUnmount(() => { closeAgreement(); releaseConsentNoticeOwnership(); dispo
                 class="consent-document-link"
                 @click.prevent="readAgreement()"
               >«{{ agreementName }}»</a>
-            </RouterLink>.
+            </RouterLink><span v-else>«{{ agreementName }}»</span>.
           </p>
           <UiButton
             v-if="!consentsCurrent"

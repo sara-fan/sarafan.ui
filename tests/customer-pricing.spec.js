@@ -165,3 +165,17 @@ it.each([null, 0, 55])('shows separate saved checkout delivery %s without changi
   expect(wrapper.get('.customer-cost__headline strong').text()).toBe(formatRub(confirmed.totalRub, '₽'))
   wrapper.unmount()
 })
+
+it.each([false, true])('uses final unknown-price wording in full/compact historical summaries (%s)', async compact => {
+  const wrapper = mount(CustomerCostSummary, { props:{ pricing:null, ops, historical:true, compact } })
+  expect(wrapper.get('.customer-cost__headline strong').text()).toBe('Рассчёт не проводился')
+  await wrapper.setProps({ pricing:forecastPricing })
+  expect(wrapper.get('.customer-cost__headline strong').text()).toBe('Рассчёт не проводился')
+  await wrapper.setProps({ pricing:{ ...calculated, totalRub:0 } })
+  expect(wrapper.get('.customer-cost__headline strong').text()).toBe('0,00 ₽')
+  await wrapper.setProps({ pricing:calculated })
+  expect(wrapper.get('.customer-cost__headline strong').text()).toBe('12 000,00 ₽')
+  await wrapper.setProps({ historical:false, pricing:forecastPricing })
+  expect(wrapper.get('.customer-cost__headline strong').text()).toBe('Стоимость уточняется')
+  wrapper.unmount()
+})
