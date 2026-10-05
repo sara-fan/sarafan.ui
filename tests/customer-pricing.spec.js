@@ -153,7 +153,7 @@ it.each([0, 120, null])('keeps extra rows visible and interprets confirmed custo
 it('retains cancelled historical unknown wording and published customs context', async () => {
   const wrapper = mount(CustomerCostSummary, { props:{ pricing:forecastPricing, ops, historical:true } })
   expect(wrapper.text()).toContain('Последняя рассчитанная стоимость')
-  expect(wrapper.findAll('.customer-cost__excluded dd').map(item => item.text())).toEqual(['Рассчёт не проводился', 'Рассчёт не проводился'])
+  expect(wrapper.findAll('.customer-cost__excluded dd').map(item => item.text())).toEqual(['Расчёт не проводился', 'Расчёт не проводился'])
   await wrapper.setProps({ pricing:{ ...confirmed, customsRub:120 } })
   expect(wrapper.findAll('.customer-cost__excluded dd')[1].text()).toBe('Предварительно 120,00 ₽')
   wrapper.unmount()
@@ -168,9 +168,9 @@ it.each([null, 0, 55])('shows separate saved checkout delivery %s without changi
 
 it.each([false, true])('uses final unknown-price wording in full/compact historical summaries (%s)', async compact => {
   const wrapper = mount(CustomerCostSummary, { props:{ pricing:null, ops, historical:true, compact } })
-  expect(wrapper.get('.customer-cost__headline strong').text()).toBe('Рассчёт не проводился')
+  expect(wrapper.get('.customer-cost__headline strong').text()).toBe('Расчёт не проводился')
   await wrapper.setProps({ pricing:forecastPricing })
-  expect(wrapper.get('.customer-cost__headline strong').text()).toBe('Рассчёт не проводился')
+  expect(wrapper.get('.customer-cost__headline strong').text()).toBe('Расчёт не проводился')
   await wrapper.setProps({ pricing:{ ...calculated, totalRub:0 } })
   expect(wrapper.get('.customer-cost__headline strong').text()).toBe('0,00 ₽')
   await wrapper.setProps({ pricing:calculated })
