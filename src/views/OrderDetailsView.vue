@@ -7,6 +7,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import CustomerCostSummary from '../components/CustomerCostSummary.vue'
+import OrderDeliveryEstimate from '../components/OrderDeliveryEstimate.vue'
 import OrderItemCard from '../components/OrderItemCard.vue'
 import UiAlert from '../components/ui/UiAlert.vue'
 import UiButton from '../components/ui/UiButton.vue'
@@ -301,9 +302,7 @@ onBeforeUnmount(() => {
       >
         {{ order.reviewReason }}
       </UiAlert>
-      <p v-if="order.estimatedDelivery">
-        Ориентировочный срок доставки: {{ order.estimatedDelivery.minimumDays }}–{{ order.estimatedDelivery.maximumDays }} дней
-      </p>
+      <OrderDeliveryEstimate :estimate="order.estimatedDelivery" />
       <CustomerCostSummary
         :pricing="order.pricing"
         :delivery-selected="Boolean(order.checkout)"

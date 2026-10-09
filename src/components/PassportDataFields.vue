@@ -8,6 +8,7 @@ import UiField from './ui/UiField.vue'
 defineProps({
   passport: { type: Object, required: true },
   disabled: { type: Boolean, default: false },
+  required: { type: Boolean, default: false },
   errorsFor: { type: Function, default: () => [] }
 })
 
@@ -23,6 +24,7 @@ const update = (name, value) => emit('update:field', name, value)
       :model-value="passport.inn"
       :disabled="disabled"
       name="inn"
+      :required="required"
       label="ИНН"
       inputmode="numeric"
       maxlength="12"
@@ -33,6 +35,7 @@ const update = (name, value) => emit('update:field', name, value)
       :model-value="passport.passportSeries"
       :disabled="disabled"
       name="passportSeries"
+      :required="required"
       label="Серия паспорта"
       maxlength="32"
       :errors="errorsFor('passportSeries')"
@@ -42,6 +45,7 @@ const update = (name, value) => emit('update:field', name, value)
       :model-value="passport.passportNumber"
       :disabled="disabled"
       name="passportNumber"
+      :required="required"
       label="Номер паспорта"
       maxlength="32"
       :errors="errorsFor('passportNumber')"
@@ -51,6 +55,7 @@ const update = (name, value) => emit('update:field', name, value)
       :model-value="passport.passportIssueDate"
       :disabled="disabled"
       name="passportIssueDate"
+      :required="required"
       label="Дата выдачи"
       type="date"
       :errors="errorsFor('passportIssueDate')"
@@ -61,6 +66,7 @@ const update = (name, value) => emit('update:field', name, value)
         :model-value="passport.passportIssuedBy"
         :disabled="disabled"
         name="passportIssuedBy"
+        :required="required"
         label="Кем выдан"
         multiline
         :rows="2"
