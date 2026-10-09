@@ -7,6 +7,7 @@ import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import CustomerCostSummary from '../components/CustomerCostSummary.vue'
 import OrderDeliveryEstimate from '../components/OrderDeliveryEstimate.vue'
+import OrderSavedDelivery from '../components/OrderSavedDelivery.vue'
 import OrderItemCard from '../components/OrderItemCard.vue'
 import PassportDataFields from '../components/PassportDataFields.vue'
 import ConsentRenewalDialog from '../components/ConsentRenewalDialog.vue'
@@ -332,6 +333,10 @@ onBeforeUnmount(() => { closeAgreement(); releaseConsentNoticeOwnership(); dispo
             @update:field="(name, value) => form[name] = value"
           />
         </section>
+        <OrderSavedDelivery
+          v-if="order.checkout && !ops.checkoutDeliveries.some(option => option.routeAlias === order.checkout.delivery.routeAlias)"
+          :delivery="order.checkout.delivery"
+        />
         <CheckoutDeliverySelector
           v-model="form.delivery"
           :options="ops.checkoutDeliveries"
