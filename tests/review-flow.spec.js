@@ -31,7 +31,7 @@ function consentSnapshot() {
 function ready(overrides = {}) {
   return completeOrder({ status:100, estimatedDelivery:{ minimumDays:14, maximumDays:21 },
     reviewCompletedAt:'2026-09-15T10:00:00Z', reviewReason:null,
-    pricing:{ state:100, totalRub:2500, calculatedAt:'2026-09-15T10:00:00Z', validUntil:'2026-09-16T10:00:00Z', asOf:'2026-09-15T10:00:00Z', domesticDeliveryRub:null, customsRub:null }, ...overrides })
+    pricing:{ state:100, totalRub:2500, calculatedAt:'2026-09-15T10:00:00Z', validUntil:'2026-09-16T10:00:00Z', asOf:'2026-09-15T10:00:00Z', domesticDeliveryRub:null, customsRub:null, customsPaid:false }, ...overrides })
 }
 async function render(path = '/orders/12345678-3', attached = false) {
   if (attached) { mountTarget = document.createElement('div'); document.body.appendChild(mountTarget) }

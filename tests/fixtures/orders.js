@@ -26,7 +26,7 @@ export const pricingStates = [
 
 export const forecastPricing = {
   state:0, totalRub:null, calculatedAt:null, validUntil:null,
-  asOf:'2026-09-15T10:00:00Z', domesticDeliveryRub:null, customsRub:null
+  asOf:'2026-09-15T10:00:00Z', domesticDeliveryRub:null, customsRub:null, customsPaid:false
 }
 
 export const productSourceUrl = {
