@@ -67,7 +67,7 @@ describe('OrderDetailsView', () => {
     expect(wrapper.get('.order-details-heading p').text())
       .toMatch(/^Создан \d{2}\.\d{2}\.\d{4}, \d{2}:\d{2} · Отменён \d{2}\.\d{2}\.\d{4}, \d{2}:\d{2}$/u)
     expect(wrapper.get('.customer-cost__excluded').findAll('dd').map(item => item.text()))
-      .toEqual(['Рассчёт не проводился', 'Рассчёт не проводился'])
+      .toEqual(['Расчёт не проводился', 'Расчёт не проводился'])
     expect(wrapper.find('.order-details-heading .ui-button--danger').exists()).toBe(false)
     expect(h.session.orderRequest.mock.calls.filter(([path]) => path.endsWith('/cancel'))).toHaveLength(1)
   })
@@ -646,7 +646,7 @@ describe('OrderDetailsView', () => {
       return value
     })
     const { wrapper } = await mountAt()
-    expect(wrapper.get('.customer-cost__headline strong').text()).toBe('Рассчёт не проводился')
+    expect(wrapper.get('.customer-cost__headline strong').text()).toBe('Расчёт не проводился')
     expect(wrapper.text()).not.toContain('Стоимость уточняется')
   })
 })

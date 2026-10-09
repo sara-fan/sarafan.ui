@@ -36,14 +36,14 @@ const label = computed(() => props.historical ? 'Последняя рассчи
   : props.ops?.pricingStates?.find(item => item.value === state.value)?.name ?? 'Стоимость заказа')
 const rubSymbol = computed(() => props.ops?.currencies?.find(item => item.routeAlias === 'rub')?.symbol ?? '₽')
 const totalText = computed(() => props.historical && props.pricing?.totalRub == null
-  ? 'Рассчёт не проводился' : formatRub(props.pricing?.totalRub ?? null, rubSymbol.value))
+  ? 'Расчёт не проводился' : formatRub(props.pricing?.totalRub ?? null, rubSymbol.value))
 const deliveryText = computed(() => props.historical
-  ? props.pricing?.domesticDeliveryRub == null ? 'Рассчёт не проводился' : formatRub(props.pricing.domesticDeliveryRub, rubSymbol.value)
+  ? props.pricing?.domesticDeliveryRub == null ? 'Расчёт не проводился' : formatRub(props.pricing.domesticDeliveryRub, rubSymbol.value)
   : props.deliverySelected && props.pricing?.domesticDeliveryRub != null ? 'Предварительно ' + formatRub(props.pricing.domesticDeliveryRub, rubSymbol.value)
   : props.deliverySelected ? 'Будут рассчитаны позже' : 'Рассчитаем при оформлении заказа')
 const customsText = computed(() => {
   const amount = props.pricing?.state === 0 ? null : props.pricing?.customsRub
-  if (amount == null) return props.historical ? 'Рассчёт не проводился' : props.pricing?.state === 0 ? 'Проверяем, потребуются ли таможенные платежи' : 'Будут рассчитаны позже'
+  if (amount == null) return props.historical ? 'Расчёт не проводился' : props.pricing?.state === 0 ? 'Проверяем, потребуются ли таможенные платежи' : 'Будут рассчитаны позже'
   return amount === 0 ? 'Не ожидаются' : 'Предварительно ' + formatRub(amount, rubSymbol.value)
 })
 </script>

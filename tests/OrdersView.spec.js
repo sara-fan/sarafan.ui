@@ -246,8 +246,8 @@ describe('OrdersView', () => {
     expect(h.store.dispose).toHaveBeenCalledOnce()
   })
   it.each([
-    [500, 'Рассчёт не проводился', false],
-    [600, 'Рассчёт не проводился', false],
+    [500, 'Расчёт не проводился', false],
+    [600, 'Расчёт не проводился', false],
     [0, 'Стоимость уточняется', true],
     [400, 'Стоимость уточняется', true]
   ])('renders unknown prices and delivery placeholders for status %s', async (status, price, deliveryPlaceholder) => {
