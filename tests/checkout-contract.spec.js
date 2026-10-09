@@ -29,7 +29,7 @@ describe('checkout response contract', () => {
     expect(() => validateCustomerOrder(completeOrder({ checkout:dto }), ops, '12345678-3')).toThrow(expect.objectContaining({ code:'ui_protocol_error' }))
   })
   it.each([
-    null, [], [ops.checkoutDeliveries[0]], [ops.checkoutDeliveries[0], ops.checkoutDeliveries[0]],
+    null, [], [ops.checkoutDeliveries[1]], [ops.checkoutDeliveries[0], ops.checkoutDeliveries[0]],
     [null, ops.checkoutDeliveries[1]], [{ ...ops.checkoutDeliveries[0], name:'' }, ops.checkoutDeliveries[1]],
     [{ ...ops.checkoutDeliveries[0], destination:123 }, ops.checkoutDeliveries[1]],
     [{ ...ops.checkoutDeliveries[0], routeAlias:'other' }, ops.checkoutDeliveries[1]]
@@ -45,4 +45,12 @@ describe('checkout response contract', () => {
     expect(isOrderCheckoutPath('/api/v1/orders/12345678-3/checkout')).toBe(true)
     for (const path of [null, '/api/v1/orders/ops/checkout', '/api/v1/orders/%zz/checkout', '/api/v1/orders/3/checkout/other', '/api/v1/orders/%2e%2e/checkout']) expect(isOrderCheckoutPath(path)).toBe(false)
   })
+})
+
+it('accepts a courier-only Pilot catalogue and historical pickup snapshots independently', () => {
+  const pilot = ops.checkoutDeliveries.slice(0, 1)
+  expect(validateCheckoutDeliveries(pilot)).toEqual(pilot)
+  const value = checkout()
+  value.delivery = { routeAlias:'pickup', name:'Исторический ПВЗ', destination:'Сохранённый адрес' }
+  expect(validateCustomerOrder(completeOrder({ checkout:value }), { ...ops, checkoutDeliveries:pilot }, '12345678-3').checkout).toEqual(value)
 })

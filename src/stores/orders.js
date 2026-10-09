@@ -142,7 +142,7 @@ function validateCompleteOrder(value, ops) {
   const product = validateProductDto(value.product, ops.currencies, ops.productLimits)
   const pricing = validatePricing(value.pricing)
   const estimate = validateDeliveryEstimate(value.estimatedDelivery)
-  const checkout = value.checkout == null ? null : validateCheckout(value.checkout, ops.checkoutDeliveries)
+  const checkout = value.checkout == null ? null : validateCheckout(value.checkout)
   if (value.reviewReason != null && !validText(value.reviewReason, 2000)
     || value.reviewCompletedAt != null && (!isRfc3339DateTime(value.reviewCompletedAt) || Date.parse(value.reviewCompletedAt) < Date.parse(value.createdAt) || Date.parse(value.reviewCompletedAt) > Date.parse(value.updatedAt))
     || value.status === 600 && (!value.reviewReason || !value.reviewCompletedAt || value.canCancel)) protocolError()

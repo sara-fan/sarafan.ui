@@ -6,6 +6,7 @@
 import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import CustomerCostSummary from '../components/CustomerCostSummary.vue'
+import OrderDeliveryEstimate from '../components/OrderDeliveryEstimate.vue'
 import OrderItemCard from '../components/OrderItemCard.vue'
 import PassportDataFields from '../components/PassportDataFields.vue'
 import ConsentRenewalDialog from '../components/ConsentRenewalDialog.vue'
@@ -17,6 +18,7 @@ import UiField from '../components/ui/UiField.vue'
 import CheckoutDeliverySelector from '../components/CheckoutDeliverySelector.vue'
 import DeliveryAddressFields from '../components/DeliveryAddressFields.vue'
 import { deliveryAddress, deliveryAddressFields, hasDeliveryAddress } from '../orders/deliveryAddress.js'
+import { hasCheckoutProfile, requiredCheckoutProfileFields } from '../orders/checkout.js'
 import { CORE_PROBLEM_TYPES, createInternalProblem, normalizeProblem, presentProblem, presentProblemTitle, problemFieldErrors, hasOnlyPresentedFieldErrors } from '../errors/problem.js'
 import { isOrderNumber } from '../orderNumber.js'
 import { validateCustomerOrder, validateOrderOps } from '../stores/orders.js'
@@ -38,7 +40,6 @@ const recipientFields = { lastName:'Фамилия', firstName:'Имя', patrony
 const profileFields = ['lastName', 'firstName', 'patronymic', 'email', 'inn', 'passportSeries', 'passportNumber', 'passportIssueDate', 'passportIssuedBy']
 const fieldName = key => profileFields.includes(key) ? 'profile.' + key : deliveryAddressFields.includes(key) ? 'deliveryAddress.' + key : key
 const aliases = Object.fromEntries([...profileFields, ...deliveryAddressFields, 'phone'].map(key => [fieldName(key), key]))
-const examples = ['Фото товара на складе в США', 'Проверка товара', 'Страхование отправления']
 let generation = 0, expiryTimer, formContext = null, disposed = false
 let agreementGeneration = 0, releaseAgreementNotice = null, agreementBoundaryTimer = null
 let releaseConsentNotice = null
@@ -46,9 +47,11 @@ function ownConsentNotice() { releaseConsentNotice ??= consents.acquireNoticeSup
 function releaseConsentNoticeOwnership() { releaseConsentNotice?.(); releaseConsentNotice = null }
 function releaseConsentNoticeIfClear() { if (!problem.value && !writeProblem.value) releaseConsentNoticeOwnership() }
 const active = computed(() => order.value?.status === 100 && order.value?.pricing.state === 100 && !expired.value)
-const savedCourier = computed(() => !addressChanged.value && order.value?.checkout?.delivery.routeAlias === 'courier' ? order.value.checkout.delivery : null)
+const savedCourier = computed(() => !addressChanged.value && order.value?.checkout?.delivery.routeAlias === 'courier' && hasDeliveryAddress(order.value.checkout.profile) ? order.value.checkout.delivery : null)
 const keepCourier = computed(() => form.delivery === 'courier' && Boolean(savedCourier.value))
-const complete = computed(() => form.firstName?.trim() && form.lastName?.trim() && form.phone?.trim() && form.delivery && (keepCourier.value || form.delivery !== 'courier' || hasDeliveryAddress(address.value)))
+const deliveryComplete = computed(() => ops.value?.checkoutDeliveries.some(option => option.routeAlias === form.delivery)
+  && (keepCourier.value || form.delivery !== 'courier' || hasDeliveryAddress(address.value)))
+const complete = computed(() => hasCheckoutProfile(form) && form.phone?.trim() && deliveryComplete.value)
 const consentsCurrent = computed(() => consents.mine.value?.customerId === session.customer.value?.id
   && [LEGAL_DOCUMENT_KIND.PERSONAL_DATA_CONSENT, LEGAL_DOCUMENT_KIND.USER_AGREEMENT]
     .every(kind => consents.mine.value?.statuses.find(row => row.kind === kind)?.status === 'current'))
@@ -81,7 +84,7 @@ async function load(reconcileDelivery = false) {
     await session.orderRequest('/api/v1/orders/ops', {}, isCurrent, data => { catalog = validateOrderOps(data) })
     if (!isCurrent()) return
     if (!catalog.checkoutDeliveries) throw createInternalProblem('protocolError')
-    await session.orderRequest('/api/v1/orders/' + encodeURIComponent(number), {}, isCurrent, data => { value = validateCustomerOrder(data, catalog, number) })
+    await session.orderRequest('/api/v1/orders/' + encodeURIComponent(number) + '/checkout', {}, isCurrent, data => { value = validateCustomerOrder(data, catalog, number) })
     if (!isCurrent()) return
     ops.value = catalog; order.value = value
     if (fill || !addressChanged.value) {
@@ -93,10 +96,10 @@ async function load(reconcileDelivery = false) {
       const profile = value.checkout?.profile ?? session.customer.value?.profile ?? {}
       for (const key of [...profileFields, 'phone']) form[key] = profile[key] ?? ''
       form.phone = session.customer.value.phone
-      form.delivery = value.checkout?.delivery.routeAlias ?? ''
+      form.delivery = catalog.checkoutDeliveries.some(option => option.routeAlias === value.checkout?.delivery.routeAlias) ? value.checkout.delivery.routeAlias : ''
       formContext = context
     }
-    if (!fill && reconcileDelivery === true && value.checkout) form.delivery = value.checkout.delivery.routeAlias
+    if (!fill && reconcileDelivery === true && value.checkout) form.delivery = catalog.checkoutDeliveries.some(option => option.routeAlias === value.checkout.delivery.routeAlias) ? value.checkout.delivery.routeAlias : ''
     conflict.value = false
     const remaining = Date.parse(value.pricing.validUntil) - Date.parse(value.pricing.asOf)
     if (value.pricing.state === 100 && remaining > 0) expiryTimer = globalThis.setTimeout(() => { expired.value = true }, Math.min(remaining, 2147483647))
@@ -233,7 +236,7 @@ onBeforeUnmount(() => { closeAgreement(); releaseConsentNoticeOwnership(); dispo
           :loading="busy"
           :disabled="loading || busy || conflict || !complete || !consentsCurrent"
         >
-          Оплатить заказ
+          Перейти к оплате
         </UiButton>
         <UiButton @click="router.push({ name:'order-details', params:{ orderNumber:order.orderNumber } })">
           Вернуться к заказу
@@ -287,13 +290,11 @@ onBeforeUnmount(() => { closeAgreement(); releaseConsentNoticeOwnership(); dispo
       >
         Заказ обновлён. Введённые данные сохранены в форме. Проверьте выбранную доставку и повторите действие.
       </UiAlert>
-      <p v-if="order.estimatedDelivery">
-        Ориентировочная доставка: {{ order.estimatedDelivery.minimumDays }}–{{ order.estimatedDelivery.maximumDays }} дней
-      </p>
+      <OrderDeliveryEstimate :estimate="order.estimatedDelivery" />
       <CustomerCostSummary
         :pricing="order.pricing"
         :ops="ops"
-        :delivery-selected="Boolean(form.delivery)"
+        :delivery-selected="Boolean(deliveryComplete)"
       />
       <OrderItemCard
         :order="order"
@@ -313,7 +314,7 @@ onBeforeUnmount(() => { closeAgreement(); releaseConsentNoticeOwnership(); dispo
               :errors="fieldErrors(key)"
               :disabled="busy"
               :readonly="key === 'phone'"
-              :required="['lastName', 'firstName', 'phone'].includes(key)"
+              :required="key === 'phone' || requiredCheckoutProfileFields.includes(key)"
               :type="key === 'phone' ? 'tel' : key === 'email' ? 'email' : 'text'"
             />
           </div>
@@ -324,6 +325,7 @@ onBeforeUnmount(() => { closeAgreement(); releaseConsentNoticeOwnership(); dispo
             <p>Нужны для таможенного оформления</p>
           </div>
           <PassportDataFields
+            required
             :passport="form"
             :disabled="busy"
             :errors-for="fieldErrors"
@@ -351,17 +353,9 @@ onBeforeUnmount(() => { closeAgreement(); releaseConsentNoticeOwnership(); dispo
           </template>
         </CheckoutDeliverySelector>
         <section class="ui-form-section">
-          <h2>Дополнительные услуги</h2><p
-            v-for="example in examples"
-            :key="example"
-          >
-            {{ example }} — В разработке
-          </p>
-        </section>
-        <section class="ui-form-section">
           <p>
             Заказ оформляется на условиях документа
-<RouterLink
+            <RouterLink
               v-if="consents.routeAlias(LEGAL_DOCUMENT_KIND.USER_AGREEMENT)"
               v-slot="{ href }"
               :to="{ name:'legal-document', params:{ documentRef:consents.routeAlias(LEGAL_DOCUMENT_KIND.USER_AGREEMENT) } }"

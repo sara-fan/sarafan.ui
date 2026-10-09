@@ -65,7 +65,7 @@ beforeEach(() => {
     return vi.fn(() => { noticeTokens.delete(token); h.consents.noticeSuppressed.value = noticeTokens.size > 0 })
   })
   h.renewal = { state:{ open:false, documents:[], reading:null, problem:null, problemKind:null }, cancel:vi.fn(), ensure:vi.fn(async () => { h.missing = []; await h.consents.loadMine(); return true }) }
-  h.session.customer = ref({ id:7, phone:'+79990001234', profile:{ firstName:'Иван', lastName:'Иванов', postalCode:'123456', city:'Москва', address:'Адрес' } })
+  h.session.customer = ref({ id:7, phone:'+79990001234', profile:{ firstName:'Иван', lastName:'Иванов', patronymic:null, email:'test@example.com', passportSeries:'1234', passportNumber:'123456', passportIssueDate:'2010-01-01', passportIssuedBy:'МВД', inn:'123456789012', postalCode:'123456', city:'Москва', address:'Адрес' } })
   h.session.refreshCustomer = vi.fn(async () => h.session.customer.value)
   h.session.orderRequest = vi.fn(async (path, _options, isCurrent, validate) => {
     const value = path.endsWith('/ops') ? ops : currentOrder
@@ -78,7 +78,7 @@ afterEach(() => { wrapper?.unmount(); wrapper = null; mountTarget?.remove(); mou
 describe('review result and checkout entry', () => {
   it('shows ETA and rechecks the quote before opening the final form', async () => {
     await render()
-    expect(wrapper.text()).toContain('14–21 дней')
+    expect(wrapper.text()).toContain('14–21 календарных дней с момента подтверждения оплаты')
     expect(wrapper.text()).toContain('Будут рассчитаны позже')
     const cta = wrapper.findAll('button').find(button => button.text() === 'Оформить заказ')
     expect(cta.classes()).toContain('ui-button--primary')
@@ -87,13 +87,14 @@ describe('review result and checkout entry', () => {
     expect(wrapper.get('form').text()).toContain('Получатель')
     expect(wrapper.get('input[name="phone"]').element.value).toBe('+79990001234')
     expect(wrapper.get('input[name="firstName"]').element.value).toBe('Иван')
-    expect(wrapper.get('input[name="email"]').attributes('required')).toBeUndefined()
+    expect(wrapper.get('input[name="email"]').attributes('required')).toBeDefined()
     expect(wrapper.findAll('input[name="delivery"]')).toHaveLength(2)
     expect(wrapper.get('input[name="sellerPrice"]').attributes('readonly')).toBeDefined()
     expect(wrapper.find('.order-review-card .order-item-fields').exists()).toBe(true)
     expect(wrapper.find('.order-review-card dl').exists()).toBe(false)
-    expect(wrapper.text().match(/В разработке/g)).toHaveLength(3)
-    expect(h.session.orderRequest.mock.calls.filter(([path]) => path === '/api/v1/orders/12345678-3')).toHaveLength(3)
+    expect(wrapper.text()).not.toContain('Дополнительные услуги')
+    expect(wrapper.text()).not.toContain('В разработке')
+    expect(h.session.orderRequest.mock.calls.filter(([path]) => path === '/api/v1/orders/12345678-3')).toHaveLength(2)
   })
   it('reuses the read-only item card with formatted seller amounts and retained review metadata', async () => {
     currentOrder = ready({ showReviewFields:false, characteristics:{ Материал:'Хлопок <script>' }, dimensions:{ lengthCm:10, widthCm:20, heightCm:30 } })
@@ -173,7 +174,7 @@ it.each([{ minimumDays:0, maximumDays:1 }, { minimumDays:20, maximumDays:14 }, {
   expect(() => validateCustomerOrders([ready({ estimatedDelivery:value })], ops)).toThrow()
 })
 
-function paymentButton() { return wrapper.findAll('button').find(button => button.text() === 'Оплатить заказ') }
+function paymentButton() { return wrapper.findAll('button').find(button => button.text() === 'Перейти к оплате') }
 function savedCheckout(payload) {
   const fields = ['lastName', 'firstName', 'patronymic', 'email', 'passportSeries', 'passportNumber', 'passportIssueDate', 'passportIssuedBy', 'inn', 'postalCode', 'city', 'address']
   return { profile:{ ...Object.fromEntries(fields.map(field => [field, null])), ...h.session.customer.value.profile, ...payload.profile, ...payload.deliveryAddress,
@@ -191,10 +192,10 @@ describe('checkout completion', () => {
     await vi.waitFor(() => expect(router.currentRoute.value.name).toBe('order-details'))
     expect(h.session.orderRequest.mock.calls.some(([, options]) => options.method === 'POST')).toBe(false)
   })
-  it('gates the CTA, saves optional email with the read-only account phone, then continues to payment', async () => {
+  it('gates the CTA, saves required email with the read-only account phone, then continues to payment', async () => {
     await render('/orders/12345678-3/checkout', true)
     expect(paymentButton().attributes('disabled')).toBeDefined()
-    expect(wrapper.findAll('button').filter(button => button.text() === 'Оплатить заказ')).toHaveLength(1)
+    expect(wrapper.findAll('button').filter(button => button.text() === 'Перейти к оплате')).toHaveLength(1)
     expect(paymentButton().element.closest('header')).not.toBeNull()
     expect(paymentButton().element.form).toBe(wrapper.get('form').element)
     expect(wrapper.get('form').find('button[type="submit"]').exists()).toBe(false)
@@ -415,7 +416,7 @@ it('submits the displayed courier address and refreshes a stale address without 
 })
 
 it('embeds shared address fields and submits them with checkout without saving the profile separately', async () => {
-  h.session.customer.value.profile = { firstName:'Иван', lastName:'Иванов' }
+  h.session.customer.value.profile = { ...h.session.customer.value.profile, postalCode:null, city:null, address:null }
   await render('/orders/12345678-3/checkout')
   await wrapper.get('input[value="courier"]').setValue(true)
   await wrapper.get('input[name="firstName"]').setValue('Черновик')
@@ -812,4 +813,81 @@ it('cancels the scheduled checkout reader refresh when the document dialog close
   await vi.advanceTimersByTimeAsync(1000); await flushPromises()
   expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
   expect(h.consents.current).toHaveBeenCalledOnce()
+})
+
+function usePilotCatalogue() {
+  const pilotOps = { ...ops, checkoutDeliveries:ops.checkoutDeliveries.slice(0, 1) }
+  h.session.orderRequest.mockImplementation(async (path, _options, isCurrent, validate) => {
+    const value = path.endsWith('/ops') ? pilotOps : currentOrder
+    if (isCurrent()) validate(value)
+    return value
+  })
+}
+
+describe('Pilot checkout requirements', () => {
+  it.each(['lastName', 'firstName', 'email', 'passportSeries', 'passportNumber', 'passportIssueDate', 'passportIssuedBy', 'inn'])('blocks missing %s without saving the draft', async field => {
+    usePilotCatalogue()
+    const original = h.session.customer.value.profile[field]
+    h.session.customer.value.profile[field] = ''
+    await render('/orders/12345678-3/checkout')
+    await wrapper.get('input[value="courier"]').setValue(true)
+    expect(wrapper.get('[name="' + field + '"]').attributes('required')).toBeDefined()
+    expect(paymentButton().attributes('disabled')).toBeDefined()
+    await wrapper.get('form').trigger('submit'); await flushPromises()
+    expect(h.session.orderRequest.mock.calls.some(([, options]) => options.method === 'POST')).toBe(false)
+    expect(wrapper.get('[name="' + field + '"]').element.value).toBe('')
+    await wrapper.get('[name="' + field + '"]').setValue(original)
+    expect(paymentButton().attributes('disabled')).toBeUndefined()
+    expect(wrapper.get('[name="patronymic"]').attributes('required')).toBeUndefined()
+  })
+
+  it.each(['postalCode', 'city', 'address'])('reveals the saved delivery amount only with a complete courier address: %s', async field => {
+    usePilotCatalogue()
+    currentOrder.pricing.domesticDeliveryRub = 55
+    h.session.customer.value.profile[field] = null
+    await render('/orders/12345678-3/checkout')
+    expect(wrapper.findAll('input[name="delivery"]')).toHaveLength(1)
+    expect(wrapper.find('input[value="pickup"]').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('Дополнительные услуги')
+    await wrapper.get('input[value="courier"]').setValue(true)
+    expect(wrapper.text()).not.toContain('Предварительно 55,00')
+    expect(paymentButton().attributes('disabled')).toBeDefined()
+    const reads = h.session.orderRequest.mock.calls.length
+    await wrapper.get('[name="' + field + '"]').setValue('Новое значение')
+    expect(wrapper.text()).toContain('Предварительно 55,00')
+    expect(wrapper.text()).toContain('2 500,00'.replace(' ', '\u00a0'))
+    expect(paymentButton().attributes('disabled')).toBeUndefined()
+    expect(h.session.orderRequest).toHaveBeenCalledTimes(reads)
+    expect(h.session.orderRequest.mock.calls.some(([, options]) => options.method === 'POST')).toBe(false)
+    expect(h.session.orderRequest.mock.calls.some(([path]) => path === '/api/v1/orders/12345678-3/checkout')).toBe(true)
+  })
+
+  it.each([null, 0])('keeps unknown and zero delivery amounts distinct before payment: %s', async amount => {
+    usePilotCatalogue()
+    currentOrder.pricing.domesticDeliveryRub = amount
+    await render('/orders/12345678-3/checkout')
+    await wrapper.get('input[value="courier"]').setValue(true)
+    expect(wrapper.text()).toContain(amount === null ? 'Будут рассчитаны позже' : 'Предварительно 0,00')
+  })
+
+  it('reads historical pickup without offering it and requires a courier selection for another save', async () => {
+    usePilotCatalogue()
+    currentOrder.checkout = savedCheckout({ profile:{}, delivery:'pickup' })
+    await render('/orders/12345678-3/checkout')
+    expect(wrapper.find('input[value="pickup"]').exists()).toBe(false)
+    expect(wrapper.get('[name="firstName"]').element.value).toBe('Иван')
+    expect(paymentButton().attributes('disabled')).toBeDefined()
+    await wrapper.get('input[value="courier"]').setValue(true)
+    expect(paymentButton().attributes('disabled')).toBeUndefined()
+  })
+})
+
+it('requires completing an incomplete historical courier snapshot before another save', async () => {
+  usePilotCatalogue()
+  currentOrder.checkout = savedCheckout({ profile:{ postalCode:null }, delivery:'courier' })
+  await render('/orders/12345678-3/checkout')
+  expect(paymentButton().attributes('disabled')).toBeDefined()
+  expect(wrapper.get('[name="postalCode"]').element.value).toBe('')
+  await wrapper.get('[name="postalCode"]').setValue('654321')
+  expect(paymentButton().attributes('disabled')).toBeUndefined()
 })
