@@ -8,6 +8,7 @@ import { useRoute, useRouter } from 'vue-router'
 
 import CustomerCostSummary from '../components/CustomerCostSummary.vue'
 import OrderDeliveryEstimate from '../components/OrderDeliveryEstimate.vue'
+import OrderSavedDelivery from '../components/OrderSavedDelivery.vue'
 import OrderItemCard from '../components/OrderItemCard.vue'
 import UiAlert from '../components/ui/UiAlert.vue'
 import UiButton from '../components/ui/UiButton.vue'
@@ -303,6 +304,7 @@ onBeforeUnmount(() => {
         {{ order.reviewReason }}
       </UiAlert>
       <OrderDeliveryEstimate :estimate="order.estimatedDelivery" />
+      <OrderSavedDelivery :delivery="order.checkout?.delivery" />
       <CustomerCostSummary
         :pricing="order.pricing"
         :delivery-selected="Boolean(order.checkout)"

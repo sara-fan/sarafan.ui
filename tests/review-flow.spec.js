@@ -80,6 +80,7 @@ describe('review result and checkout entry', () => {
     await render()
     expect(wrapper.text()).toContain('14–21 календарных дней с момента подтверждения оплаты')
     expect(wrapper.text()).toContain('Будут рассчитаны позже')
+    expect(wrapper.find('section[aria-label="Сохранённая доставка"]').exists()).toBe(false)
     const cta = wrapper.findAll('button').find(button => button.text() === 'Оформить заказ')
     expect(cta.classes()).toContain('ui-button--primary')
     await cta.trigger('click'); await flushPromises()
@@ -870,15 +871,76 @@ describe('Pilot checkout requirements', () => {
     expect(wrapper.text()).toContain(amount === null ? 'Будут рассчитаны позже' : 'Предварительно 0,00')
   })
 
-  it('reads historical pickup without offering it and requires a courier selection for another save', async () => {
+  it('shows the retained pickup details without offering it and requires courier for another save', async () => {
     usePilotCatalogue()
     currentOrder.checkout = savedCheckout({ profile:{}, delivery:'pickup' })
+    const savedDelivery = { routeAlias:'pickup', name:'Прежний пункт выдачи', destination:'Сохранённый адрес <img src=x onerror=alert(1)>' }
+    currentOrder.checkout.delivery = savedDelivery
     await render('/orders/12345678-3/checkout')
+    const summary = wrapper.get('section[aria-label="Сохранённая доставка"]')
+    expect(summary.text()).toContain(savedDelivery.name)
+    expect(summary.text()).toContain(savedDelivery.destination)
+    expect(summary.find('img').exists()).toBe(false)
+    expect(summary.find('input, textarea, button, a').exists()).toBe(false)
     expect(wrapper.find('input[value="pickup"]').exists()).toBe(false)
+    expect(wrapper.get('input[value="courier"]').element.checked).toBe(false)
     expect(wrapper.get('[name="firstName"]').element.value).toBe('Иван')
     expect(paymentButton().attributes('disabled')).toBeDefined()
     await wrapper.get('input[value="courier"]').setValue(true)
     expect(paymentButton().attributes('disabled')).toBeUndefined()
+    expect(summary.text()).toContain(savedDelivery.destination)
+    expect(currentOrder.checkout.delivery).toEqual(savedDelivery)
+  })
+
+  it.each(['courier', 'pickup'])('shows saved %s delivery in order details independently of the current catalogue and profile', async delivery => {
+    usePilotCatalogue()
+    currentOrder.checkout = savedCheckout({ profile:{}, delivery })
+    const savedDelivery = { routeAlias:delivery, name:'Сохранённый способ доставки', destination:'Прежний адрес <script>alert(1)</script>' }
+    currentOrder.checkout.delivery = savedDelivery
+    h.session.customer.value.profile.address = 'Новый адрес профиля'
+    await render()
+    const summary = wrapper.get('section[aria-label="Сохранённая доставка"]')
+    expect(summary.text()).toContain(savedDelivery.name)
+    expect(summary.text()).toContain(savedDelivery.destination)
+    expect(summary.text()).not.toContain('Новый адрес профиля')
+    expect(summary.find('script').exists()).toBe(false)
+    expect(summary.find('input, textarea, button, a').exists()).toBe(false)
+  })
+
+  it('retains the recipient draft and displays unavailable pickup after a conflict reload without selecting it', async () => {
+    usePilotCatalogue()
+    await render('/orders/12345678-3/checkout')
+    await wrapper.get('input[value="courier"]').setValue(true)
+    await wrapper.get('[name="firstName"]').setValue('Мой получатель')
+    h.session.orderRequest.mockRejectedValueOnce(new ProblemError({
+      type:CORE_PROBLEM_TYPES.orderUpdateConflict, title:'Заказ изменился', detail:'Обновите заказ.', status:409, code:'order_update_conflict'
+    }))
+    await wrapper.get('form').trigger('submit'); await flushPromises()
+    currentOrder = { ...currentOrder, updatedAt:'2026-09-15T10:00:01Z', checkout:savedCheckout({ profile:{ firstName:'Другое имя' }, delivery:'pickup' }) }
+    currentOrder.checkout.delivery.name = 'Ранее сохранённый ПВЗ'
+    currentOrder.checkout.delivery.destination = 'Исторический адрес выдачи'
+    await wrapper.findAll('button').find(button => button.text() === 'Обновить данные заказа').trigger('click'); await flushPromises()
+    const summary = wrapper.get('section[aria-label="Сохранённая доставка"]')
+    expect(summary.text()).toContain('Ранее сохранённый ПВЗ')
+    expect(summary.text()).toContain('Исторический адрес выдачи')
+    expect(wrapper.get('[name="firstName"]').element.value).toBe('Мой получатель')
+    expect(wrapper.find('input[value="pickup"]').exists()).toBe(false)
+    expect(wrapper.get('input[value="courier"]').element.checked).toBe(false)
+    expect(paymentButton().attributes('disabled')).toBeDefined()
+    await wrapper.get('form').trigger('submit'); await flushPromises()
+    expect(h.session.orderRequest.mock.calls.filter(([, options]) => options.method === 'POST')).toHaveLength(1)
+    await wrapper.get('input[value="courier"]').setValue(true)
+    h.session.orderRequest.mockImplementationOnce(async (_path, options, isCurrent, validate) => {
+      const payload = JSON.parse(options.body)
+      expect(payload.delivery).toBe('courier')
+      expect(payload.expectedUpdatedAt).toBe(currentOrder.updatedAt)
+      expect(payload.profile.firstName).toBe('Мой получатель')
+      const value = { ...currentOrder, checkout:savedCheckout(payload) }
+      if (isCurrent()) validate(value)
+      return value
+    })
+    await wrapper.get('form').trigger('submit'); await flushPromises()
+    await vi.waitFor(() => expect(router.currentRoute.value.name).toBe('payment'))
   })
 })
 
