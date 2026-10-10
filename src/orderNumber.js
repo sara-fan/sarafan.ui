@@ -16,6 +16,10 @@ export function isOrderDetailPath(path) {
   }
 }
 
+export function isOrderPaymentPath(path) {
+  return typeof path === 'string' && path.endsWith('/payment') && isOrderDetailPath(path.slice(0, -'/payment'.length))
+}
+
 export function isOrderCheckoutPath(path) {
   return typeof path === 'string' && path.endsWith('/checkout') && isOrderDetailPath(path.slice(0, -'/checkout'.length))
 }

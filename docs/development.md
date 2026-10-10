@@ -94,3 +94,7 @@ To select it on GitHub, append `&template=traceability.md` to a PR creation URL 
 
 The template is opt-in, is not the default PR body, and has no CI enforcement. Applicable issue and repository requirements still apply when using a custom description.
 
+
+## Pilot payment flow
+
+Payment information is managed by administrators in Back Office. The customer payment route reads the owner-only Core payment envelope and displays the saved main amount, separate domestic delivery/customs, enabled recipient and static QR. Missing configuration uses «Оплата пока недоступна. Попробуйте позже»; expired quotes cannot be paid by customers. The bank action refreshes first and requires another click after changed data. Bank return does not change status: staff records receipt after reconciliation, including expired quotes. QR previews share the immutable ui-shared helper with Back Office and are discarded on identity/route/bundle changes. No payment information is persisted or logged. Use mocked tests and the pinned package artifact for verification. Saved checkout exposes payment navigation from order details without a separate edit action. Delivery and ETA share the product-panel presentation, with ETA after the address. Product and all cost summaries reuse ui-section-title typography; narrow full cards wrap their headings and compact lists retain their smaller sizing.

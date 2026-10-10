@@ -245,9 +245,11 @@ button:focus-visible {
 .ui-data-grid dt { color: var(--sarafan-muted); font-size: 12px; }
 .ui-data-grid dd { margin: 4px 0 0; color: var(--sarafan-ink); overflow-wrap: anywhere; font-size: 14px; font-weight: 650; line-height: 20px; }
 .ui-form-section h2 { margin: 0; color: var(--sarafan-accent-hover); font: 500 25px/1.15 var(--sarafan-font-display); }
+.ui-section-title { margin: 0; color: var(--sarafan-accent-hover); font: 500 30px/1.1 var(--sarafan-font-display); }
 
 @media (max-width: 767px) {
   .ui-form-panel { padding-inline: var(--sarafan-space-20); border-radius: var(--sarafan-radius-20); }
+  .ui-section-title { font-size: 25px; }
   .ui-form-section__heading { align-items: flex-start; flex-direction: column; gap: var(--sarafan-space-8); }
   .ui-form-grid, .ui-data-grid { grid-template-columns: 1fr; }
   .ui-form-grid--recipient, .ui-data-grid--recipient { grid-template-columns: 1fr; }

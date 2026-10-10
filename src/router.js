@@ -12,7 +12,7 @@ import LegalDocumentView from './views/LegalDocumentView.vue'
 import NotFoundView from './views/NotFoundView.vue'
 import OrderDetailsView from './views/OrderDetailsView.vue'
 import OrdersView from './views/OrdersView.vue'
-import PendingView from './views/PendingView.vue'
+import PaymentView from './views/PaymentView.vue'
 import ProfileView from './views/ProfileView.vue'
 import ProductView from './views/ProductView.vue'
 
@@ -29,7 +29,7 @@ export const routes = [
   { path: '/orders', name: 'orders', component: OrdersView, meta: { access: ACCESS.CUSTOMER, navigationSection: 'orders' } },
   { path: '/orders/:orderNumber', name: 'order-details', component: OrderDetailsView, meta: { access: ACCESS.CUSTOMER, navigationSection: 'orders' } },
   { path: '/orders/:orderNumber/checkout', name: 'checkout', component: CheckoutView, meta: { access: ACCESS.CUSTOMER, navigationSection: 'orders' } },
-  { path: '/orders/:orderNumber/payment', name: 'payment', component: PendingView, props: { title: 'Оплата', copy: 'Демонстрационная оплата будет подключена отдельной задачей MVP.' }, meta: { access: ACCESS.CUSTOMER, navigationSection: 'orders' } },
+  { path: '/orders/:orderNumber/payment', name: 'payment', component: PaymentView, meta: { access: ACCESS.CUSTOMER, navigationSection: 'orders' } },
   { path: '/profile', name: 'profile', component: ProfileView, meta: { access: ACCESS.CUSTOMER, navigationSection: 'profile' } },
   { path: '/legal/:documentRef', name: 'legal-document', component: LegalDocumentView, meta: { access: ACCESS.LIMITED } },
   { path: '/consents/cookies', redirect: '/consents' },

@@ -11,6 +11,8 @@ const props = defineProps({
   pricing: { type: Object, default: null },
   ops: { type: Object, default: null },
   compact: { type: Boolean, default: false },
+  payment: { type:Boolean, default:false },
+  mainPaymentRub: { type:Number, default:null },
   historical: { type: Boolean, default: false },
   deliverySelected: { type: Boolean, default: false },
   preview: { type: Boolean, default: false },
@@ -22,7 +24,7 @@ let timer
 watch(() => props.pricing, pricing => {
   globalThis.clearTimeout(timer)
   expiredNow.value = false
-  if (pricing?.validUntil && pricing.state === 100) {
+  if (!props.payment && pricing?.validUntil && pricing.state === 100) {
     const remaining = Date.parse(pricing.validUntil) - Date.parse(pricing.asOf)
     if (remaining <= 0) expiredNow.value = true
     else timer = globalThis.setTimeout(() => { expiredNow.value = true }, Math.min(remaining, 2147483647))
@@ -31,12 +33,12 @@ watch(() => props.pricing, pricing => {
 onUnmounted(() => globalThis.clearTimeout(timer))
 
 const state = computed(() => expiredNow.value ? 200 : props.pricing?.state ?? 0)
-const label = computed(() => props.historical ? 'Последняя рассчитанная стоимость'
+const label = computed(() => props.payment ? 'Сумма к оплате' : props.historical ? 'Последняя рассчитанная стоимость'
   : props.preview ? 'Прогнозная стоимость'
   : props.pricing?.state === 0 ? 'Предварительная стоимость'
   : props.ops?.pricingStates?.find(item => item.value === state.value)?.name ?? 'Стоимость заказа')
 const rubSymbol = computed(() => props.ops?.currencies?.find(item => item.routeAlias === 'rub')?.symbol ?? '₽')
-const totalText = computed(() => props.historical && props.pricing?.totalRub == null
+const totalText = computed(() => props.payment ? formatRub(props.mainPaymentRub, rubSymbol.value) : props.historical && props.pricing?.totalRub == null
   ? 'Расчёт не проводился' : formatRub(props.pricing?.totalRub ?? null, rubSymbol.value))
 const deliveryText = computed(() => props.historical
   ? props.pricing?.domesticDeliveryRub == null ? 'Расчёт не проводился' : formatRub(props.pricing.domesticDeliveryRub, rubSymbol.value)
@@ -60,7 +62,12 @@ const customsText = computed(() => {
       aria-live="polite"
     >
       <div class="customer-cost__headline">
-        <span>{{ label }}</span>
+        <component
+          :is="compact ? 'h3' : 'h2'"
+          class="ui-section-title"
+        >
+          {{ label }}
+        </component>
         <strong>{{ loading ? 'Рассчитываем стоимость…' : totalText }}</strong>
       </div>
       <p
@@ -74,12 +81,16 @@ const customsText = computed(() => {
       v-if="!compact"
       class="customer-cost__note"
     >
-      Доставка по России и таможенные платежи не входят в указанную стоимость.
+      {{ payment ? 'Таможенные платежи оплачиваются отдельно и не входят в сумму к оплате.' : 'Доставка по России и таможенные платежи не входят в указанную стоимость.' }}
     </p>
     <dl
       v-if="!compact"
       class="customer-cost__excluded"
     >
+      <div v-if="payment">
+        <dt>Подтверждённая стоимость заказа</dt>
+        <dd>{{ formatRub(pricing.totalRub, rubSymbol) }}</dd>
+      </div>
       <div>
         <dt>Доставка по России</dt>
         <dd>
@@ -98,13 +109,13 @@ const customsText = computed(() => {
       </div>
     </dl>
     <p
-      v-if="historical || state === 200"
+      v-if="!payment && (historical || state === 200)"
       class="customer-cost__status"
     >
       Сохранённая стоимость показана для справки.
     </p>
     <p
-      v-else-if="state === 100 && pricing?.validUntil"
+      v-else-if="!payment && state === 100 && pricing?.validUntil"
       class="customer-cost__status"
     >
       Действует до {{ formatMoscow(pricing.validUntil) }}
