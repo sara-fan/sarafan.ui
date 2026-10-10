@@ -18,6 +18,7 @@ defineProps({
     </p>
     <h1>{{ title }}</h1>
     <p>{{ copy }}</p>
+    <slot />
     <UiButton
       variant="secondary"
       @click="$router.push({ name: 'home' })"

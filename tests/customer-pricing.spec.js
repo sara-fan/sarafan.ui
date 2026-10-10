@@ -60,12 +60,12 @@ describe('customer pricing', () => {
   it('expires a confirmed amount at the Core deadline while keeping the saved amount', async () => {
     vi.useFakeTimers()
     const wrapper = mount(CustomerCostSummary, { props:{ pricing:confirmed, ops } })
-    expect(wrapper.get('.customer-cost__headline > span').text()).toBe('Подтверждённая стоимость')
+    expect(wrapper.get('.customer-cost__headline > .ui-section-title').text()).toBe('Подтверждённая стоимость')
     expect(wrapper.text()).toContain('Действует до')
     expect(wrapper.text()).toContain('Не ожидаются')
     expect(wrapper.text()).not.toContain('В разработке')
     await vi.advanceTimersByTimeAsync(5000)
-    expect(wrapper.get('.customer-cost__headline > span').text()).toBe('Срок подтверждения истёк')
+    expect(wrapper.get('.customer-cost__headline > .ui-section-title').text()).toBe('Срок подтверждения истёк')
     expect(wrapper.text()).toContain('Срок подтверждения истёк')
     expect(wrapper.text()).toContain('12 000,00 ₽')
     wrapper.unmount()
@@ -95,21 +95,21 @@ describe('customer pricing', () => {
 
   it('shows a saved expired amount, compact extras, and an honest unavailable forecast', () => {
     const expired = mount(CustomerCostSummary, { props:{ pricing:{ ...confirmed, state:200 }, ops, compact:true } })
-    expect(expired.get('.customer-cost__headline > span').text()).toBe('Срок подтверждения истёк')
+    expect(expired.get('.customer-cost__headline > .ui-section-title').text()).toBe('Срок подтверждения истёк')
     expect(expired.text().match(/Срок подтверждения истёк/gu)).toHaveLength(1)
     expect(expired.text()).toContain('12 000,00 ₽')
     expect(expired.text()).not.toContain('Доставка по России')
     expired.unmount()
 
     const unavailable = mount(CustomerCostSummary, { props:{ pricing:forecastPricing, ops } })
-    expect(unavailable.get('.customer-cost__headline > span').text()).toBe('Предварительная стоимость')
+    expect(unavailable.get('.customer-cost__headline > .ui-section-title').text()).toBe('Предварительная стоимость')
     expect(unavailable.text()).toContain('Стоимость уточняется')
     expect(unavailable.text()).not.toContain('будет проверена после отправки заявки')
     expect(unavailable.text()).not.toContain('В разработке')
     unavailable.unmount()
 
     const loading = mount(CustomerCostSummary, { props:{ pricing:null, ops:null, loading:true } })
-    expect(loading.get('.customer-cost__headline > span').text()).toBe('Стоимость заказа')
+    expect(loading.get('.customer-cost__headline > .ui-section-title').text()).toBe('Стоимость заказа')
     expect(loading.text()).toContain('Рассчитываем стоимость…')
     loading.unmount()
   })
@@ -133,7 +133,7 @@ describe('customer pricing', () => {
     const wrapper = mount(CustomerCostSummary, { props:{ pricing:{
       ...confirmed, domesticDeliveryRub:55, customsRub:120
     }, ops } })
-    expect(wrapper.get('.customer-cost__headline > span').text()).toBe('Подтверждённая стоимость')
+    expect(wrapper.get('.customer-cost__headline > .ui-section-title').text()).toBe('Подтверждённая стоимость')
     expect(wrapper.findAll('.customer-cost__excluded dd').map(amount => amount.text()))
       .toEqual(['Рассчитаем при оформлении заказа', 'Предварительно 120,00 ₽'])
     expect(wrapper.get('.customer-cost__note').element.nextElementSibling)

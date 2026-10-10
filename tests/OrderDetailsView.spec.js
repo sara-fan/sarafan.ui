@@ -245,7 +245,7 @@ describe('OrderDetailsView', () => {
     expect(wrapper.text()).not.toContain('← Мои заказы')
     expect(wrapper.text()).toContain('Проверим данные в течение двух часов')
     expect(wrapper.text()).not.toContain('Предварительная стоимость указана ниже')
-    expect(wrapper.get('.customer-cost__headline > span').text()).toBe('Предварительная стоимость')
+    expect(wrapper.get('.customer-cost__headline > .ui-section-title').text()).toBe('Предварительная стоимость')
     expect(wrapper.get('.customer-cost').element.nextElementSibling).toBe(wrapper.get('.order-review-card').element)
     expect(wrapper.findAll('.order-review-card .order-item-fields input').map(field => field.element.value)).toContain('12,34 $')
     expect(wrapper.findAll('.order-review-card .order-item-fields .ui-field')).toHaveLength(9)

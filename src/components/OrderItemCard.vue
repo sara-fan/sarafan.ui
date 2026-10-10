@@ -39,7 +39,10 @@ const reviewItem = computed(() => ({
         >
           НА ПРОВЕРКЕ
         </p>
-        <h2 id="order-product-title">
+        <h2
+          id="order-product-title"
+          class="ui-section-title"
+        >
           Товар
         </h2>
       </div>

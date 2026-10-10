@@ -3,8 +3,9 @@
 // This file is a part of the Sarafan application
 
 import { readonly, ref } from 'vue'
-import { isOrderCancelPath, isOrderCheckoutPath, isOrderDetailPath } from '../orderNumber.js'
+import { isOrderCancelPath, isOrderCheckoutPath, isOrderDetailPath, isOrderPaymentPath } from '../orderNumber.js'
 
+import { isPaymentQrPath } from '../orders/payment.js'
 import { API_BASE_PATH } from '../api.js'
 import { createApiClient } from '../api/client.js'
 import { isIsoDate, isRfc3339DateTime } from '../api/validation.js'
@@ -314,10 +315,16 @@ async function orderRequest(path, options = {}, isCurrent = () => true, validate
   if (path === `${API_BASE_PATH}/orders/ops`) {
     return identityScopedRequest(path, options, {}, validateResponse, isCurrent, false)
   }
-  if (path !== `${API_BASE_PATH}/orders` && !isOrderDetailPath(path) && !isOrderCancelPath(path) && !isOrderCheckoutPath(path)) {
+  if (path !== `${API_BASE_PATH}/orders` && !isOrderDetailPath(path) && !isOrderCancelPath(path) && !isOrderCheckoutPath(path) && !isOrderPaymentPath(path)) {
     throw createInternalProblem('invalidInput')
   }
   return authorizedRequest(path, options, {}, validateResponse, isCurrent)
+}
+
+// QR failures are recoverable; the user can retry without losing their identity.
+async function paymentQr(path) {
+  if (!isPaymentQrPath(path)) throw createInternalProblem('invalidInput')
+  return client.request(path, { cache:'no-store' }, { authorize:true, responseType:'blob' })
 }
 
 async function previewOrder(sourceUrl, isCurrent = () => true, validateResponse) {
@@ -515,6 +522,7 @@ export function useSession() {
     getStatus,
     consentRequest,
     orderRequest,
+    paymentQr,
     previewOrder,
     createOrder,
     isCurrentIdentityInvalidation,

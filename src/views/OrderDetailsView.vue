@@ -7,7 +7,6 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import CustomerCostSummary from '../components/CustomerCostSummary.vue'
-import OrderDeliveryEstimate from '../components/OrderDeliveryEstimate.vue'
 import OrderSavedDelivery from '../components/OrderSavedDelivery.vue'
 import OrderItemCard from '../components/OrderItemCard.vue'
 import UiAlert from '../components/ui/UiAlert.vue'
@@ -52,12 +51,12 @@ watch(() => order.value?.pricing, pricing => {
   }
 })
 const canCheckout = computed(() => status.value?.routeAlias === 'quote_ready' && order.value?.pricing.state === 100 && !expired.value)
-async function checkout() {
+async function checkout(payment = false) {
   const customerId = session.customer.value?.id
   const expectedNumber = orderNumber()
   await load()
   if (customerId !== session.customer.value?.id || expectedNumber !== orderNumber() || !canCheckout.value) return
-  try { await router.push({ name:'checkout', params:{ orderNumber:expectedNumber } }) }
+  try { await router.push({ name:payment && order.value?.checkout ? 'payment' : 'checkout', params:{ orderNumber:expectedNumber } }) }
   catch (value) { if (customerId === session.customer.value?.id && expectedNumber === orderNumber()) problem.value = normalizeProblem(value) }
 }
 const headingDetail = computed(() => {
@@ -237,10 +236,18 @@ onBeforeUnmount(() => {
         class="order-details-heading__actions"
       >
         <UiButton
-          v-if="canCheckout"
+          v-if="canCheckout && order.checkout"
           variant="primary"
           :disabled="loading || cancelBusy"
-          @click="checkout"
+          @click="checkout(true)"
+        >
+          Перейти к оплате
+        </UiButton>
+        <UiButton
+          v-if="canCheckout && !order.checkout"
+          variant="primary"
+          :disabled="loading || cancelBusy"
+          @click="checkout(false)"
         >
           Оформить заказ
         </UiButton>
@@ -303,8 +310,11 @@ onBeforeUnmount(() => {
       >
         {{ order.reviewReason }}
       </UiAlert>
-      <OrderDeliveryEstimate :estimate="order.estimatedDelivery" />
-      <OrderSavedDelivery :delivery="order.checkout?.delivery" />
+      <OrderSavedDelivery
+        :delivery="order.checkout?.delivery"
+        :estimate="order.estimatedDelivery"
+        panel
+      />
       <CustomerCostSummary
         :pricing="order.pricing"
         :delivery-selected="Boolean(order.checkout)"

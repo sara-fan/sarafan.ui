@@ -80,7 +80,7 @@ describe('review result and checkout entry', () => {
     await render()
     expect(wrapper.text()).toContain('14–21 календарных дней с момента подтверждения оплаты')
     expect(wrapper.text()).toContain('Будут рассчитаны позже')
-    expect(wrapper.find('section[aria-label="Сохранённая доставка"]').exists()).toBe(false)
+    expect(wrapper.get('section[aria-label="Доставка"]').text()).toContain('14–21 календарных дней с момента подтверждения оплаты')
     const cta = wrapper.findAll('button').find(button => button.text() === 'Оформить заказ')
     expect(cta.classes()).toContain('ui-button--primary')
     await cta.trigger('click'); await flushPromises()
@@ -877,7 +877,7 @@ describe('Pilot checkout requirements', () => {
     const savedDelivery = { routeAlias:'pickup', name:'Прежний пункт выдачи', destination:'Сохранённый адрес <img src=x onerror=alert(1)>' }
     currentOrder.checkout.delivery = savedDelivery
     await render('/orders/12345678-3/checkout')
-    const summary = wrapper.get('section[aria-label="Сохранённая доставка"]')
+    const summary = wrapper.get('section[aria-label="Доставка"]')
     expect(summary.text()).toContain(savedDelivery.name)
     expect(summary.text()).toContain(savedDelivery.destination)
     expect(summary.find('img').exists()).toBe(false)
@@ -899,7 +899,7 @@ describe('Pilot checkout requirements', () => {
     currentOrder.checkout.delivery = savedDelivery
     h.session.customer.value.profile.address = 'Новый адрес профиля'
     await render()
-    const summary = wrapper.get('section[aria-label="Сохранённая доставка"]')
+    const summary = wrapper.get('section[aria-label="Доставка"]')
     expect(summary.text()).toContain(savedDelivery.name)
     expect(summary.text()).toContain(savedDelivery.destination)
     expect(summary.text()).not.toContain('Новый адрес профиля')
@@ -920,7 +920,7 @@ describe('Pilot checkout requirements', () => {
     currentOrder.checkout.delivery.name = 'Ранее сохранённый ПВЗ'
     currentOrder.checkout.delivery.destination = 'Исторический адрес выдачи'
     await wrapper.findAll('button').find(button => button.text() === 'Обновить данные заказа').trigger('click'); await flushPromises()
-    const summary = wrapper.get('section[aria-label="Сохранённая доставка"]')
+    const summary = wrapper.get('section[aria-label="Доставка"]')
     expect(summary.text()).toContain('Ранее сохранённый ПВЗ')
     expect(summary.text()).toContain('Исторический адрес выдачи')
     expect(wrapper.get('[name="firstName"]').element.value).toBe('Мой получатель')
@@ -952,4 +952,14 @@ it('requires completing an incomplete historical courier snapshot before another
   expect(wrapper.get('[name="postalCode"]').element.value).toBe('')
   await wrapper.get('[name="postalCode"]').setValue('654321')
   expect(paymentButton().attributes('disabled')).toBeUndefined()
+})
+
+it('offers payment navigation for saved checkout without a separate edit action', async () => {
+  currentOrder.checkout = { profile:{ ...h.session.customer.value.profile, phone:h.session.customer.value.phone }, delivery:{ routeAlias:'courier', name:'Курьер', destination:'123456, Москва, Адрес' } }
+  await render()
+  const paymentButton = wrapper.findAll('button').find(button => button.text() === 'Перейти к оплате')
+  expect(paymentButton.classes()).toContain('ui-button--primary')
+  expect(wrapper.findAll('button').some(button => button.text() === 'Изменить')).toBe(false)
+  await paymentButton.trigger('click'); await flushPromises()
+  expect(router.currentRoute.value.name).toBe('payment')
 })
