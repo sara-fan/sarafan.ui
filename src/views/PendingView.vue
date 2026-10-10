@@ -3,12 +3,16 @@
 // All rights reserved.
 // This file is a part of the Sarafan application
 
+import { useRouter } from 'vue-router'
 import UiButton from '../components/ui/UiButton.vue'
 
-defineProps({
+const props = defineProps({
   title: { type: String, required: true },
-  copy: { type: String, required: true }
+  copy: { type: String, required: true },
+  homeAction: { type: Function, default: null }
 })
+const router = useRouter()
+function home() { return props.homeAction ? props.homeAction() : router.push({ name:'home' }) }
 </script>
 
 <template>
@@ -21,7 +25,7 @@ defineProps({
     <slot />
     <UiButton
       variant="secondary"
-      @click="$router.push({ name: 'home' })"
+      @click="home"
     >
       На главную
     </UiButton>
