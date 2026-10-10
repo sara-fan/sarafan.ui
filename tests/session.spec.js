@@ -1242,7 +1242,7 @@ describe('session store', () => {
   it('forecasts anonymously without storing or authorizing the request', async () => {
     const pricing = {
       state:0, totalRub:12000, calculatedAt:'2026-09-15T10:00:00Z', validUntil:null,
-      asOf:'2026-09-15T10:00:00Z', domesticDeliveryRub:null, customsRub:null
+      asOf:'2026-09-15T10:00:00Z', domesticDeliveryRub:null, customsRub:null, customsPaid:false
     }
     const fetch = vi.fn(url => {
       if (url === '/api/v1/orders/forecast') return Promise.resolve(response(200, pricing))

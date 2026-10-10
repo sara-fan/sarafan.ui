@@ -127,6 +127,10 @@ For other comment-capable formats, use the same three lines with that format's n
 
 - Present Core phone-validation detail without duplicating format rules in the UI. Retain the entered phone after rejection; empty input uses the existing required-field validation. After an error on the phone step, restore focus once the input is enabled; never focus a closed dialog or act on a stale request.
 
+## Customs payment evidence
+
+- Customer pricing carries Core's independent boolean `customsPaid`. Render its accessible green check in the customs row through `@sara-fan/ui-shared/paid-indicator`, injecting Vue h. The paid flag remains visible independently of later estimate changes; amounts retain their confirmation gate. Keep the existing cancelled-order historical wording. The flag does not imply a Sarafan payment or order-status transition.
+
 ## Validation focus
 
 - After a failed user submit, save, preview or file-selection action, use `@sara-fan/ui-shared/validation-focus` through the local `useValidationFocus` lifecycle adapter to focus the first invalid field in displayed form order, after errors render and controls are enabled. Trigger it for each attempt, including identical failures; never focus from typing, blur validation or background refresh.

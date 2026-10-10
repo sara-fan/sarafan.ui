@@ -4,6 +4,7 @@
 // This file is a part of the Sarafan application
 
 import { computed, onUnmounted, ref, watch } from 'vue'
+import { PaidIndicator } from '../paidIndicator.js'
 import { formatMoscow, formatRub } from '../orders/customerPricing.js'
 
 const props = defineProps({
@@ -89,6 +90,10 @@ const customsText = computed(() => {
         <dt>Таможенные платежи</dt>
         <dd>
           {{ customsText }}
+          <PaidIndicator
+            :paid="pricing?.customsPaid === true"
+            label="Таможенная пошлина оплачена"
+          />
         </dd>
       </div>
     </dl>
