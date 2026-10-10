@@ -231,6 +231,10 @@ button:focus-visible {
   *, *::before, *::after { scroll-behavior: auto !important; transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; }
 }
 
+.ui-panel, .order-review-card { min-width: 0; padding: var(--sarafan-space-28); border: 1px solid var(--sarafan-panel-border); border-radius: var(--sarafan-radius-28); background: var(--sarafan-paper); box-shadow: var(--sarafan-card-shadow); }
+.ui-panel__heading, .order-review-card__heading { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--sarafan-space-20); padding-bottom: var(--sarafan-space-16); border-bottom: 1px solid var(--sarafan-line); }
+.ui-field-grid, .order-item-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sarafan-space-20) var(--sarafan-space-24); }
+.ui-panel__heading + .ui-field-grid, .order-review-card__heading + .order-item-fields { margin-top: var(--sarafan-space-20); }
 .ui-page { padding-block: var(--sarafan-space-48) var(--sarafan-space-64); }
 .ui-form-stack { display: grid; gap: var(--sarafan-space-24); }
 .ui-form-panel { min-width: 0; overflow: hidden; padding-inline: var(--sarafan-space-28); border: 1px solid var(--sarafan-panel-border); border-radius: var(--sarafan-radius-28); background: linear-gradient(135deg, var(--sarafan-paper), #f8fcff); box-shadow: var(--sarafan-card-shadow); }
@@ -248,10 +252,12 @@ button:focus-visible {
 .ui-section-title { margin: 0; color: var(--sarafan-accent-hover); font: 500 30px/1.1 var(--sarafan-font-display); }
 
 @media (max-width: 767px) {
+  .ui-panel, .order-review-card { padding: var(--sarafan-space-20); border-radius: var(--sarafan-radius-20); }
+  .ui-panel__heading, .order-review-card__heading { align-items: flex-start; flex-direction: column; }
   .ui-form-panel { padding-inline: var(--sarafan-space-20); border-radius: var(--sarafan-radius-20); }
   .ui-section-title { font-size: 25px; }
   .ui-form-section__heading { align-items: flex-start; flex-direction: column; gap: var(--sarafan-space-8); }
-  .ui-form-grid, .ui-data-grid { grid-template-columns: 1fr; }
+  .ui-field-grid, .order-item-fields, .ui-form-grid, .ui-data-grid { grid-template-columns: 1fr; }
   .ui-form-grid--recipient, .ui-data-grid--recipient { grid-template-columns: 1fr; }
   .ui-form-grid__wide { grid-column: auto; }
 }

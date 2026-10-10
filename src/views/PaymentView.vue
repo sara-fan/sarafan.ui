@@ -6,19 +6,22 @@
 import { computed, onUnmounted, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import CustomerCostSummary from '../components/CustomerCostSummary.vue'
-import PaymentQr from '../components/PaymentQr.vue'
+import PaymentMethod from '../components/PaymentMethod.vue'
 import UiButton from '../components/ui/UiButton.vue'
+import UiPanel from '../components/ui/UiPanel.vue'
+import UiField from '../components/ui/UiField.vue'
 import UiAlert from '../components/ui/UiAlert.vue'
 import PendingView from './PendingView.vue'
 import { useSession } from '../stores/session.js'
 import { validateOrderOps, orderStatusFor } from '../stores/orders.js'
 import { BANK_FIELDS, validatePayment, paymentFingerprint, openPaymentLink } from '../orders/payment.js'
 import { isOrderNumber } from '../orderNumber.js'
+import { scheduleBoundary } from '../consentTiming.js'
 import { createInternalProblem, normalizeProblem, presentProblem } from '../errors/problem.js'
 
 const session = useSession(), route = useRoute(), router = useRouter()
-const payment = ref(null), ops = ref(null), problem = ref(null), loading = ref(false), notice = ref(''), expired = ref(false), qrReady = ref(false)
-let generation = 0, timer, pending = null
+const payment = ref(null), ops = ref(null), problem = ref(null), loading = ref(false), notice = ref(''), expired = ref(false)
+let generation = 0, navigationGeneration = 0, timer, pending = null
 const number = computed(() => String(route.params.orderNumber ?? ''))
 const identity = computed(() => `${session.customer.value?.id ?? ''}:${number.value}`)
 const available = computed(() => payment.value?.canPay && !expired.value && !problem.value)
@@ -28,8 +31,8 @@ const missingCheckout = computed(() => payment.value?.order.status === 100 && !e
 const paid = computed(() => payment.value?.order.status === 300)
 const status = computed(() => orderStatusFor(ops.value, expired.value && payment.value?.order.status === 100 ? 200 : payment.value?.order.status))
 function reset() {
-  generation++; pending = null; globalThis.clearTimeout(timer)
-  payment.value = null; ops.value = null; problem.value = null; notice.value = ''; expired.value = false; qrReady.value = false; loading.value = false
+  generation++; navigationGeneration++; pending = null; globalThis.clearTimeout(timer)
+  payment.value = null; ops.value = null; problem.value = null; notice.value = ''; expired.value = false; loading.value = false
 }
 function armExpiry(value, started) {
   globalThis.clearTimeout(timer)
@@ -38,10 +41,10 @@ function armExpiry(value, started) {
   if (pricing.state !== 100) return
   const remaining = Date.parse(pricing.validUntil) - Date.parse(pricing.asOf) - (Date.now() - started)
   expired.value = remaining <= 0
-  if (remaining > 0) timer = globalThis.setTimeout(() => {
-    expired.value = true; qrReady.value = false
-    void refresh()
-  }, Math.min(remaining, 2147483647))
+  if (remaining > 0) scheduleBoundary(remaining, value => { timer = value }, () => {
+    armExpiry(value, started)
+    if (expired.value) void refresh()
+  })
 }
 function refresh() {
   if (pending) return pending
@@ -65,17 +68,15 @@ async function load() {
     await session.orderRequest(`/api/v1/orders/${encodeURIComponent(expectedNumber)}/payment`, { cache:'no-store' }, isCurrent,
       value => { result = validatePayment(value, catalog, expectedNumber) })
     if (!isCurrent()) return null
-    if (payment.value?.paymentInformation?.bundleId !== result.paymentInformation?.bundleId
-      || payment.value?.paymentInformation?.qrUrl !== result.paymentInformation?.qrUrl) qrReady.value = false
     ops.value = catalog; payment.value = result; armExpiry(result, started)
     return result
   } catch (value) {
-    if (isCurrent()) { payment.value = null; qrReady.value = false; problem.value = normalizeProblem(value) }
+    if (isCurrent()) { payment.value = null; problem.value = normalizeProblem(value) }
     return null
   } finally { if (isCurrent()) loading.value = false }
 }
 async function pay() {
-  if (loading.value || !available.value || !qrReady.value) return
+  if (loading.value || !available.value) return
   const expectedIdentity = identity.value, before = paymentFingerprint(payment.value)
   const result = await refresh()
   if (identity.value !== expectedIdentity || !result || !available.value) return
@@ -83,12 +84,17 @@ async function pay() {
     notice.value = 'Платёжные данные изменились. Проверьте сумму и получателя и нажмите ещё раз.'
     return
   }
-  if (!qrReady.value) return
   try { openPaymentLink(result.paymentInformation.information.paymentLink) }
   catch (value) { problem.value = normalizeProblem(value) }
 }
-function back() { return router.push({ name:'order-details', params:{ orderNumber:number.value } }) }
-function checkout() { return router.push({ name:'checkout', params:{ orderNumber:number.value } }) }
+async function navigate(target) {
+  const current = ++navigationGeneration
+  try { await router.push(target) }
+  catch (value) { if (current === navigationGeneration) problem.value = normalizeProblem(value) }
+}
+function back() { return navigate({ name:'order-details', params:{ orderNumber:number.value } }) }
+function checkout() { return navigate({ name:'checkout', params:{ orderNumber:number.value } }) }
+function home() { return navigate({ name:'home' }) }
 function revisit() { if (globalThis.document.visibilityState === 'visible') void refresh() }
 watch(identity, () => { reset(); void refresh() }, { immediate:true, flush:'sync' })
 onMounted(() => globalThis.document.addEventListener('visibilitychange', revisit))
@@ -96,9 +102,10 @@ onUnmounted(() => { reset(); globalThis.document.removeEventListener('visibility
 </script>
 <template>
   <PendingView
-    v-if="payment && !available && !missingCheckout && !paid && payment.order.status === 100 && !expired"
+    v-if="!problem && payment && !available && !missingCheckout && !paid && payment.order.status === 100 && !expired"
     title="Оплата"
     copy="Оплата пока недоступна. Попробуйте позже"
+    :home-action="home"
   >
     <UiButton @click="refresh">
       Обновить
@@ -162,7 +169,10 @@ onUnmounted(() => { reset(); globalThis.document.removeEventListener('visibility
       >
         {{ status.name }}. Оплата недоступна.
       </p>
-      <template v-else>
+      <div
+        v-else
+        class="ui-form-stack"
+      >
         <CustomerCostSummary
           payment
           :main-payment-rub="payment.mainPaymentRub"
@@ -170,49 +180,28 @@ onUnmounted(() => { reset(); globalThis.document.removeEventListener('visibility
           :ops="ops"
           delivery-selected
         />
-        <p>Получатель: <strong>{{ bank.recipientName }}</strong></p>
-        <div class="payment-methods">
-          <div>
-            <p>Отсканируйте QR-код в приложении банка. Вручную введите указанную сумму, проверьте получателя и подтвердите платёж в банке.</p>
-            <PaymentQr
-              :key="payment.paymentInformation.bundleId"
-              :url="payment.paymentInformation.qrUrl"
-              :identity="identity"
-              @ready="qrReady = $event"
-            />
-          </div>
-          <div>
-            <UiButton
-              class="bank-payment"
-              variant="primary"
-              :disabled="loading || !qrReady"
-              @click="pay"
-            >
-              Оплатить через СБП
-            </UiButton>
-            <p>При возврате из банка статус заказа обновит сотрудник после сверки платежа.</p>
-          </div>
-        </div>
-        <details class="payment-details">
-          <summary>Банковские реквизиты</summary>
-          <dl>
-            <div
+        <UiPanel title="Оплата через СБП">
+          <p>Получатель: <strong>{{ bank.recipientName }}</strong></p>
+          <PaymentMethod
+            :key="payment.paymentInformation.bundleId"
+            :qr-url="payment.paymentInformation.qrUrl"
+            :identity="identity"
+            :disabled="loading"
+            @pay="pay"
+          />
+        </UiPanel>
+        <UiPanel title="Банковские реквизиты">
+          <div class="ui-field-grid">
+            <UiField
               v-for="[key, label] in bankFields"
               :key="key"
-            >
-              <dt>{{ label }}</dt><dd>{{ bank[key] }}</dd>
-            </div>
-          </dl>
-        </details>
-      </template>
+              :model-value="bank[key]"
+              :label="label"
+              readonly
+            />
+          </div>
+        </UiPanel>
+      </div>
     </template>
   </main>
 </template>
-<style scoped>
-.payment-methods { display:grid; grid-template-columns:minmax(0, 1fr) minmax(0, 1fr); gap:2rem; }
-.payment-details { margin-top:1.5rem; }
-.payment-details dl div { margin-top:.75rem; }
-.payment-details dd { margin:0; overflow-wrap:anywhere; }
-@media (min-width:769px) { .bank-payment { background:transparent; color:var(--color-primary, #1976d2); } }
-@media (max-width:768px) { .payment-methods { display:flex; flex-direction:column-reverse; } .bank-payment { width:100%; } }
-</style>
