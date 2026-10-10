@@ -59,15 +59,16 @@ describe('customer pricing', () => {
 
   it('expires a confirmed amount at the Core deadline while keeping the saved amount', async () => {
     vi.useFakeTimers()
-    const wrapper = mount(CustomerCostSummary, { props:{ pricing:confirmed, ops } })
+    const wrapper = mount(CustomerCostSummary, { props:{ pricing:{ ...confirmed, customsRub:null }, ops, deliverySelected:true } })
     expect(wrapper.get('.customer-cost__headline > .ui-section-title').text()).toBe('Подтверждённая стоимость')
     expect(wrapper.text()).toContain('Действует до')
-    expect(wrapper.text()).toContain('Не ожидаются')
+    expect(wrapper.findAll('.customer-cost__excluded dd').map(item => item.text())).toEqual(['Будут рассчитаны позже', 'Будут рассчитаны позже'])
     expect(wrapper.text()).not.toContain('В разработке')
     await vi.advanceTimersByTimeAsync(5000)
     expect(wrapper.get('.customer-cost__headline > .ui-section-title').text()).toBe('Срок подтверждения истёк')
     expect(wrapper.text()).toContain('Срок подтверждения истёк')
     expect(wrapper.text()).toContain('12 000,00 ₽')
+    expect(wrapper.findAll('.customer-cost__excluded dd').map(item => item.text())).toEqual(['Расчёт не производился', 'Расчёт не производился'])
     wrapper.unmount()
   })
 
@@ -153,9 +154,21 @@ it.each([0, 120, null])('keeps extra rows visible and interprets confirmed custo
 it('retains cancelled historical unknown wording and published customs context', async () => {
   const wrapper = mount(CustomerCostSummary, { props:{ pricing:forecastPricing, ops, historical:true } })
   expect(wrapper.text()).toContain('Последняя рассчитанная стоимость')
-  expect(wrapper.findAll('.customer-cost__excluded dd').map(item => item.text())).toEqual(['Расчёт не проводился', 'Расчёт не проводился'])
+  expect(wrapper.findAll('.customer-cost__excluded dd').map(item => item.text())).toEqual(['Расчёт не производился', 'Расчёт не производился'])
   await wrapper.setProps({ pricing:{ ...confirmed, customsRub:120 } })
   expect(wrapper.findAll('.customer-cost__excluded dd')[1].text()).toBe('Предварительно 120,00 ₽')
+  wrapper.unmount()
+})
+
+it.each([false, true])('shows final unknown extras for an expired quote with saved checkout %s', async deliverySelected => {
+  const wrapper = mount(CustomerCostSummary, { props:{ pricing:{ ...confirmed, state:200, customsRub:null }, ops, deliverySelected } })
+  const extras = () => wrapper.findAll('.customer-cost__excluded dd').map(item => item.text())
+  expect(extras()).toEqual(['Расчёт не производился', 'Расчёт не производился'])
+  expect(wrapper.get('.customer-cost__headline strong').text()).toBe('12 000,00 ₽')
+  await wrapper.setProps({ deliverySelected:true, pricing:{ ...confirmed, state:200, domesticDeliveryRub:0, customsRub:0 } })
+  expect(extras()).toEqual(['Предварительно 0,00 ₽', 'Не ожидаются'])
+  await wrapper.setProps({ pricing:{ ...confirmed, state:200, domesticDeliveryRub:55, customsRub:120 } })
+  expect(extras()).toEqual(['Предварительно 55,00 ₽', 'Предварительно 120,00 ₽'])
   wrapper.unmount()
 })
 
@@ -168,9 +181,9 @@ it.each([null, 0, 55])('shows separate saved checkout delivery %s without changi
 
 it.each([false, true])('uses final unknown-price wording in full/compact historical summaries (%s)', async compact => {
   const wrapper = mount(CustomerCostSummary, { props:{ pricing:null, ops, historical:true, compact } })
-  expect(wrapper.get('.customer-cost__headline strong').text()).toBe('Расчёт не проводился')
+  expect(wrapper.get('.customer-cost__headline strong').text()).toBe('Расчёт не производился')
   await wrapper.setProps({ pricing:forecastPricing })
-  expect(wrapper.get('.customer-cost__headline strong').text()).toBe('Расчёт не проводился')
+  expect(wrapper.get('.customer-cost__headline strong').text()).toBe('Расчёт не производился')
   await wrapper.setProps({ pricing:{ ...calculated, totalRub:0 } })
   expect(wrapper.get('.customer-cost__headline strong').text()).toBe('0,00 ₽')
   await wrapper.setProps({ pricing:calculated })

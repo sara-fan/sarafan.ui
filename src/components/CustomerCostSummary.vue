@@ -38,15 +38,21 @@ const label = computed(() => props.payment ? 'Сумма к оплате' : prop
   : props.pricing?.state === 0 ? 'Предварительная стоимость'
   : props.ops?.pricingStates?.find(item => item.value === state.value)?.name ?? 'Стоимость заказа')
 const rubSymbol = computed(() => props.ops?.currencies?.find(item => item.routeAlias === 'rub')?.symbol ?? '₽')
+const notCalculatedText = 'Расчёт не производился'
+const pendingCalculationText = 'Будут рассчитаны позже'
+const extrasNotCalculated = computed(() => props.historical || state.value === 200)
 const totalText = computed(() => props.payment ? formatRub(props.mainPaymentRub, rubSymbol.value) : props.historical && props.pricing?.totalRub == null
-  ? 'Расчёт не проводился' : formatRub(props.pricing?.totalRub ?? null, rubSymbol.value))
-const deliveryText = computed(() => props.historical
-  ? props.pricing?.domesticDeliveryRub == null ? 'Расчёт не проводился' : formatRub(props.pricing.domesticDeliveryRub, rubSymbol.value)
-  : props.deliverySelected && props.pricing?.domesticDeliveryRub != null ? 'Предварительно ' + formatRub(props.pricing.domesticDeliveryRub, rubSymbol.value)
-  : props.deliverySelected ? 'Будут рассчитаны позже' : 'Рассчитаем при оформлении заказа')
+  ? notCalculatedText : formatRub(props.pricing?.totalRub ?? null, rubSymbol.value))
+const deliveryText = computed(() => {
+  const amount = props.pricing?.domesticDeliveryRub
+  if (amount == null && extrasNotCalculated.value) return notCalculatedText
+  if (props.historical) return formatRub(amount, rubSymbol.value)
+  return props.deliverySelected && amount != null ? 'Предварительно ' + formatRub(amount, rubSymbol.value)
+    : props.deliverySelected ? pendingCalculationText : 'Рассчитаем при оформлении заказа'
+})
 const customsText = computed(() => {
   const amount = props.pricing?.state === 0 ? null : props.pricing?.customsRub
-  if (amount == null) return props.historical ? 'Расчёт не проводился' : props.pricing?.state === 0 ? 'Проверяем, потребуются ли таможенные платежи' : 'Будут рассчитаны позже'
+  if (amount == null) return extrasNotCalculated.value ? notCalculatedText : props.pricing?.state === 0 ? 'Проверяем, потребуются ли таможенные платежи' : pendingCalculationText
   return amount === 0 ? 'Не ожидаются' : 'Предварительно ' + formatRub(amount, rubSymbol.value)
 })
 </script>
