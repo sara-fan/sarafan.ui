@@ -38,7 +38,7 @@ const label = computed(() => props.payment ? 'Сумма к оплате' : prop
   : props.pricing?.state === 0 ? 'Предварительная стоимость'
   : props.ops?.pricingStates?.find(item => item.value === state.value)?.name ?? 'Стоимость заказа')
 const rubSymbol = computed(() => props.ops?.currencies?.find(item => item.routeAlias === 'rub')?.symbol ?? '₽')
-const notCalculatedText = 'Расчёт не производился'
+const notCalculatedText = 'Расчёт не проводился'
 const pendingCalculationText = 'Будут рассчитаны позже'
 const extrasNotCalculated = computed(() => props.historical || state.value === 200)
 const totalText = computed(() => props.payment ? formatRub(props.mainPaymentRub, rubSymbol.value) : props.historical && props.pricing?.totalRub == null
