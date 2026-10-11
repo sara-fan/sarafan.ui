@@ -187,6 +187,7 @@ function selectPhotoAction(event) {
   clearPhotoDraft()
   pendingPhoto.value = file
   draftPhotoUrl.value = globalThis.URL.createObjectURL(file)
+  releaseConsentProblemOwnership()
   problem.value = null
 }
 
@@ -194,6 +195,7 @@ function removePhoto() {
   if (busy.value || !editing.value) return
   clearPhotoDraft()
   photoRemoved.value = Boolean(customer.value?.hasPhoto)
+  releaseConsentProblemOwnership()
   problem.value = null
 }
 
