@@ -174,6 +174,22 @@ describe('RFC 9457 API client', () => {
     expect(JSON.stringify(logger.log.mock.calls)).not.toMatch(/79991234567|never-log|X-Unsafe/u)
   })
 
+  it('attributes multipart profile failures without logging personal fields or photos', async () => {
+    const logger = { log:vi.fn() }
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(problemResponse(503, 'service-unavailable')))
+    const client = createApiClient({ getAccessToken:() => '', refreshSession:vi.fn(), logger })
+    const body = new globalThis.FormData()
+    body.append('firstName', 'Секретное имя')
+    body.append('photo', new globalThis.File(['private image bytes'], 'private-photo.png', { type:'image/png' }))
+    await expect(client.request('/api/v1/customers/me/profile', { method:'PUT', body }))
+      .rejects.toMatchObject({ code:'service_unavailable' })
+    expect(logger.log).toHaveBeenCalledOnce()
+    expect(logger.log.mock.calls[0][1]).toMatchObject({
+      'http.request.method':'PUT', 'http.route':'/api/v1/customers/me/profile'
+    })
+    expect(JSON.stringify(logger.log.mock.calls)).not.toMatch(/Секретное имя|private image bytes|private-photo/u)
+  })
+
   it('normalizes only strict legal-document UUID routes for logging', async () => {
     const logger = { log: vi.fn() }
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(problemResponse(

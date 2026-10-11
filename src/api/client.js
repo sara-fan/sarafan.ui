@@ -26,6 +26,7 @@ const API_ROUTE_TEMPLATES = new Set([
   '/api/v1/auth/logout',
   '/api/v1/auth/refresh',
   '/api/v1/customers/me',
+  '/api/v1/customers/me/profile',
   '/api/v1/customers/me/delivery-address',
   '/api/v1/customers/ops',
   '/api/v1/customers/me/photo',

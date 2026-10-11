@@ -449,15 +449,23 @@ async function refreshCustomer() {
   return result
 }
 
-function updateProfile(profile) { return updateCustomerProfile(profile, '') }
+function updateProfile(profile, photo = null) { return updateCustomerProfile(profile, '', photo) }
 function updateDeliveryAddress(address) { return updateCustomerProfile(address, '/delivery-address') }
-async function updateCustomerProfile(profile, suffix) {
+async function updateCustomerProfile(profile, suffix, photo = null) {
   if (!customer.value) throw createInternalProblem('invalidInput')
   const { id, phone } = customer.value
   const generation = identityGeneration
+  let options = jsonOptions('PUT', profile)
+  if (photo) {
+    const body = new globalThis.FormData()
+    for (const [key, value] of Object.entries(profile)) if (value !== null && value !== undefined) body.append(key, String(value))
+    body.append('removePhoto', String(Boolean(photo.remove)))
+    if (photo.file) body.append('photo', photo.file)
+    options = { method:'PUT', body }
+  }
   const updatedCustomer = await authorizedRequest(
-    `${API_BASE_PATH}/customers/me${suffix}`,
-    jsonOptions('PUT', profile),
+    `${API_BASE_PATH}/customers/me${photo ? '/profile' : suffix}`,
+    options,
     {},
     value => {
       if (!isValidActiveCustomer(value) || value.id !== id || value.phone !== phone) throw createInternalProblem('protocolError')

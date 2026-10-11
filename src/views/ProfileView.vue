@@ -30,11 +30,13 @@ const photoProblemFields = Object.fromEntries(['invalid-photo-size', 'invalid-ph
 const focusRoot = ref(null)
 
 const session = useSession()
-const { customer, deletePhoto, getPhoto, updateProfile, uploadPhoto } = session
+const { customer, getPhoto, updateProfile } = session
 const renewal = useConsentRenewal()
 const consents = useConsents()
 let releaseConsentNoticeSuppression = null
 const pendingPhoto = ref(null)
+const photoRemoved = ref(false)
+const draftPhotoUrl = ref('')
 let mounted = true
 let writeOperation = 0
 const fields = [
@@ -51,6 +53,9 @@ const photoInput = ref(null)
 let photoLoadVersion = 0
 
 const profile = computed(() => customer.value?.profile || {})
+const displayedPhotoUrl = computed(() => editing.value && photoRemoved.value ? '' : draftPhotoUrl.value || photoUrl.value)
+const hasPhoto = computed(() => editing.value && (pendingPhoto.value || photoRemoved.value)
+  ? Boolean(pendingPhoto.value) : Boolean(customer.value?.hasPhoto))
 const photoFieldOwnsProblem = computed(() => editing.value && Boolean(photoError.value)
   && !isServiceUnavailableProblem(problem.value)
   && (hasOnlyPresentedFieldErrors(problem.value, ['photo'])
@@ -73,6 +78,13 @@ function releasePhoto() {
   photoLoadVersion += 1
   if (photoUrl.value) globalThis.URL.revokeObjectURL(photoUrl.value)
   photoUrl.value = ''
+}
+
+function clearPhotoDraft() {
+  if (draftPhotoUrl.value) globalThis.URL.revokeObjectURL(draftPhotoUrl.value)
+  draftPhotoUrl.value = ''
+  pendingPhoto.value = null
+  photoRemoved.value = false
 }
 
 function fillForm() {
@@ -103,6 +115,7 @@ function releaseConsentProblemOwnership() {
 }
 
 function startEditing() {
+  clearPhotoDraft()
   releaseConsentProblemOwnership()
   fillForm()
   problem.value = null
@@ -111,8 +124,9 @@ function startEditing() {
 }
 
 function cancelEditing() {
+  if (busy.value) return
   releaseConsentProblemOwnership()
-  pendingPhoto.value = null
+  clearPhotoDraft()
   fillForm()
   problem.value = null
   editing.value = false
@@ -148,29 +162,21 @@ async function protectedWrite(action, detail) {
 async function saveAction() {
   saved.value = false
   const payload = Object.fromEntries(fields.map(field => [field, form[field] || null]))
+  const photo = pendingPhoto.value || photoRemoved.value ? { file:pendingPhoto.value, remove:photoRemoved.value } : null
   await protectedWrite(async isCurrent => {
-    const updatedCustomer = await updateProfile(payload)
+    const updatedCustomer = await updateProfile(payload, photo)
     if (!updatedCustomer || !isCurrent()) return
+    clearPhotoDraft()
     saved.value = true
     editing.value = false
+    if (photo) await loadPhoto()
   }, 'Не удалось сохранить профиль')
 }
 
-async function uploadSelectedPhoto() {
-  const file = pendingPhoto.value
-  if (!file) return
-  await protectedWrite(async isCurrent => {
-    if (await uploadPhoto(file) && isCurrent()) {
-      pendingPhoto.value = null
-      await loadPhoto()
-    }
-  }, 'Не удалось загрузить фотографию')
-}
-
-async function selectPhotoAction(event) {
+function selectPhotoAction(event) {
   const file = event.target.files?.[0]
   event.target.value = ''
-  if (!file) return
+  if (!file || busy.value || !editing.value) return
   if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type) || file.size > 5 * 1024 * 1024) {
     problem.value = createInternalProblem('invalidInput', {
       detail: 'Выберите JPEG, PNG или WebP размером не более 5 МБ',
@@ -178,40 +184,34 @@ async function selectPhotoAction(event) {
     })
     return
   }
+  clearPhotoDraft()
   pendingPhoto.value = file
-  await uploadSelectedPhoto()
+  draftPhotoUrl.value = globalThis.URL.createObjectURL(file)
+  releaseConsentProblemOwnership()
+  problem.value = null
 }
 
-async function removePhoto() {
+function removePhoto() {
+  if (busy.value || !editing.value) return
+  clearPhotoDraft()
+  photoRemoved.value = Boolean(customer.value?.hasPhoto)
   releaseConsentProblemOwnership()
-  busy.value = true
   problem.value = null
-  try {
-    if (await deletePhoto()) releasePhoto()
-  } catch (value) {
-    captureProblem(value, 'Не удалось удалить фотографию')
-  } finally {
-    busy.value = false
-  }
 }
 
 watch(() => customer.value?.id, async () => {
   releaseConsentProblemOwnership()
   ++writeOperation
   busy.value = false
-  pendingPhoto.value = null
+  clearPhotoDraft()
   fillForm()
   problem.value = null
   editing.value = false
   await loadPhoto()
 }, { immediate: true })
 
-onBeforeUnmount(() => { releaseConsentProblemOwnership(); mounted = false; ++writeOperation; pendingPhoto.value = null; releasePhoto() })
-function save(...args) { return focusAfter(() => saveAction(...args), () => validationFields(problem.value)) }
-
-function retryPhoto() {
-  return focusAfter(uploadSelectedPhoto, () => validationFields(problem.value, { types:photoProblemFields }))
-}
+onBeforeUnmount(() => { releaseConsentProblemOwnership(); mounted = false; ++writeOperation; clearPhotoDraft(); releasePhoto() })
+function save(...args) { return focusAfter(() => saveAction(...args), () => validationFields(problem.value, { types:photoProblemFields })) }
 
 function selectPhoto(event) {
   if (!event.target.files?.[0]) return
@@ -290,8 +290,8 @@ const focusAfter = useValidationFocus(focusRoot, { context:() => customer.value?
         <div class="profile-account-panel__summary">
           <span class="profile-avatar">
             <img
-              v-if="photoUrl"
-              :src="photoUrl"
+              v-if="displayedPhotoUrl"
+              :src="displayedPhotoUrl"
               alt="Фотография профиля"
             >
             <span v-else>{{ initials }}</span>
@@ -316,6 +316,7 @@ const focusAfter = useValidationFocus(focusRoot, { context:() => customer.value?
           label="Электронная почта"
           type="email"
           maxlength="254"
+          :disabled="busy"
           :errors="fieldErrors('email')"
         />
         <div
@@ -323,7 +324,7 @@ const focusAfter = useValidationFocus(focusRoot, { context:() => customer.value?
           class="profile-photo-actions"
         >
           <UiButton
-            v-if="customer?.hasPhoto"
+            v-if="hasPhoto"
             class="photo-remove"
             variant="danger"
             :disabled="busy"
@@ -339,14 +340,7 @@ const focusAfter = useValidationFocus(focusRoot, { context:() => customer.value?
             :aria-describedby="photoError ? 'profile-photo-error' : undefined"
             @click="openPhotoPicker"
           >
-            {{ customer?.hasPhoto ? 'Заменить фото' : 'Загрузить фото' }}
-          </UiButton>
-          <UiButton
-            v-if="pendingPhoto"
-            :disabled="busy"
-            @click="retryPhoto"
-          >
-            Продолжить загрузку
+            {{ hasPhoto ? 'Заменить фото' : 'Загрузить фото' }}
           </UiButton>
           <input
             ref="photoInput"
@@ -378,6 +372,7 @@ const focusAfter = useValidationFocus(focusRoot, { context:() => customer.value?
               name="firstName"
               label="Имя"
               maxlength="100"
+              :disabled="busy"
               :errors="fieldErrors('firstName')"
             />
             <UiField
@@ -385,6 +380,7 @@ const focusAfter = useValidationFocus(focusRoot, { context:() => customer.value?
               name="patronymic"
               label="Отчество"
               maxlength="100"
+              :disabled="busy"
               :errors="fieldErrors('patronymic')"
             />
             <UiField
@@ -392,6 +388,7 @@ const focusAfter = useValidationFocus(focusRoot, { context:() => customer.value?
               name="lastName"
               label="Фамилия"
               maxlength="100"
+              :disabled="busy"
               :errors="fieldErrors('lastName')"
             />
           </div>
@@ -436,6 +433,7 @@ const focusAfter = useValidationFocus(focusRoot, { context:() => customer.value?
           <DeliveryAddressFields
             v-if="editing"
             :address="form"
+            :disabled="busy"
             :errors-for="fieldErrors"
             @update:field="(name, value) => form[name] = value"
           />
