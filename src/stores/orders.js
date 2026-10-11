@@ -3,6 +3,7 @@
 // This file is a part of the Sarafan application
 
 import { readonly, ref } from 'vue'
+import { validateOrderStages } from '../orderStages.js'
 import { isOrderNumber } from '../orderNumber.js'
 
 import { isIsoDate, isRfc3339DateTime } from '../api/validation.js'
@@ -139,6 +140,7 @@ function validateCompleteOrder(value, ops) {
   const statusValues = new Set(ops.statuses.map(item => item.value))
   const currencyValues = new Set(ops.currencies.map(item => item.value))
   validateOrderIdentityAndProduct(value, currencyValues, ops.productLimits, ops.productSourceUrl.maximumLength)
+  const stages = validateOrderStages(value.stages, value.createdAt, value.updatedAt)
   const product = validateProductDto(value.product, ops.currencies, ops.productLimits)
   const pricing = validatePricing(value.pricing)
   const estimate = validateDeliveryEstimate(value.estimatedDelivery)
@@ -180,6 +182,7 @@ function validateCompleteOrder(value, ops) {
     || value.sellerPrice?.currency !== product.sellerPrice?.currency) protocolError()
   return {
     ...value,
+    stages,
     ...(value.checkout === undefined ? {} : { checkout }),
     pricing,
     ...(estimate ? { estimatedDelivery:estimate } : {}),

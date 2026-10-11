@@ -7,6 +7,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { RouterLink, useRouter } from 'vue-router'
 
 import CustomerCostSummary from '../components/CustomerCostSummary.vue'
+import OrderProductImage from '../components/OrderProductImage.vue'
 import UiAlert from '../components/ui/UiAlert.vue'
 import UiButton from '../components/ui/UiButton.vue'
 import { normalizeProblem, presentProblem } from '../errors/problem.js'
@@ -18,7 +19,6 @@ const session = useSession()
 const router = useRouter()
 const store = createOrderStore(session)
 const problem = ref(null)
-const failedImages = ref(new Set())
 const createdOrderNumber = ref(consumeOrderCreated(session.customer.value?.id))
 let mounted = true
 
@@ -48,10 +48,6 @@ function storeName(order) { return order.storeName?.trim() || 'Магазин у
 function createdAt(value) {
   return new Intl.DateTimeFormat('ru-RU', { day:'numeric', month:'long', year:'numeric' }).format(new Date(value))
 }
-function hasImage(order) { return Boolean(order.imageUrl) && !failedImages.value.has(order.orderNumber) }
-function markImageFailed(orderNumber) {
-  failedImages.value = new Set([...failedImages.value, orderNumber])
-}
 function addProduct() { return router.push({ name:'home' }) }
 function revisit() { if (globalThis.document.visibilityState === 'visible') void load() }
 async function load() {
@@ -68,7 +64,6 @@ const stopCustomerWatch = watch(() => session.customer.value?.id, (customerId, p
   store.reset()
   problem.value = null
   createdOrderNumber.value = consumeOrderCreated(customerId)
-  failedImages.value = new Set()
   if (customerId) void load()
 }, { flush:'sync' })
 
@@ -180,14 +175,7 @@ onBeforeUnmount(() => {
             class="order-card__visual"
             aria-hidden="true"
           >
-            <img
-              v-if="hasImage(order)"
-              :src="order.imageUrl"
-              alt=""
-              referrerpolicy="no-referrer"
-              @error="markImageFailed(order.orderNumber)"
-            >
-            <span v-else>◇</span>
+            <OrderProductImage :src="order.imageUrl" />
           </div>
 
           <div class="order-card__summary">
@@ -271,14 +259,7 @@ onBeforeUnmount(() => {
             class="order-card__visual"
             aria-hidden="true"
           >
-            <img
-              v-if="hasImage(order)"
-              :src="order.imageUrl"
-              alt=""
-              referrerpolicy="no-referrer"
-              @error="markImageFailed(order.orderNumber)"
-            >
-            <span v-else>◇</span>
+            <OrderProductImage :src="order.imageUrl" />
           </div>
           <div class="order-card__summary">
             <div class="order-card__meta">

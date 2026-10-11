@@ -68,7 +68,7 @@ describe('customer pricing', () => {
     expect(wrapper.get('.customer-cost__headline > .ui-section-title').text()).toBe('Срок подтверждения истёк')
     expect(wrapper.text()).toContain('Срок подтверждения истёк')
     expect(wrapper.text()).toContain('12 000,00 ₽')
-    expect(wrapper.findAll('.customer-cost__excluded dd').map(item => item.text())).toEqual(['Расчёт не производился', 'Расчёт не производился'])
+    expect(wrapper.findAll('.customer-cost__excluded dd').map(item => item.text())).toEqual(['Расчёт не производился', 'Будут рассчитаны позже'])
     wrapper.unmount()
   })
 
@@ -154,7 +154,7 @@ it.each([0, 120, null])('keeps extra rows visible and interprets confirmed custo
 it('retains cancelled historical unknown wording and published customs context', async () => {
   const wrapper = mount(CustomerCostSummary, { props:{ pricing:forecastPricing, ops, historical:true } })
   expect(wrapper.text()).toContain('Последняя рассчитанная стоимость')
-  expect(wrapper.findAll('.customer-cost__excluded dd').map(item => item.text())).toEqual(['Расчёт не производился', 'Расчёт не производился'])
+  expect(wrapper.findAll('.customer-cost__excluded dd').map(item => item.text())).toEqual(['Расчёт не производился', 'Расчёт не проводился'])
   await wrapper.setProps({ pricing:{ ...confirmed, customsRub:120 } })
   expect(wrapper.findAll('.customer-cost__excluded dd')[1].text()).toBe('Предварительно 120,00 ₽')
   wrapper.unmount()
@@ -163,7 +163,7 @@ it('retains cancelled historical unknown wording and published customs context',
 it.each([false, true])('shows final unknown extras for an expired quote with saved checkout %s', async deliverySelected => {
   const wrapper = mount(CustomerCostSummary, { props:{ pricing:{ ...confirmed, state:200, customsRub:null }, ops, deliverySelected } })
   const extras = () => wrapper.findAll('.customer-cost__excluded dd').map(item => item.text())
-  expect(extras()).toEqual(['Расчёт не производился', 'Расчёт не производился'])
+  expect(extras()).toEqual(['Расчёт не производился', 'Будут рассчитаны позже'])
   expect(wrapper.get('.customer-cost__headline strong').text()).toBe('12 000,00 ₽')
   await wrapper.setProps({ deliverySelected:true, pricing:{ ...confirmed, state:200, domesticDeliveryRub:0, customsRub:0 } })
   expect(extras()).toEqual(['Предварительно 0,00 ₽', 'Не ожидаются'])

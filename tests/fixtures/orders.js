@@ -7,6 +7,7 @@ export const statuses = [
   { value:100, name:'Расчёт готов', routeAlias:'quote_ready', upperStatusValue:100, upperStatusName:'Расчёт готов', upperStatusRouteAlias:'quote_ready', isTerminal:false, progressPercent:32 },
   { value:200, name:'Расчёт истёк', routeAlias:'quote_expired', upperStatusValue:200, upperStatusName:'Расчёт истёк', upperStatusRouteAlias:'quote_expired', isTerminal:false, progressPercent:32 },
   { value:300, name:'Оплачен', routeAlias:'paid', upperStatusValue:300, upperStatusName:'Выполняется', upperStatusRouteAlias:'in_progress', isTerminal:false, progressPercent:48 },
+  { value:350, name:'Доставляется', routeAlias:'delivering', upperStatusValue:300, upperStatusName:'Выполняется', upperStatusRouteAlias:'in_progress', isTerminal:false, progressPercent:75 },
   { value:400, name:'Получен', routeAlias:'received', upperStatusValue:400, upperStatusName:'Завершён', upperStatusRouteAlias:'completed', isTerminal:true, progressPercent:100 },
   { value:500, name:'Отменён', routeAlias:'cancelled', upperStatusValue:500, upperStatusName:'Отменён', upperStatusRouteAlias:'cancelled', isTerminal:true, progressPercent:100 },
   { value:600, name:'Не можем привезти', routeAlias:'cannot_deliver', upperStatusValue:600, upperStatusName:'Не можем привезти', upperStatusRouteAlias:'cannot_deliver', isTerminal:true, progressPercent:100 }
@@ -26,7 +27,7 @@ export const pricingStates = [
 
 export const forecastPricing = {
   state:0, totalRub:null, calculatedAt:null, validUntil:null,
-  asOf:'2026-09-15T10:00:00Z', domesticDeliveryRub:null, customsRub:null, customsPaid:false
+  asOf:'2026-09-15T10:00:00Z', domesticDeliveryRub:null, customsRub:null, customsPaid:false, mainPaymentPaid:false
 }
 
 export const productSourceUrl = {
@@ -95,6 +96,7 @@ export function completeOrder(overrides = {}) {
     pricing:{ ...forecastPricing },
     createdAt:'2026-09-15T10:00:00Z',
     updatedAt:'2026-09-15T10:00:00Z',
+    stages:[],
     canCancel:[0, 100, 200].includes(orderOverrides.status ?? 0),
     cancelledAt:null,
     showReviewFields:true,

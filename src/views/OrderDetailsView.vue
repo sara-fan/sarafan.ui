@@ -9,6 +9,8 @@ import { useRoute, useRouter } from 'vue-router'
 import CustomerCostSummary from '../components/CustomerCostSummary.vue'
 import OrderSavedDelivery from '../components/OrderSavedDelivery.vue'
 import OrderItemCard from '../components/OrderItemCard.vue'
+import OrderRecipient from '../components/OrderRecipient.vue'
+import OrderStageHistory from '../components/OrderStageHistory.vue'
 import UiAlert from '../components/ui/UiAlert.vue'
 import UiButton from '../components/ui/UiButton.vue'
 import UiDialog from '../components/ui/UiDialog.vue'
@@ -67,7 +69,7 @@ const headingDetail = computed(() => {
       ? `Создан ${creation} · Отменён ${createdAt(order.value.cancelledAt)}`
       : `Создан ${creation} · Отменён`
   }
-  return `${status.value?.name} · создан ${creation}`
+  return `${status.value?.upperStatusName} · создан ${creation}`
 })
 const cancelReasonErrors = computed(() => problemFieldErrors(cancelProblem.value, 'reason'))
 const cancelError = computed(() => cancelProblem.value && cancelReasonErrors.value.length === 0 ? presentProblem(cancelProblem.value) : '')
@@ -310,6 +312,14 @@ onBeforeUnmount(() => {
       >
         {{ order.reviewReason }}
       </UiAlert>
+      <OrderStageHistory
+        :order="order"
+        :ops="ops"
+      />
+      <OrderRecipient
+        v-if="order.checkout"
+        :profile="order.checkout.profile"
+      />
       <OrderSavedDelivery
         :delivery="order.checkout?.delivery"
         :estimate="order.estimatedDelivery"
@@ -322,6 +332,7 @@ onBeforeUnmount(() => {
         :historical="['cancelled', 'cannot_deliver'].includes(status?.routeAlias)"
       />
       <OrderItemCard
+        show-metadata
         :order="order"
         :ops="ops"
       />
