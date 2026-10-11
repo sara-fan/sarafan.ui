@@ -55,6 +55,11 @@
   --sarafan-content-width: 1184px;
 }
 
+.v-tooltip > .v-overlay__content {
+  color: var(--sarafan-paper);
+  background: var(--sarafan-accent-hover);
+}
+
 .ui-button {
   min-height: 48px;
   display: inline-flex;
