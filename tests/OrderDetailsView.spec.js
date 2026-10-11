@@ -60,7 +60,10 @@ describe('OrderDetailsView', () => {
       return response
     })
     const { wrapper } = await mountAt()
-    expect(wrapper.get('.order-details-heading').text()).toContain(status === 400 ? 'Завершён' : 'Выполняется')
+    expect(wrapper.get('.order-details-heading p').text()).toBe(status === 400
+      ? 'Создан 15.09.2026, 13:00 МСК · Завершён 15.09.2026, 15:00 МСК' : 'Создан 15.09.2026, 13:00 МСК · Выполняется')
+    expect(wrapper.get('tr[aria-current="step"]').text()).toContain(status === 300 ? 'Оплачен' : status === 350 ? 'Доставляется' : 'Получен')
+    expect(wrapper.text()).not.toContain('Действует до')
     expect(wrapper.text()).toContain('Текущий этап: ' + (status === 300 ? 'Оплачен' : status === 350 ? 'Доставляется' : 'Получен'))
     expect(wrapper.findAll('time')).toHaveLength(status === 300 ? 1 : status === 350 ? 2 : 3)
     expect(wrapper.get('img').attributes('src')).toContain('saved.png')
@@ -68,6 +71,17 @@ describe('OrderDetailsView', () => {
     expect(wrapper.html()).not.toContain('secret-')
     expect(wrapper.find('[aria-label="Основной платёж подтверждён"]').exists()).toBe(true)
     expect(wrapper.find('[aria-label="Доставка по России оплачена"]').exists()).toBe(true)
+  })
+
+  it('keeps completed orders readable without inventing an unrecorded completion date', async () => {
+    h.session.orderRequest.mockImplementation(async (path, _options, isCurrent, validate) => {
+      const value = path.endsWith('/ops') ? ops : completeOrder({ status:400, showReviewFields:false, stages:[] })
+      if (isCurrent()) validate(value)
+      return value
+    })
+    const { wrapper } = await mountAt()
+    expect(wrapper.get('.order-details-heading p').text()).toBe('Создан 15.09.2026, 13:00 МСК · Завершён')
+    expect(wrapper.find('tr[aria-current]').exists()).toBe(false)
   })
 
   it('confirms customer cancellation with an optional reason and shows its date', async () => {
@@ -91,7 +105,7 @@ describe('OrderDetailsView', () => {
     await flushPromises()
     expect(wrapper.text()).toContain('Заказ отменён')
     expect(wrapper.get('.order-details-heading p').text())
-      .toMatch(/^Создан \d{2}\.\d{2}\.\d{4}, \d{2}:\d{2} · Отменён \d{2}\.\d{2}\.\d{4}, \d{2}:\d{2}$/u)
+      .toMatch(/^Создан \d{2}\.\d{2}\.\d{4}, \d{2}:\d{2} МСК · Отменён \d{2}\.\d{2}\.\d{4}, \d{2}:\d{2} МСК$/u)
     expect(wrapper.get('.customer-cost__excluded').findAll('dd').map(item => item.text()))
       .toEqual(['Расчёт не проводился', 'Расчёт не проводился'])
     expect(wrapper.find('.order-details-heading .ui-button--danger').exists()).toBe(false)
@@ -107,7 +121,7 @@ describe('OrderDetailsView', () => {
     })
     const { wrapper } = await mountAt()
     expect(wrapper.get('.order-details-heading p').text())
-      .toMatch(/^Создан \d{2}\.\d{2}\.\d{4}, \d{2}:\d{2} · Отменён$/u)
+      .toMatch(/^Создан \d{2}\.\d{2}\.\d{4}, \d{2}:\d{2} МСК · Отменён$/u)
     expect(wrapper.find('.order-details-heading .ui-button--danger').exists()).toBe(false)
   })
 

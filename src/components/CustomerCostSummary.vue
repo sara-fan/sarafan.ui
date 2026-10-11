@@ -131,7 +131,7 @@ const customsText = computed(() => {
       Сохранённая стоимость показана для справки.
     </p>
     <p
-      v-else-if="!payment && state === 100 && pricing?.validUntil"
+      v-else-if="!payment && pricing?.mainPaymentPaid !== true && state === 100 && pricing?.validUntil"
       class="customer-cost__status"
     >
       Действует до {{ formatMoscow(pricing.validUntil) }}

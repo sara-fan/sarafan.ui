@@ -6,6 +6,7 @@ import { mount } from '@vue/test-utils'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import CustomerCostSummary from '../src/components/CustomerCostSummary.vue'
+import { createSarafanVuetify } from '../src/plugins/vuetify.js'
 import { formatMoscow, formatRub, validatePricing, validatePricingStates } from '../src/orders/customerPricing.js'
 import { forecastPricing, ops } from './fixtures/orders.js'
 
@@ -74,11 +75,17 @@ describe('customer pricing', () => {
 
   it('expires immediately at the server deadline and resets when pricing is replaced', async () => {
     vi.useFakeTimers()
-    const wrapper = mount(CustomerCostSummary, { props:{ pricing:{ ...confirmed, asOf:confirmed.validUntil }, ops } })
+    const wrapper = mount(CustomerCostSummary, { props:{ pricing:{ ...confirmed, asOf:confirmed.validUntil }, ops }, global:{ plugins:[createSarafanVuetify()] } })
     expect(wrapper.text()).toContain('Срок подтверждения истёк')
     expect(wrapper.text()).not.toContain('Действует до')
     await wrapper.setProps({ pricing:confirmed })
     expect(wrapper.text()).toContain('Действует до')
+    for (const compact of [true, false]) {
+      await wrapper.setProps({ compact, pricing:{ ...confirmed, mainPaymentPaid:true } })
+      expect(wrapper.text()).not.toContain('Действует до')
+      await wrapper.setProps({ pricing:{ ...confirmed, customsPaid:true } })
+      expect(wrapper.text()).toContain('Действует до')
+    }
     await vi.advanceTimersByTimeAsync(1000)
     await wrapper.setProps({ pricing:calculated })
     await vi.advanceTimersByTimeAsync(5000)

@@ -47,6 +47,7 @@ it.each([null, 0, 100])('marks a confirmed main payment and only its known deliv
   expect(wrapper.find('[aria-label="Основной платёж подтверждён"]').exists()).toBe(true)
   expect(wrapper.find('[aria-label="Доставка по России оплачена"]').exists()).toBe(domesticDeliveryRub !== null)
   expect(wrapper.find('[aria-label="Таможенная пошлина оплачена"]').exists()).toBe(false)
+  expect(wrapper.text()).not.toContain('Действует до')
   wrapper.unmount()
 })
 it.each([null, 0, 120])('shows saved customs before confirmation only in cancelled history %s', customsRub => {
@@ -64,9 +65,24 @@ it.each([0, 300, 350, 400, 999])('shows actual history only for fulfilment and c
   if ([300, 350, 400].includes(status)) {
     expect(wrapper.findAll('time').map(item => item.attributes('datetime'))).toEqual([start, end])
     expect(wrapper.text()).toContain('Текущий этап: ' + (status === 300 ? 'Оплачен' : status === 350 ? 'Доставляется' : 'Получен'))
-    expect(wrapper.findAll('li')).toHaveLength(2)
-    expect(wrapper.findAll('li')[1].text()).toContain('Доставляется')
+    const rows = wrapper.findAll('tbody tr')
+    expect(rows).toHaveLength(2)
+    expect(rows[1].text()).toContain('Доставляется')
+    const currentRows = wrapper.findAll('tr[aria-current="step"]')
+    expect(currentRows).toHaveLength(status === 400 ? 0 : 1)
+    if (currentRows.length) {
+      expect(currentRows[0].text()).toContain(status === 300 ? 'Оплачен' : 'Доставляется')
+      expect(currentRows[0].find('[role="img"][aria-label="Текущий этап"]').exists()).toBe(true)
+      expect(currentRows[0].text()).not.toContain('Текущий')
+    }
   }
+  wrapper.unmount()
+})
+it.each([300, 400])('keeps a current stage without inventing missing history for %s', status => {
+  const wrapper = mount(OrderStageHistory, { props:{ order:completeOrder({ status, stages:[] }), ops } })
+  expect(wrapper.text()).toContain('Зафиксированных этапов пока нет.')
+  expect(wrapper.findAll('time')).toHaveLength(0)
+  expect(wrapper.find('[aria-current]').exists()).toBe(false)
   wrapper.unmount()
 })
 it.each([null, 'Иванович'])('renders only recipient snapshot names, phone and email %s', patronymic => {
