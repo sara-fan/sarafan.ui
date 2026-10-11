@@ -305,7 +305,10 @@ onBeforeUnmount(() => {
       <p>Загружаем заказ…</p>
     </section>
 
-    <template v-else-if="order">
+    <div
+      v-else-if="order"
+      class="ui-form-stack"
+    >
       <UiAlert
         v-if="order.reviewReason"
         title="Не можем привезти"
@@ -336,7 +339,7 @@ onBeforeUnmount(() => {
         :order="order"
         :ops="ops"
       />
-    </template>
+    </div>
 
     <UiDialog
       v-model="cancelOpen"
