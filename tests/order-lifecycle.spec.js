@@ -19,17 +19,30 @@ it.each([undefined, null, {}, [null], [{ status:-1, at:start }], [{ status:300.1
   [{ status:300, at:'2026-02-30T10:00:00Z' }], [{ status:300, at:'2026-09-15T09:59:59Z' }],
   [{ status:300, at:'2026-09-15T12:00:01Z' }], [stages[0], stages[0]], [stages[1], stages[0]]])(
   'rejects malformed or invented stage evidence %j', value => {
-    expect(() => validateOrderStages(value, start, end)).toThrow()
+    expect(() => validateOrderStages(value, start, end, 350, ops)).toThrow()
   })
 it('retains only public dated evidence and accepts no-history orders', () => {
-  expect(validateOrderStages([], start, end)).toEqual([])
-  expect(validateOrderStages(stages.map(stage => ({ ...stage, actorName:'private', reason:'private' })), start, end)).toEqual(stages)
+  expect(validateOrderStages([], start, end, 0, ops)).toEqual([])
+  expect(validateOrderStages(stages.map(stage => ({ ...stage, actorName:'private', reason:'private' })), start, end, 350, ops)).toEqual(stages)
+})
+it.each([
+  [300, [300, 350]], [300, [400]], [350, [400]], [0, [300]], [500, [300]],
+  [400, [350, 300]], [400, [999]]
+])('rejects incompatible stage sequence for status %s: %j', (status, values) => {
+  expect(() => validateOrderStages(values.map(status => ({ status, at:start })), start, end, status, ops)).toThrow()
+})
+it.each([[300, [300]], [350, [300, 350]], [400, [300, 350, 400]], [400, [350]], [999, [300]]])(
+  'accepts recorded stages compatible with status %s', (status, values) => {
+    expect(validateOrderStages(values.map(status => ({ status, at:start })), start, end, status, ops).map(stage => stage.status)).toEqual(values)
+  })
+it('rejects payment evidence in anonymous forecast pricing', () => {
+  expect(() => validatePricing({ ...forecastPricing, mainPaymentPaid:true })).toThrow()
 })
 it.each([undefined, null, 1, 'true'])('requires boolean main payment evidence %s', value => {
   expect(() => validatePricing({ ...forecastPricing, mainPaymentPaid:value })).toThrow()
 })
 it.each([null, 0, 100])('marks a confirmed main payment and only its known delivery %s', domesticDeliveryRub => {
-  const wrapper = mount(CustomerCostSummary, { props:{ pricing:{ ...forecastPricing, mainPaymentPaid:true, domesticDeliveryRub }, ops, deliverySelected:true } })
+  const wrapper = mount(CustomerCostSummary, { props:{ pricing:{ ...forecastPricing, state:100, totalRub:1000, calculatedAt:'2026-09-15T10:00:00Z', validUntil:'2026-09-16T10:00:00Z', mainPaymentPaid:true, domesticDeliveryRub }, ops, deliverySelected:true } })
   expect(wrapper.find('[aria-label="Основной платёж подтверждён"]').exists()).toBe(true)
   expect(wrapper.find('[aria-label="Доставка по России оплачена"]').exists()).toBe(domesticDeliveryRub !== null)
   expect(wrapper.find('[aria-label="Таможенная пошлина оплачена"]').exists()).toBe(false)

@@ -140,7 +140,7 @@ function validateCompleteOrder(value, ops) {
   const statusValues = new Set(ops.statuses.map(item => item.value))
   const currencyValues = new Set(ops.currencies.map(item => item.value))
   validateOrderIdentityAndProduct(value, currencyValues, ops.productLimits, ops.productSourceUrl.maximumLength)
-  const stages = validateOrderStages(value.stages, value.createdAt, value.updatedAt)
+  const stages = validateOrderStages(value.stages, value.createdAt, value.updatedAt, value.status, ops)
   const product = validateProductDto(value.product, ops.currencies, ops.productLimits)
   const pricing = validatePricing(value.pricing)
   const estimate = validateDeliveryEstimate(value.estimatedDelivery)

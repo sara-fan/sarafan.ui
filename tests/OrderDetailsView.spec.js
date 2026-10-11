@@ -52,7 +52,7 @@ describe('OrderDetailsView', () => {
       imageUrl:'https://example.test/saved.png', characteristics:{ Материал:'Сталь' },
       stages:[{ status:300, at:'2026-09-15T11:00:00Z' }, ...(status === 300 ? [] : [{ status:350, at:'2026-09-15T11:30:00Z' }]),
         ...(status === 400 ? [{ status:400, at:'2026-09-15T12:00:00Z' }] : [])],
-      pricing:{ ...forecastPricing, mainPaymentPaid:true, domesticDeliveryRub:0 },
+      pricing:{ ...forecastPricing, state:100, totalRub:1000, calculatedAt:'2026-09-15T10:00:00Z', validUntil:'2026-09-16T10:00:00Z', mainPaymentPaid:true, domesticDeliveryRub:0 },
       checkout:{ profile, delivery:{ routeAlias:'courier', name:'Курьер', destination:'Сохранённый адрес' } } })
     h.session.orderRequest.mockImplementation(async (path, _options, isCurrent, validate) => {
       const response = path.endsWith('/ops') ? ops : value

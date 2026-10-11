@@ -37,6 +37,7 @@ export function validatePricing(value) {
     || value.domesticDeliveryRub !== null && !money(value.domesticDeliveryRub)
     || value.customsRub !== null && !money(value.customsRub)
     || typeof value.mainPaymentPaid !== 'boolean'
+    || value.state === 0 && value.mainPaymentPaid
     || typeof value.customsPaid !== 'boolean'
     || value.state === 0 && value.validUntil !== null
     || value.state !== 0 && (value.totalRub === null || value.validUntil === null)) protocolError()
