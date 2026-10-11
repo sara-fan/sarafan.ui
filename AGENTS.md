@@ -129,7 +129,7 @@ For other comment-capable formats, use the same three lines with that format's n
 
 ## Customs payment evidence
 
-- Customer pricing carries Core's independent boolean `customsPaid`. Render its accessible green check in the customs row through `@sara-fan/ui-shared/paid-indicator`, injecting Vue h. The paid flag remains visible independently of later estimate changes; amounts retain their confirmation gate. Cancelled customs uses the current CUSTOMS wording and saved historical amount. The flag does not imply a Sarafan payment or order-status transition.
+- Customer pricing carries Core's independent boolean `customsPaid`. Render its accessible green check in the customs row through `@sara-fan/ui-shared/paid-indicator`, injecting Vue h and Vuetify VTooltip. All paid marks use the fixed «Оплачено» hover/focus tooltip and scale with the surrounding font through the shared 1em SVG; keep payment-specific accessible labels. The paid flag remains visible independently of later estimate changes; amounts retain their confirmation gate. Cancelled customs uses the current CUSTOMS wording and saved historical amount. The flag does not imply a Sarafan payment or order-status transition.
 
 ## Validation focus
 

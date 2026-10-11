@@ -3,6 +3,7 @@
 // This file is a part of the Sarafan application
 
 import { mount } from '@vue/test-utils'
+import { createSarafanVuetify } from '../src/plugins/vuetify.js'
 import { expect, it } from 'vitest'
 import { validateOrderStages } from '../src/orderStages.js'
 import { validatePricing } from '../src/orders/customerPricing.js'
@@ -42,7 +43,7 @@ it.each([undefined, null, 1, 'true'])('requires boolean main payment evidence %s
   expect(() => validatePricing({ ...forecastPricing, mainPaymentPaid:value })).toThrow()
 })
 it.each([null, 0, 100])('marks a confirmed main payment and only its known delivery %s', domesticDeliveryRub => {
-  const wrapper = mount(CustomerCostSummary, { props:{ pricing:{ ...forecastPricing, state:100, totalRub:1000, calculatedAt:'2026-09-15T10:00:00Z', validUntil:'2026-09-16T10:00:00Z', mainPaymentPaid:true, domesticDeliveryRub }, ops, deliverySelected:true } })
+  const wrapper = mount(CustomerCostSummary, { props:{ pricing:{ ...forecastPricing, state:100, totalRub:1000, calculatedAt:'2026-09-15T10:00:00Z', validUntil:'2026-09-16T10:00:00Z', mainPaymentPaid:true, domesticDeliveryRub }, ops, deliverySelected:true }, global:{ plugins:[createSarafanVuetify()] } })
   expect(wrapper.find('[aria-label="Основной платёж подтверждён"]').exists()).toBe(true)
   expect(wrapper.find('[aria-label="Доставка по России оплачена"]').exists()).toBe(domesticDeliveryRub !== null)
   expect(wrapper.find('[aria-label="Таможенная пошлина оплачена"]').exists()).toBe(false)
