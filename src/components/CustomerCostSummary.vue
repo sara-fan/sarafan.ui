@@ -38,7 +38,7 @@ const label = computed(() => props.payment ? 'Сумма к оплате' : prop
   : props.pricing?.state === 0 ? 'Предварительная стоимость'
   : props.ops?.pricingStates?.find(item => item.value === state.value)?.name ?? 'Стоимость заказа')
 const rubSymbol = computed(() => props.ops?.currencies?.find(item => item.routeAlias === 'rub')?.symbol ?? '₽')
-const notCalculatedText = 'Расчёт не производился'
+const notCalculatedText = 'Расчёт не проводился'
 const pendingCalculationText = 'Будут рассчитаны позже'
 const extrasNotCalculated = computed(() => props.historical || state.value === 200)
 const totalText = computed(() => props.payment ? formatRub(props.mainPaymentRub, rubSymbol.value) : props.historical && props.pricing?.totalRub == null
@@ -51,8 +51,8 @@ const deliveryText = computed(() => {
     : props.deliverySelected ? pendingCalculationText : 'Рассчитаем при оформлении заказа'
 })
 const customsText = computed(() => {
-  const amount = props.pricing?.state === 0 ? null : props.pricing?.customsRub
-  if (amount == null) return extrasNotCalculated.value ? notCalculatedText : props.pricing?.state === 0 ? 'Проверяем, потребуются ли таможенные платежи' : pendingCalculationText
+  const amount = props.pricing?.state === 0 && !props.historical ? null : props.pricing?.customsRub
+  if (amount == null) return props.historical ? 'Расчёт не проводился' : props.pricing?.state === 0 ? 'Проверяем, потребуются ли таможенные платежи' : pendingCalculationText
   return amount === 0 ? 'Не ожидаются' : 'Предварительно ' + formatRub(amount, rubSymbol.value)
 })
 </script>
@@ -74,7 +74,13 @@ const customsText = computed(() => {
         >
           {{ label }}
         </component>
-        <strong>{{ loading ? 'Рассчитываем стоимость…' : totalText }}</strong>
+        <strong>
+          {{ loading ? 'Рассчитываем стоимость…' : totalText }}
+          <PaidIndicator
+            :paid="pricing?.mainPaymentPaid === true"
+            label="Основной платёж подтверждён"
+          />
+        </strong>
       </div>
       <p
         v-if="preview"
@@ -101,6 +107,10 @@ const customsText = computed(() => {
         <dt>Доставка по России</dt>
         <dd>
           {{ deliveryText }}
+          <PaidIndicator
+            :paid="pricing?.mainPaymentPaid === true && pricing?.domesticDeliveryRub != null"
+            label="Доставка по России оплачена"
+          />
         </dd>
       </div>
       <div>
@@ -121,7 +131,7 @@ const customsText = computed(() => {
       Сохранённая стоимость показана для справки.
     </p>
     <p
-      v-else-if="!payment && state === 100 && pricing?.validUntil"
+      v-else-if="!payment && pricing?.mainPaymentPaid !== true && state === 100 && pricing?.validUntil"
       class="customer-cost__status"
     >
       Действует до {{ formatMoscow(pricing.validUntil) }}

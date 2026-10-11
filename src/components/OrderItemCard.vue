@@ -8,6 +8,7 @@ import { formatMoneyAmount } from '../moneyFormatting.js'
 import { priceCents } from '../orderProduct.js'
 import OrderItemFields from './OrderItemFields.vue'
 import UiField from './ui/UiField.vue'
+import OrderProductImage from './OrderProductImage.vue'
 
 const props = defineProps({ order:{ type:Object, required:true }, ops:{ type:Object, required:true }, showMetadata:{ type:Boolean, default:false } })
 const product = computed(() => props.order.product)
@@ -53,6 +54,15 @@ const reviewItem = computed(() => ({
     >
       Проверим данные в течение двух часов.
     </p>
+    <div
+      v-if="showMetadata && order.imageUrl"
+      class="order-product-image"
+    >
+      <OrderProductImage
+        :src="order.imageUrl"
+        :alt="product.productName || 'Товар'"
+      />
+    </div>
     <OrderItemFields
       :source-url="order.sourceUrl"
       :item="reviewItem"
@@ -79,3 +89,8 @@ const reviewItem = computed(() => ({
     </div>
   </section>
 </template>
+
+<style scoped>
+.order-product-image { max-width: 20rem; margin-bottom: 1rem; }
+.order-product-image img { display: block; width: 100%; max-height: 20rem; object-fit: contain; }
+</style>

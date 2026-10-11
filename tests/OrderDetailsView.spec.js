@@ -13,6 +13,7 @@ vi.mock('../src/stores/session.js', () => ({ useSession:() => h.session }))
 import { CORE_PROBLEM_TYPES, ProblemError, createInternalProblem, SERVICE_UNAVAILABLE_MESSAGE } from '../src/errors/problem.js'
 import OrderDetailsView from '../src/views/OrderDetailsView.vue'
 import { createSarafanVuetify } from '../src/plugins/vuetify.js'
+import { customerDto } from './fixtures/customer.js'
 import { completeOrder, forecastPricing, ops, product } from './fixtures/orders.js'
 
 const mountedViews = []
@@ -44,6 +45,45 @@ describe('OrderDetailsView', () => {
     })
   })
 
+  it.each([300, 350, 400])('shows upper status, current stage, dated history and saved recipient for %s', async status => {
+    const profile = customerDto({ profile:{ firstName:'Иван', lastName:'Иванов', patronymic:'Иванович', email:'saved@example.test',
+      passportNumber:'secret-passport', inn:'secret-inn' } }).profile
+    const value = completeOrder({ status, showReviewFields:false, updatedAt:'2026-09-15T12:00:00Z',
+      imageUrl:'https://example.test/saved.png', characteristics:{ Материал:'Сталь' },
+      stages:[{ status:300, at:'2026-09-15T11:00:00Z' }, ...(status === 300 ? [] : [{ status:350, at:'2026-09-15T11:30:00Z' }]),
+        ...(status === 400 ? [{ status:400, at:'2026-09-15T12:00:00Z' }] : [])],
+      pricing:{ ...forecastPricing, state:100, totalRub:1000, calculatedAt:'2026-09-15T10:00:00Z', validUntil:'2026-09-16T10:00:00Z', mainPaymentPaid:true, domesticDeliveryRub:0 },
+      checkout:{ profile, delivery:{ routeAlias:'courier', name:'Курьер', destination:'Сохранённый адрес' } } })
+    h.session.orderRequest.mockImplementation(async (path, _options, isCurrent, validate) => {
+      const response = path.endsWith('/ops') ? ops : value
+      if (isCurrent()) validate(response)
+      return response
+    })
+    const { wrapper } = await mountAt()
+    expect(wrapper.get('.order-details-heading p').text()).toBe(status === 400
+      ? 'Создан 15.09.2026, 13:00 МСК · Завершён 15.09.2026, 15:00 МСК' : 'Создан 15.09.2026, 13:00 МСК · Выполняется')
+    expect(wrapper.get('tr[aria-current="step"]').text()).toContain(status === 300 ? 'Оплачен' : status === 350 ? 'Доставляется' : 'Получен')
+    expect(wrapper.text()).not.toContain('Действует до')
+    expect(wrapper.text()).toContain('Текущий этап: ' + (status === 300 ? 'Оплачен' : status === 350 ? 'Доставляется' : 'Получен'))
+    expect(wrapper.findAll('time')).toHaveLength(status === 300 ? 1 : status === 350 ? 2 : 3)
+    expect(wrapper.get('img').attributes('src')).toContain('saved.png')
+    expect(wrapper.findAll('input').map(input => input.element.value)).toEqual(expect.arrayContaining(['Иванов Иван Иванович', '+79990000001', 'saved@example.test', 'Сталь']))
+    expect(wrapper.html()).not.toContain('secret-')
+    expect(wrapper.find('[aria-label="Основной платёж подтверждён"]').exists()).toBe(true)
+    expect(wrapper.find('[aria-label="Доставка по России оплачена"]').exists()).toBe(true)
+  })
+
+  it('keeps completed orders readable without inventing an unrecorded completion date', async () => {
+    h.session.orderRequest.mockImplementation(async (path, _options, isCurrent, validate) => {
+      const value = path.endsWith('/ops') ? ops : completeOrder({ status:400, showReviewFields:false, stages:[] })
+      if (isCurrent()) validate(value)
+      return value
+    })
+    const { wrapper } = await mountAt()
+    expect(wrapper.get('.order-details-heading p').text()).toBe('Создан 15.09.2026, 13:00 МСК · Завершён')
+    expect(wrapper.find('tr[aria-current]').exists()).toBe(false)
+  })
+
   it('confirms customer cancellation with an optional reason and shows its date', async () => {
     h.session.orderRequest.mockImplementation(async (path, options, isCurrent, validate) => {
       const value = path.endsWith('/ops') ? ops : path.endsWith('/cancel')
@@ -65,9 +105,9 @@ describe('OrderDetailsView', () => {
     await flushPromises()
     expect(wrapper.text()).toContain('Заказ отменён')
     expect(wrapper.get('.order-details-heading p').text())
-      .toMatch(/^Создан \d{2}\.\d{2}\.\d{4}, \d{2}:\d{2} · Отменён \d{2}\.\d{2}\.\d{4}, \d{2}:\d{2}$/u)
+      .toMatch(/^Создан \d{2}\.\d{2}\.\d{4}, \d{2}:\d{2} МСК · Отменён \d{2}\.\d{2}\.\d{4}, \d{2}:\d{2} МСК$/u)
     expect(wrapper.get('.customer-cost__excluded').findAll('dd').map(item => item.text()))
-      .toEqual(['Расчёт не производился', 'Расчёт не производился'])
+      .toEqual(['Расчёт не проводился', 'Расчёт не проводился'])
     expect(wrapper.find('.order-details-heading .ui-button--danger').exists()).toBe(false)
     expect(h.session.orderRequest.mock.calls.filter(([path]) => path.endsWith('/cancel'))).toHaveLength(1)
   })
@@ -81,7 +121,7 @@ describe('OrderDetailsView', () => {
     })
     const { wrapper } = await mountAt()
     expect(wrapper.get('.order-details-heading p').text())
-      .toMatch(/^Создан \d{2}\.\d{2}\.\d{4}, \d{2}:\d{2} · Отменён$/u)
+      .toMatch(/^Создан \d{2}\.\d{2}\.\d{4}, \d{2}:\d{2} МСК · Отменён$/u)
     expect(wrapper.find('.order-details-heading .ui-button--danger').exists()).toBe(false)
   })
 
@@ -646,7 +686,7 @@ describe('OrderDetailsView', () => {
       return value
     })
     const { wrapper } = await mountAt()
-    expect(wrapper.get('.customer-cost__headline strong').text()).toBe('Расчёт не производился')
+    expect(wrapper.get('.customer-cost__headline strong').text()).toBe('Расчёт не проводился')
     expect(wrapper.text()).not.toContain('Стоимость уточняется')
   })
 })

@@ -9,11 +9,14 @@ import { useRoute, useRouter } from 'vue-router'
 import CustomerCostSummary from '../components/CustomerCostSummary.vue'
 import OrderSavedDelivery from '../components/OrderSavedDelivery.vue'
 import OrderItemCard from '../components/OrderItemCard.vue'
+import OrderRecipient from '../components/OrderRecipient.vue'
+import OrderStageHistory from '../components/OrderStageHistory.vue'
 import UiAlert from '../components/ui/UiAlert.vue'
 import UiButton from '../components/ui/UiButton.vue'
 import UiDialog from '../components/ui/UiDialog.vue'
 import UiField from '../components/ui/UiField.vue'
 import { CORE_PROBLEM_TYPES, createInternalProblem, normalizeProblem, presentProblem, presentProblemTitle, problemFieldErrors } from '../errors/problem.js'
+import { formatMoscow } from '../orders/customerPricing.js'
 import { isOrderNumber } from '../orderNumber.js'
 import { orderStatusFor, validateCustomerOrder, validateOrderOps } from '../stores/orders.js'
 import { useSession } from '../stores/session.js'
@@ -61,13 +64,15 @@ async function checkout(payment = false) {
 }
 const headingDetail = computed(() => {
   if (!order.value) return ''
-  const creation = createdAt(order.value.createdAt)
+  const creation = formatMoscow(order.value.createdAt)
   if (status.value?.routeAlias === 'cancelled') {
     return order.value.cancelledAt
-      ? `Создан ${creation} · Отменён ${createdAt(order.value.cancelledAt)}`
+      ? `Создан ${creation} · Отменён ${formatMoscow(order.value.cancelledAt)}`
       : `Создан ${creation} · Отменён`
   }
-  return `${status.value?.name} · создан ${creation}`
+  const completedAt = status.value?.upperStatusRouteAlias === 'completed'
+    ? order.value.stages.find(stage => stage.status === order.value.status)?.at : null
+  return `Создан ${creation} · ${status.value?.upperStatusName}${completedAt ? ` ${formatMoscow(completedAt)}` : ''}`
 })
 const cancelReasonErrors = computed(() => problemFieldErrors(cancelProblem.value, 'reason'))
 const cancelError = computed(() => cancelProblem.value && cancelReasonErrors.value.length === 0 ? presentProblem(cancelProblem.value) : '')
@@ -81,11 +86,6 @@ function orderNumber() {
     return null
   }
   return isOrderNumber(value) ? value : null
-}
-function createdAt(value) {
-  return new Intl.DateTimeFormat('ru-RU', {
-    day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit'
-  }).format(new Date(value))
 }
 
 function openCancellation() {
@@ -303,13 +303,24 @@ onBeforeUnmount(() => {
       <p>Загружаем заказ…</p>
     </section>
 
-    <template v-else-if="order">
+    <div
+      v-else-if="order"
+      class="ui-form-stack"
+    >
       <UiAlert
         v-if="order.reviewReason"
         title="Не можем привезти"
       >
         {{ order.reviewReason }}
       </UiAlert>
+      <OrderStageHistory
+        :order="order"
+        :ops="ops"
+      />
+      <OrderRecipient
+        v-if="order.checkout"
+        :profile="order.checkout.profile"
+      />
       <OrderSavedDelivery
         :delivery="order.checkout?.delivery"
         :estimate="order.estimatedDelivery"
@@ -322,10 +333,11 @@ onBeforeUnmount(() => {
         :historical="['cancelled', 'cannot_deliver'].includes(status?.routeAlias)"
       />
       <OrderItemCard
+        show-metadata
         :order="order"
         :ops="ops"
       />
-    </template>
+    </div>
 
     <UiDialog
       v-model="cancelOpen"

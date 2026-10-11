@@ -3,5 +3,6 @@
 // This file is a part of the Sarafan application
 
 import { h } from 'vue'
+import { VTooltip } from 'vuetify/components'
 import { createPaidIndicator } from '@sara-fan/ui-shared/paid-indicator'
-export const PaidIndicator = createPaidIndicator({ h })
+export const PaidIndicator = createPaidIndicator({ h, Tooltip:VTooltip })
