@@ -285,7 +285,8 @@ a { color: var(--sarafan-secondary); }
 .order-stage-history tbody tr + tr > * { border-top: 1px solid var(--sarafan-line); }
 .order-stage-history tr[aria-current="step"] { background: var(--sarafan-accent-soft); }
 .order-stage-history tr[aria-current="step"] > th { box-shadow: inset 4px 0 var(--sarafan-secondary); color: var(--sarafan-accent-hover); }
-.order-stage-history__spinner { display: inline-block; width: 1em; height: 1em; margin-inline-start: var(--sarafan-space-8); vertical-align: middle; }
+.order-stage-history__indicator { display: inline-block; width: 1em; height: 1em; margin-inline-start: var(--sarafan-space-8); vertical-align: middle; }
+.order-stage-history__indicator svg { display: block; width: 100%; height: 100%; fill: currentColor; }
 .order-details-view > .ui-alert { margin-bottom: var(--sarafan-space-20); }
 .order-details-view > .ui-alert .ui-button { margin-top: var(--sarafan-space-12); }
 .order-review-card__heading .page-kicker { margin-bottom: 5px; }

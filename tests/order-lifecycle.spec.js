@@ -78,6 +78,25 @@ it.each([0, 300, 350, 400, 999])('shows actual history only for fulfilment and c
   }
   wrapper.unmount()
 })
+it.each([
+  [300, [300], 'fa-solid fa-check'],
+  [350, [300, 350], null],
+  [400, [300, 350, 400], 'fa-regular fa-square-check']
+])('uses the current stage indicator for status %s only', (status, history, iconClass) => {
+  const wrapper = mount(OrderStageHistory, { props:{
+    order:completeOrder({ status, stages:history.map(status => ({ status, at:start })) }), ops
+  } })
+  const indicator = wrapper.get('tr[aria-current="step"] [aria-label="Текущий этап"]')
+  expect(wrapper.findAll('[aria-label="Текущий этап"]')).toHaveLength(1)
+  expect(indicator.classes('ui-spinner')).toBe(iconClass === null)
+  expect(indicator.find('svg').exists()).toBe(iconClass !== null)
+  if (iconClass) {
+    expect(indicator.get('svg').classes().join(' ')).toBe(iconClass)
+    expect(indicator.get('svg').attributes('aria-hidden')).toBe('true')
+    expect(indicator.get('svg').attributes('focusable')).toBe('false')
+  }
+  wrapper.unmount()
+})
 it.each([300, 400])('keeps a current stage without inventing missing history for %s', status => {
   const wrapper = mount(OrderStageHistory, { props:{ order:completeOrder({ status, stages:[] }), ops } })
   expect(wrapper.text()).toContain('Зафиксированных этапов пока нет.')
