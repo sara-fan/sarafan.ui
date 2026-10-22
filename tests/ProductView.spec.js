@@ -393,7 +393,7 @@ describe('ProductView product review', () => {
     await wrapper.get('input[name="sellerPrice"]').setValue('300,00')
     await wrapper.get('input[name="quantity"]').setValue('5')
     await wrapper.get('form').trigger('submit')
-    expect(wrapper.text()).toContain('Такое количество товара может быть признано коммерческой партией и запрещено к ввозу')
+    expect(wrapper.text()).toContain('Не больше 4 одинаковых товаров в одном заказе')
     await flushPromises()
     expect(document.activeElement).toBe(wrapper.get('[name="quantity"]').element)
     expect(h.session.createOrder).not.toHaveBeenCalled()

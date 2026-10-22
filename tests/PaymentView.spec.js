@@ -81,7 +81,7 @@ it.each([
   expect(wrapper.findComponent(PaymentQr).exists()).toBe(!mobile)
   expect(wrapper.text().includes('Отсканируйте QR-код')).toBe(!mobile)
   expect(wrapper.text()).toContain('Вручную введите указанную сумму')
-  expect(wrapper.text().match(/Проверка платежа выполняется оператором/gu)).toHaveLength(1)
+  expect(wrapper.text().split('После поступления и подтверждения оплаты оператором заказ перейдёт в статус „Выполняется“. Это может занять время, подождите.')).toHaveLength(2)
   expect(wrapper.get('section[aria-label="Оплата через СБП"]').get('h2').text()).toBe('Оплата через СБП')
   vi.stubGlobal('innerWidth', mobile ? 360 : 1280)
   globalThis.dispatchEvent(new globalThis.Event('resize')); await flushPromises()
@@ -230,6 +230,18 @@ it('uses the Pilot placeholder and directs missing checkout to checkout', async 
   response.order.checkout = null; response.mainPaymentRub = null; await state().refresh(); await flushPromises()
   expect(wrapper.text()).toContain('Заполните данные'); await state().checkout()
   expect(h.push).toHaveBeenCalledWith({ name:'checkout', params:{ orderNumber:'12345678-3' } })
+})
+it.each([100, 200])('does not refresh paid pricing state %s at the old deadline', async pricingState => {
+  vi.useFakeTimers()
+  response.canPay = false; response.paymentInformation = null; response.order.status = 300; response.order.canCancel = false
+  response.order.pricing.mainPaymentPaid = true; response.order.pricing.state = pricingState
+  await render()
+  const calls = h.session.orderRequest.mock.calls.length
+  expect(wrapper.text()).toContain('Заказ оплачен')
+  await vi.advanceTimersByTimeAsync(25 * 60 * 60 * 1000)
+  expect(h.session.orderRequest).toHaveBeenCalledTimes(calls)
+  expect(state().expired).toBe(false)
+  expect(wrapper.find('.bank-payment').exists()).toBe(false)
 })
 it.each([300, 500, 600, 999])('shows status %s without payment controls', async status => {
   response.canPay = false; response.paymentInformation = null; response.order.status = status; response.order.canCancel = false

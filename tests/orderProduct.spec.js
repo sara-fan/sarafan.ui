@@ -131,7 +131,7 @@ describe('order product rules', () => {
     }, { ...productLimits, minimumQuantity:2 }).quantity).toEqual(['Такое количество нельзя заказать.'])
     expect(productFormErrors({
       storeName:'', productName:'Товар', sellerPrice:'10', quantity:'5', color:'', size:'', comment:''
-    }, productLimits).quantity).toEqual(['Такое количество товара может быть признано коммерческой партией и запрещено к ввозу'])
+    }, productLimits).quantity).toEqual(['Не больше 4 одинаковых товаров в одном заказе'])
     expect(productFormErrors({
       storeName:'', productName:'x'.repeat(501), sellerPrice:'10', quantity:'1', color:'', size:'', comment:''
     }, productLimits).productName).toEqual(['Не более 500 символов.'])

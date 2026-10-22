@@ -54,7 +54,7 @@ export const productLimits = {
     available:true,
     sourceEffectiveDate:'2026-09-15',
     maximumTotalUsd:1125,
-    exceededMessage:'Максимальная стоимость заказа при экспресс-перевозке 900 евро с учётом резерва 10% на изменение курса'
+    exceededMessage:'Общая стоимость товаров в заказе не более 900€'
   }
 }
 

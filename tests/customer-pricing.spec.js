@@ -101,6 +101,25 @@ describe('customer pricing', () => {
     wrapper.unmount()
   })
 
+  it.each([false, true])('keeps paid quotes confirmed beyond their deadline in compact=%s', async compact => {
+    vi.useFakeTimers()
+    const wrapper = mount(CustomerCostSummary, { props:{ pricing:confirmed, ops, compact, deliverySelected:true }, global:{ plugins:[createSarafanVuetify()] } })
+    await vi.advanceTimersByTimeAsync(1000)
+    for (const state of [100, 200]) {
+      await wrapper.setProps({ pricing:{ ...confirmed, state, mainPaymentPaid:true, domesticDeliveryRub:55, customsRub:120 } })
+      await vi.advanceTimersByTimeAsync(25 * 60 * 60 * 1000)
+      expect(wrapper.get('.customer-cost__headline > .ui-section-title').text()).toBe('Подтверждённая стоимость')
+      expect(wrapper.get('.customer-cost__headline strong').text()).toContain('12 000,00 ₽')
+      expect(wrapper.text()).not.toContain('Срок подтверждения истёк')
+      expect(wrapper.text()).not.toContain('Действует до')
+      expect(wrapper.text()).not.toContain('Сохранённая стоимость показана для справки')
+      if (!compact) expect(wrapper.findAll('.customer-cost__excluded dd').map(item => item.text()))
+        .toEqual(['Предварительно 55,00 ₽', 'Предварительно 120,00 ₽'])
+    }
+    wrapper.unmount()
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
   it('shows a saved expired amount, compact extras, and an honest unavailable forecast', () => {
     const expired = mount(CustomerCostSummary, { props:{ pricing:{ ...confirmed, state:200 }, ops, compact:true } })
     expect(expired.get('.customer-cost__headline > .ui-section-title').text()).toBe('Срок подтверждения истёк')

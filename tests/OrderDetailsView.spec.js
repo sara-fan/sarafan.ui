@@ -17,7 +17,7 @@ import { customerDto } from './fixtures/customer.js'
 import { completeOrder, forecastPricing, ops, product } from './fixtures/orders.js'
 
 const mountedViews = []
-afterEach(() => { for (const wrapper of mountedViews.splice(0)) wrapper.unmount() })
+afterEach(() => { for (const wrapper of mountedViews.splice(0)) wrapper.unmount(); vi.useRealTimers() })
 
 async function mountAt(path = '/orders/12345678-3') {
   const empty = { template:'<main />' }
@@ -46,6 +46,7 @@ describe('OrderDetailsView', () => {
   })
 
   it.each([300, 350, 400])('shows upper status, current stage, dated history and saved recipient for %s', async status => {
+    vi.useFakeTimers({ toFake:['setTimeout', 'clearTimeout'] })
     const profile = customerDto({ profile:{ firstName:'Иван', lastName:'Иванов', patronymic:'Иванович', email:'saved@example.test',
       passportNumber:'secret-passport', inn:'secret-inn' } }).profile
     const value = completeOrder({ status, showReviewFields:false, updatedAt:'2026-09-15T12:00:00Z',
@@ -71,6 +72,11 @@ describe('OrderDetailsView', () => {
     expect(wrapper.html()).not.toContain('secret-')
     expect(wrapper.find('[aria-label="Основной платёж подтверждён"]').exists()).toBe(true)
     expect(wrapper.find('[aria-label="Доставка по России оплачена"]').exists()).toBe(true)
+    const calls = h.session.orderRequest.mock.calls.length
+    await vi.advanceTimersByTimeAsync(25 * 60 * 60 * 1000)
+    expect(h.session.orderRequest).toHaveBeenCalledTimes(calls)
+    expect(wrapper.text()).toContain('Подтверждённая стоимость')
+    expect(wrapper.text()).not.toContain('Срок подтверждения истёк')
   })
 
   it('keeps completed orders readable without inventing an unrecorded completion date', async () => {

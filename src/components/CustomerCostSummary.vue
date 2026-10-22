@@ -24,7 +24,7 @@ let timer
 watch(() => props.pricing, pricing => {
   globalThis.clearTimeout(timer)
   expiredNow.value = false
-  if (!props.payment && pricing?.validUntil && pricing.state === 100) {
+  if (!props.payment && pricing?.mainPaymentPaid !== true && pricing?.validUntil && pricing.state === 100) {
     const remaining = Date.parse(pricing.validUntil) - Date.parse(pricing.asOf)
     if (remaining <= 0) expiredNow.value = true
     else timer = globalThis.setTimeout(() => { expiredNow.value = true }, Math.min(remaining, 2147483647))
@@ -32,7 +32,7 @@ watch(() => props.pricing, pricing => {
 }, { immediate: true })
 onUnmounted(() => globalThis.clearTimeout(timer))
 
-const state = computed(() => expiredNow.value ? 200 : props.pricing?.state ?? 0)
+const state = computed(() => props.pricing?.mainPaymentPaid === true ? 100 : expiredNow.value ? 200 : props.pricing?.state ?? 0)
 const label = computed(() => props.payment ? 'Сумма к оплате' : props.historical ? 'Последняя рассчитанная стоимость'
   : props.preview ? 'Прогнозная стоимость'
   : props.pricing?.state === 0 ? 'Предварительная стоимость'
@@ -125,13 +125,7 @@ const customsText = computed(() => {
       </div>
     </dl>
     <p
-      v-if="!payment && (historical || state === 200)"
-      class="customer-cost__status"
-    >
-      Сохранённая стоимость показана для справки.
-    </p>
-    <p
-      v-else-if="!payment && pricing?.mainPaymentPaid !== true && state === 100 && pricing?.validUntil"
+      v-if="!payment && !historical && pricing?.mainPaymentPaid !== true && state === 100 && pricing?.validUntil"
       class="customer-cost__status"
     >
       Действует до {{ formatMoscow(pricing.validUntil) }}
