@@ -2,6 +2,8 @@
 
 ## Specification and repository guidance
 
+- Recorded main payment keeps the saved customer price confirmed beyond validUntil. Do not start a quote-expiry timer or display validity/expiry copy for a paid quote in list or detail views. Preserve the confirmed total and show delivery/customs separately; no all-in total is introduced.
+
 - Follow the current specification identified in the [specification README](https://github.com/sara-fan/sarafan.spec#source-of-truth). If an implementation issue conflicts with it, flag the discrepancy before implementing the affected behavior.
 - In implementation PR descriptions, cite the governing specification version and section, and link the planning issue. Use any suitable format; the PR template is optional.
 - When a change introduces or changes a lasting convention, API contract, domain invariant, security/privacy rule, workflow, or test pattern, update the nearest relevant `AGENTS.md` in the same PR. Keep entries concise and reusable.

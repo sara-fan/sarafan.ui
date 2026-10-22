@@ -126,7 +126,7 @@ export function productFormErrors(form, limits) {
     } else if (quantity === 0 || quantity < limits.minimumQuantity) {
       errors.quantity = ['Такое количество нельзя заказать.']
     } else if (quantity > limits.maximumQuantity) {
-      errors.quantity = ['Такое количество товара может быть признано коммерческой партией и запрещено к ввозу']
+      errors.quantity = ['Не больше 4 одинаковых товаров в одном заказе']
     }
   }
 

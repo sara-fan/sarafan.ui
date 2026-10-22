@@ -37,8 +37,8 @@ function reset() {
 function armExpiry(value, started) {
   globalThis.clearTimeout(timer)
   const pricing = value.order.pricing
-  expired.value = pricing.state === 200
-  if (pricing.state !== 100) return
+  expired.value = pricing.mainPaymentPaid !== true && pricing.state === 200
+  if (pricing.state !== 100 || pricing.mainPaymentPaid === true) return
   const remaining = Date.parse(pricing.validUntil) - Date.parse(pricing.asOf) - (Date.now() - started)
   expired.value = remaining <= 0
   if (remaining > 0) scheduleBoundary(remaining, value => { timer = value }, () => {

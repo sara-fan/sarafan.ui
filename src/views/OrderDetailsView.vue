@@ -46,8 +46,8 @@ const errorTitle = computed(() => presentProblemTitle(problem.value))
 const status = computed(() => orderStatusFor(ops.value, expired.value && order.value?.status === 100 ? 200 : order.value?.status))
 watch(() => order.value?.pricing, pricing => {
   globalThis.clearTimeout(expiryTimer)
-  expired.value = pricing?.state === 200
-  if (pricing?.state === 100) {
+  expired.value = pricing?.mainPaymentPaid !== true && pricing?.state === 200
+  if (pricing?.state === 100 && pricing.mainPaymentPaid !== true) {
     const delay = Date.parse(pricing.validUntil) - Date.parse(pricing.asOf)
     if (delay <= 0) expired.value = true
     else expiryTimer = globalThis.setTimeout(() => { expired.value = true; if (!cancelBusy.value) void load() }, Math.min(delay, 2147483647))
